@@ -1,0 +1,42 @@
+# Environment variables
+.env
+
+# Node modules
+node_modules/
+
+# Logs
+logs
+*.log
+
+# Runtime files
+pids
+*.pid
+*.seed
+
+# Directory for temporary files
+tmp
+temp
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE or editor-specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# NPM package lock files (if you want to ignore them)
+package-lock.json
+yarn.lock
+
+# Build output
+dist/
+build/
+
+# Coverage reports
+coverage/
+
+# Miscellaneous
+*.tgz
