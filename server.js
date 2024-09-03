@@ -1,5 +1,6 @@
 import fastify from "fastify";
 import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import farmerRoutes from "./routes/farmerRoutes.js";
 import acceptsSerializer from "@fastify/accepts-serializer";
 import connectDB from "./config/db.js";
@@ -18,38 +19,42 @@ const PORT = process.env.PORT || 5000;
 
 connectDB();
 const start = async () => {
-  const app = fastify({ logger: false });
+  const app = fastify({ logger: true });
 
   // fastify-swagger setup with ui
   app.register(swagger, {
     swagger: {
       info: {
-        title: "My API",
+        title: "ColdOp Api",
         description: "A sample API using Fastify and Swagger",
         version: "1.0.0",
       },
-      externalDocs: {
-        url: "https://swagger.io",
-        description: "Find more info here",
-      },
+      // externalDocs: {
+      //   url: "https://swagger.io",
+      //   description: "Find more info here",
+      // },
       consumes: ["application/json"],
       produces: ["application/json"],
     },
     exposeRoute: true,
   });
 
-  app.register(acceptsSerializer, {
-    serializers: [
-      {
-        regex: /^application\/json/,
-        serializer: (payload) => JSON.parse(payload),
-      },
-      {
-        regex: /^application\/x-www-form-urlencoded/,
-        serializer: (payload) => require("querystring").parse(payload),
-      },
-    ],
+  app.register(swaggerUi, {
+    routePrefix: "/docs",
   });
+
+  // app.register(acceptsSerializer, {
+  //   serializers: [
+  //     {
+  //       regex: /^application\/json/,
+  //       serializer: (payload) => JSON.parse(payload),
+  //     },
+  //     {
+  //       regex: /^application\/x-www-form-urlencoded/,
+  //       serializer: (payload) => require("querystring").parse(payload),
+  //     },
+  //   ],
+  // });
 
   await app.register(cors, {
     origin: ["*", "http://localhost:3000"],
@@ -76,14 +81,17 @@ const start = async () => {
   app.register(storeAdminRoutes, { prefix: "/api/store-admin" });
 
   app.get("/", (req, res) => {
-    res.send("Fastify server started on port 5000");
+    res.send("Fastify server started server");
   });
 
   try {
     await app.listen({ port: PORT });
-    console.log(
+    app.log.info(
       `Server started in ${process.env.NODE_ENV} mode on port ${PORT}`
     );
+    // console.log(
+    //   `Server started in ${process.env.NODE_ENV} mode on port ${PORT}`
+    // );
   } catch (err) {
     app.log.error(err);
     process.exit(1);

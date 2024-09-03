@@ -42,7 +42,6 @@ const storeAdminRegisterSchema = z.object({
     z.string().length(11),
     z.string().length(12),
   ]),
-  coldStorageGSTNumber: z.string().length(15),
 });
 
 const storeAdminUpdateSchmea = z.object({

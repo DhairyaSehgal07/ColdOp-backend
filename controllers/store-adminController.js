@@ -22,6 +22,8 @@ import PaymentHistory from "../models/paymentHistoryModel.js";
 // @access Public
 const registerStoreAdmin = async (req, reply) => {
   try {
+    req.log.info("Starting store admin registration process");
+
     // Assuming storeAdminRegisterSchema is a validation schema
     storeAdminRegisterSchema.parse(req.body);
 
@@ -33,15 +35,19 @@ const registerStoreAdmin = async (req, reply) => {
       coldStorageName,
       coldStorageAddress,
       coldStorageContactNumber,
-      coldStorageGSTNumber,
       isVerified,
-      imageUrl, // Include imageUrl from req.body
+      imageUrl,
     } = req.body;
+
+    req.log.info("Parsed request body", { mobileNumber, name });
 
     const storeAdminExists = await StoreAdmin.findOne({ mobileNumber });
     if (storeAdminExists) {
+      req.log.warn("Attempt to register existing store admin", {
+        mobileNumber,
+      });
       return reply.code(400).send({
-        status: "Fail",
+        success: false,
         message: "Store-admin already exists",
       });
     }
@@ -58,21 +64,23 @@ const registerStoreAdmin = async (req, reply) => {
       mobileNumber,
       password: hashedPassword,
       isVerified,
-      imageUrl, // Include imageUrl in the document creation
+      imageUrl,
       coldStorageDetails: {
         coldStorageName,
         coldStorageAddress,
         coldStorageContactNumber,
-        coldStorageGSTNumber,
       },
-      storeAdminId: storeAdminId, // Set storeAdminId to the incremented count
+      storeAdminId: storeAdminId,
     });
 
     if (storeAdmin) {
+      req.log.info("Store admin registered successfully", {
+        storeAdminId,
+        name,
+      });
       generateToken(reply, storeAdmin._id);
-      // Return the response with selected properties
       return reply.code(201).send({
-        status: "Success",
+        success: true,
         data: {
           name: storeAdmin.name,
           personalAddress: storeAdmin.personalAddress,
@@ -89,8 +97,9 @@ const registerStoreAdmin = async (req, reply) => {
       });
     }
   } catch (err) {
+    req.log.error("Error during store admin registration", { err });
     return reply.code(500).send({
-      status: "Fail",
+      success: false,
       message: err.message,
     });
   }
