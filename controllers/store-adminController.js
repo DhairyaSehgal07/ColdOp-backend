@@ -203,8 +203,6 @@ const getStoreAdminProfile = async (req, reply) => {
           req.storeAdmin.coldStorageDetails.coldStorageAddress,
         coldStorageContactNumber:
           req.storeAdmin.coldStorageDetails.coldStorageContactNumber,
-        coldStorageGSTNumber:
-          req.storeAdmin.coldStorageDetails.coldStorageGSTNumber,
       },
     };
     reply.code(200).send({

@@ -38,10 +38,6 @@ const storeAdminSchema = mongoose.Schema(
         type: String,
         required: true,
       },
-      coldStorageGSTNumber: {
-        type: String,
-        required: true,
-      },
     },
     registeredFarmers: [
       {
