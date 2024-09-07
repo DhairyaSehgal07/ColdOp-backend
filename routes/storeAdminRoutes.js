@@ -12,7 +12,7 @@ import {
   getFarmerById,
   createOutgoingOrder,
   updateOrdersAfterOutgoing,
-  getLotNumber,
+  getReceiptNumber,
   getFarmerOutgoingOrders,
   updateFarmerOutgoingOrder,
   deleteFarmerOutgoingOrder,
@@ -75,10 +75,18 @@ function storeAdminRoutes(fastify, options, done) {
     quickRegisterFarmer
   );
   // get single farmer for StoreAdminViewFarmerProfileScreen
-  fastify.post("/farmer", { preHandler: [storeAdminProtect] }, getFarmerById);
+  fastify.post(
+    "/farmers/:id",
+    { preHandler: [storeAdminProtect] },
+    getFarmerById
+  );
 
   // ORDER ROUTES
-  fastify.get("/lot-number", { preHandler: [storeAdminProtect] }, getLotNumber);
+  fastify.get(
+    "/receipt-number",
+    { preHandler: [storeAdminProtect] },
+    getReceiptNumber
+  );
   fastify.post("/orders", { preHandler: [storeAdminProtect] }, createNewOrder);
   fastify.post(
     "/all-orders",

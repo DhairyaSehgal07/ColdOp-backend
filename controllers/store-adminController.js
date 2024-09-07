@@ -24,7 +24,6 @@ const registerStoreAdmin = async (req, reply) => {
   try {
     req.log.info("Starting store admin registration process");
 
-    // Assuming storeAdminRegisterSchema is a validation schema
     storeAdminRegisterSchema.parse(req.body);
 
     const {
@@ -47,7 +46,7 @@ const registerStoreAdmin = async (req, reply) => {
         mobileNumber,
       });
       return reply.code(400).send({
-        success: false,
+        status: "Fail",
         message: "Store-admin already exists",
       });
     }
@@ -80,7 +79,7 @@ const registerStoreAdmin = async (req, reply) => {
       });
       generateToken(reply, storeAdmin._id);
       return reply.code(201).send({
-        success: true,
+        status: "Success",
         data: {
           name: storeAdmin.name,
           personalAddress: storeAdmin.personalAddress,
@@ -99,30 +98,51 @@ const registerStoreAdmin = async (req, reply) => {
   } catch (err) {
     req.log.error("Error during store admin registration", { err });
     return reply.code(500).send({
-      success: false,
-      message: err.message,
+      status: "Fail",
+      message: "Some error occured while registering store-admin",
+      errorMessage: err.message,
     });
   }
 };
 
 //@desc login store-admin
 //@route POST/api/store-admin/login
-//@access PUBLIC
+//@access Public
 const loginStoreAdmin = async (req, reply) => {
   try {
+    req.log.info("Starting store admin login process");
+
+    // Validate the request body
     loginSchema.parse(req.body);
+    req.log.info("Parsed request body", {
+      mobileNumber: req.body.mobileNumber,
+    });
+
     const { mobileNumber, password } = req.body;
 
+    // Check if the store admin exists
     const storeAdmin = await StoreAdmin.findOne({ mobileNumber });
 
     if (storeAdmin) {
+      req.log.info("Store admin found", { mobileNumber });
+
+      // Compare the provided password with the stored hash
       const isPasswordMatch = await bcrypt.compare(
         password,
         storeAdmin.password
       );
 
       if (isPasswordMatch) {
+        req.log.info("Password match successful", {
+          storeAdminId: storeAdmin.storeAdminId,
+        });
+
+        // Generate token and send success response
         generateToken(reply, storeAdmin._id);
+        req.log.info("Token generated for store admin", {
+          storeAdminId: storeAdmin.storeAdminId,
+        });
+
         return reply.code(200).send({
           status: "Success",
           data: {
@@ -140,21 +160,31 @@ const loginStoreAdmin = async (req, reply) => {
           },
         });
       } else {
+        req.log.warn("Password mismatch", { mobileNumber });
+
+        // Invalid password case
         return reply.code(400).send({
           status: "Fail",
           message: "Invalid password",
         });
       }
     } else {
-      return reply.code(500).send({
+      req.log.warn("Store admin not found", { mobileNumber });
+
+      // Store admin doesn't exist
+      return reply.code(400).send({
         status: "Fail",
         message: "User does not exist, try signing up",
       });
     }
   } catch (err) {
-    reply.code(500).send({
+    req.log.error("Error during store admin login", { err });
+
+    // Handle unexpected errors
+    return reply.code(500).send({
       status: "Fail",
-      message: err.message,
+      message: "Some error occured during store admin login",
+      errorMessage: err.message,
     });
   }
 };
@@ -164,20 +194,33 @@ const loginStoreAdmin = async (req, reply) => {
 // @access Private
 const logoutStoreAdmin = async (req, reply) => {
   try {
+    req.log.info("Starting store admin logout process");
+
+    // Clear the JWT cookie by setting an empty value and an expired date
     reply.cookie("jwt", "", {
       httpOnly: true,
       expires: new Date(0),
     });
+    req.log.info("JWT cookie cleared successfully");
 
-    //req.session.delete();
+    // If using session management, uncomment the session deletion
+    // req.session.delete();
+
+    // Send success response
     reply.code(200).send({
       status: "Success",
       message: "User logged out successfully",
     });
+
+    req.log.info("Store admin logged out successfully");
   } catch (err) {
+    req.log.error("Error during store admin logout", { err });
+
+    // Handle any errors that occur during logout
     reply.code(500).send({
       status: "Fail",
-      message: err.message,
+      message: "Some error occured during store admin logout",
+      errorMessage: err.message,
     });
   }
 };
@@ -187,14 +230,18 @@ const logoutStoreAdmin = async (req, reply) => {
 //@access Private
 const getStoreAdminProfile = async (req, reply) => {
   try {
+    req.log.info("Starting to fetch store admin profile", {
+      storeAdminId: req.storeAdmin._id,
+    });
+
+    // Extract the store admin profile details from the request
     const storeAdmin = {
       _id: req.storeAdmin._id,
       name: req.storeAdmin.name,
       personalAddress: req.storeAdmin.personalAddress,
       mobileNumber: req.storeAdmin.mobileNumber,
       imageUrl: req.storeAdmin.imageUrl,
-      //view account details or something you can do on the frontend
-      isVerfied: req.storeAdmin.isVerified,
+      isVerified: req.storeAdmin.isVerified,
       isActive: req.storeAdmin.isActive,
       isPaid: req.storeAdmin.isPaid,
       coldStorageDetails: {
@@ -205,33 +252,56 @@ const getStoreAdminProfile = async (req, reply) => {
           req.storeAdmin.coldStorageDetails.coldStorageContactNumber,
       },
     };
+
+    req.log.info("Store admin profile fetched successfully", {
+      storeAdminId: storeAdmin._id,
+    });
+
+    // Send the profile data as a response
     reply.code(200).send({
       status: "Success",
       data: storeAdmin,
     });
   } catch (err) {
+    req.log.error("Error fetching store admin profile", { err });
+
+    // Handle any errors
     reply.code(500).send({
       status: "Fail",
-      message: err.message,
+      message: "Some error occured while fetching farmer profile",
+      errorMessage: err.message,
     });
   }
 };
+
+//@desc update store-admin profile
+//@route UPDATE/api/store-admin/profile
+//@access Private
 const updateStoreAdminProfile = async (req, reply) => {
   try {
+    req.log.info("Starting store admin profile update", {
+      storeAdminId: req.storeAdmin._id,
+    });
+
     // Check if store admin session exists
-
     const storeAdmin = await StoreAdmin.findById(req.storeAdmin._id);
-
     if (!storeAdmin) {
-      // If session doesn't exist, send unauthorized response
+      req.log.warn("Unauthorized access attempt - store admin not found", {
+        storeAdminId: req.storeAdmin._id,
+      });
       return reply.code(401).send({
         status: "Fail",
         message: "Unauthorized",
       });
     }
 
-    // If session exists, update store admin profile
+    req.log.info("Store admin found, proceeding with update", {
+      storeAdminId: storeAdmin._id,
+    });
+
+    // Validate request body
     storeAdminUpdateSchmea.parse(req.body);
+
     const updatedFields = {};
 
     // Update store admin fields if provided in request body
@@ -252,10 +322,16 @@ const updateStoreAdminProfile = async (req, reply) => {
       updatedFields.coldStorageDetails.coldStorageGSTNumber =
         req.body.coldStorageGSTNumber;
 
+    // Log which fields are being updated
+    req.log.info("Updating store admin profile fields", { updatedFields });
+
     // Update password if provided in request body
     if (req.body.password) {
       const hashedPassword = await bcrypt.hash(req.body.password, 10);
       updatedFields.password = hashedPassword;
+      req.log.info("Password updated for store admin", {
+        storeAdminId: storeAdmin._id,
+      });
     }
 
     // Find and update store admin profile
@@ -266,11 +342,18 @@ const updateStoreAdminProfile = async (req, reply) => {
     );
 
     if (!updatedStoreAdmin) {
+      req.log.warn("Store admin not found during update", {
+        storeAdminId: storeAdmin._id,
+      });
       return reply.code(404).send({
         status: "Fail",
         message: "Store admin not found",
       });
     }
+
+    req.log.info("Store admin profile updated successfully", {
+      storeAdminId: updatedStoreAdmin._id,
+    });
 
     // Send updated store admin profile in response
     reply.code(200).send({
@@ -278,7 +361,7 @@ const updateStoreAdminProfile = async (req, reply) => {
       data: {
         _id: updatedStoreAdmin._id,
         name: updatedStoreAdmin.name,
-        personalAddress: updatedStoreAdmin.address,
+        personalAddress: updatedStoreAdmin.personalAddress,
         mobileNumber: updatedStoreAdmin.mobileNumber,
         coldStorageDetails: {
           coldStorageName: updatedStoreAdmin.coldStorageDetails.coldStorageName,
@@ -292,9 +375,11 @@ const updateStoreAdminProfile = async (req, reply) => {
       },
     });
   } catch (err) {
+    req.log.error("Error updating store admin profile", { err });
     reply.code(500).send({
       status: "Fail",
-      message: err.message,
+      message: "Some error occured while updating store admin profile",
+      errorMessage: err.message,
     });
   }
 };
@@ -326,42 +411,54 @@ const getNumberOfStoreAdmins = async (req, reply) => {
 //@access Private
 const sendRequestToFarmer = async (req, reply) => {
   try {
+    req.log.info("Starting send request to farmer process", {
+      storeAdminId: req.storeAdmin._id,
+    });
+
+    // Validate the request body using the schema
     farmerIdSchema.parse(req.body);
 
     const senderId = req.storeAdmin._id;
     const { farmerId } = req.body;
 
+    // Log the farmerId and senderId
+    req.log.info("Parsed request body", { senderId, farmerId });
+
+    // Find the farmer by farmerId
     const receiver = await Farmer.findOne({ farmerId });
     if (!receiver) {
-      reply.code(404).send({
+      req.log.warn("Farmer not found", { farmerId });
+      return reply.code(404).send({
         status: "Fail",
         message: "Farmer not found, please re-check the farmerId",
       });
-      return;
     }
 
     const receiverId = receiver._id;
+    req.log.info("Farmer found", { receiverId });
 
     // Check if the farmer is already registered with the cold storage
     const isRegistered = req.storeAdmin.registeredFarmers.includes(receiverId);
     if (isRegistered) {
+      req.log.warn("Farmer is already registered", { receiverId });
       return reply.code(400).send({
         status: "Fail",
         message: "Farmer is already registered with this cold storage",
       });
     }
 
-    // Get current date in the desired format
+    // Log the current date
     const currentDate = new Date().toLocaleDateString("en-US", {
       day: "numeric",
       month: "long",
       year: "numeric",
     });
+    req.log.info("Current date for the request", { currentDate });
 
-    // Check if a friend request already exists
+    // Check if a request already exists
     const existingRequest = await Request.findOne({ senderId, receiverId });
-
     if (existingRequest) {
+      req.log.warn("Duplicate request detected", { senderId, receiverId });
       return reply.code(400).send({
         status: "Fail",
         message: "You have already sent the request",
@@ -369,79 +466,183 @@ const sendRequestToFarmer = async (req, reply) => {
     }
 
     // Create a new friend request
-
-    const newRequest = Request({ senderId, receiverId, date: currentDate });
+    const newRequest = new Request({ senderId, receiverId, date: currentDate });
     await newRequest.save();
+    req.log.info("New request created", {
+      senderId,
+      receiverId,
+      date: currentDate,
+    });
 
     // Add the farmer to the list of registered farmers for the cold storage
     req.storeAdmin.registeredFarmers.push(receiverId);
     await req.storeAdmin.save();
+    req.log.info("Farmer registered to cold storage", {
+      storeAdminId: req.storeAdmin._id,
+      receiverId,
+    });
 
     reply.code(201).send({
       status: "Success",
       message: "Request sent successfully",
     });
   } catch (err) {
+    req.log.error("Error in sending request to farmer", { error: err.message });
     reply.code(500).send({
       status: "Fail",
-      message: err.message,
+      message: "Some error occured while sending request to farmer",
+      errorMessage: err.message,
     });
   }
 };
 
 // @desc    Get all farmers
-// @route   GET /api/farmers
+// @route   GET /api/store-admin/farmers
 // @access  Private/store-admin
 const getFarmers = async (req, reply) => {
   try {
+    req.log.info("Starting getFarmers process", {
+      storeAdminId: req.storeAdmin._id,
+    });
+
     const { registeredFarmers } = req.storeAdmin;
 
-    if (registeredFarmers.length == 0) {
+    // Log the number of registered farmers
+    req.log.info("Number of registered farmers", {
+      count: registeredFarmers.length,
+    });
+
+    if (registeredFarmers.length === 0) {
+      req.log.warn("No registered farmers found");
       return reply.code(200).send({
         status: "Fail",
-        message: "no registered farmers",
+        message: "No registered farmers",
       });
     }
 
+    // Fetch all registered farmers and log the process
     const populatedFarmers = await Promise.all(
       registeredFarmers.map(async (item) => {
-        return await Farmer.findById(item)
-          .select("name mobileNumber _id address  createdAt")
+        req.log.info("Fetching farmer details", { farmerId: item });
+        const farmer = await Farmer.findById(item)
+          .select("name mobileNumber _id address createdAt")
           .exec();
+
+        if (!farmer) {
+          req.log.warn("Farmer not found", { farmerId: item });
+        } else {
+          req.log.info("Farmer details fetched successfully", {
+            farmerId: item,
+          });
+        }
+
+        return farmer;
       })
     );
+
+    req.log.info("Farmers successfully fetched", {
+      storeAdminId: req.storeAdmin._id,
+      farmerCount: populatedFarmers.length,
+    });
 
     reply.code(200).send({
       status: "Success",
       populatedFarmers,
     });
   } catch (err) {
+    req.log.error("Error in getFarmers process", { error: err.message });
     reply.code(500).send({
       status: "Fail",
-      message: err.message,
+      errorMessage: err.message,
+      message: "Some error occured while getting farmers",
     });
   }
 };
 
-// @desc    Update user
-// @route   PUT /api/users/:id
+// @desc    Get farmer by ID
+// @route   GET /api/store-admin/farmers/:id
 // @access  Private/store-admin
-const updateUser = (req, res) => {
-  res.send("update single user by id");
+const getFarmerById = async (req, reply) => {
+  try {
+    const { id } = req.params;
+
+    // Log the ID of the farmer being fetched
+    req.log.info("Fetching farmer", { farmerId: id });
+
+    // Find farmer by ID
+    const farmer = await Farmer.findById(id);
+
+    if (farmer) {
+      const farmerInfo = {
+        name: farmer.name,
+        address: farmer.address,
+        mobileNumber: farmer.mobileNumber,
+        isVerified: farmer.isVerified,
+        imageUrl: farmer.imageUrl,
+        role: farmer.role,
+        farmerId: farmer.farmerId,
+        _id: farmer._id,
+      };
+
+      // Log successful farmer retrieval
+      req.log.info("Farmer found", { farmerName: farmer.name, farmerId: id });
+      reply.code(200).send({
+        status: "Success",
+        farmerInfo,
+      });
+    } else {
+      // Log when farmer is not found
+      req.log.warn("Farmer not found", { farmerId: id });
+      reply.code(404).send({
+        status: "Fail",
+        message: "Farmer not found",
+      });
+    }
+  } catch (err) {
+    // Log detailed error message
+    req.log.error("Error fetching farmer", {
+      farmerId: id,
+      error: err.message,
+    });
+    reply.code(500).send({
+      status: "Fail",
+      message: "Some error occurred while finding farmer",
+      errorMessage: err.message,
+    });
+  }
 };
 
-// @desc    Delete user
-// @route   DELETE /api/users/:id
+// @desc    Update farmer
+// @route   PUT /api/farmers/:id
 // @access  Private/store-admin
-const deleteUser = async (req, res) => {
+const updateFarmer = (req, res) => {
+  res.send("update single farmer by id");
+};
+
+// @desc    Delete farmer
+// @route   DELETE /api/farmer/:id
+// @access  Private/store-admin
+const deleteFarmer = async (req, res) => {
   try {
+    req.log.info("Starting deleteUser process", {
+      storeAdminId: req.storeAdmin._id,
+    });
+
     const { userId } = req.body;
-    const storeAdmin = StoreAdmin.findById(req.storeAdmin);
+    const storeAdmin = await StoreAdmin.findById(req.storeAdmin);
 
     // Check if the StoreAdmin exists
     if (!storeAdmin) {
-      return res.status(404).json({ message: "StoreAdmin not found" });
+      req.log.warn("StoreAdmin not found", {
+        storeAdminId: req.storeAdmin._id,
+      });
+      return res
+        .status(404)
+        .json({ status: "Fail", message: "StoreAdmin not found" });
     }
+
+    // Log if the farmer is found in registeredFarmers
+    req.log.info("Checking if farmer is registered", { userId });
 
     const index = storeAdmin.registeredFarmers.indexOf(userId);
     if (index !== -1) {
@@ -450,17 +651,27 @@ const deleteUser = async (req, res) => {
       // Save the updated StoreAdmin document
       await storeAdmin.save();
 
-      return res.status(200).json({ message: "User deleted successfully" });
-    } else {
-      // If the user ID does not exist in the array
+      req.log.info("Farmer deleted successfully", {
+        userId,
+        storeAdminId: storeAdmin._id,
+      });
       return res
-        .status(404)
-        .json({ message: "User not found in registeredFarmers array" });
+        .status(200)
+        .json({ status: "Success", message: "User deleted successfully" });
+    } else {
+      // Log when the user is not found in registeredFarmers array
+      req.log.warn("User not found in registeredFarmers array", { userId });
+      return res.status(404).json({
+        status: "Fail",
+        message: "User not found in registeredFarmers array",
+      });
     }
   } catch (err) {
-    console.error("Error deleting user:", error);
+    req.log.error("Error deleting user", { error: err.message });
     return res.code(500).send({
-      message: "some error occured while deleting user",
+      status: "Fail",
+      message: "Some error occurred while deleting user",
+      errorMessage: err.message,
     });
   }
 };
@@ -471,15 +682,19 @@ const deleteUser = async (req, res) => {
 const quickRegisterFarmer = async (req, reply) => {
   try {
     // Validate the request body
+    req.log.info("Validating request body for quick farmer registration");
     quickRegisterSchema.parse(req.body);
 
     // Extract data from the request body
     const { name, address, mobileNumber, password, imageUrl } = req.body;
 
+    // Log farmer existence check
+    req.log.info("Checking if farmer already exists", { mobileNumber });
+
     // Check if a farmer with the given mobile number already exists
     const farmerExists = await Farmer.findOne({ mobileNumber });
-
     if (farmerExists) {
+      req.log.warn("Farmer already exists", { mobileNumber });
       return reply.code(400).send({
         status: "Fail",
         message: "Farmer already exists",
@@ -489,16 +704,23 @@ const quickRegisterFarmer = async (req, reply) => {
     let farmerId;
     let isIdTaken = true;
 
+    // Log farmerId generation
+    req.log.info("Generating unique farmerId");
+
     // Keep generating a unique farmerId until it's not already taken
     while (isIdTaken) {
       farmerId = generateUniqueAlphaNumeric(); // Generate a unique alphanumeric code
       isIdTaken = await Farmer.findOne({ farmerId });
     }
 
+    req.log.info("Unique farmerId generated", { farmerId });
+
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
+    req.log.info("Password hashed successfully");
 
     // Create the new farmer record
+    req.log.info("Creating new farmer record", { name, mobileNumber });
     const farmer = await Farmer.create({
       name,
       address,
@@ -510,21 +732,32 @@ const quickRegisterFarmer = async (req, reply) => {
       isVerified: false,
     });
 
-    // If the farmer record is created successfully, associate it with the store admin and send the response
     if (farmer) {
+      // Log store admin lookup
+      req.log.info("Fetching store admin", {
+        storeAdminId: req.storeAdmin._id,
+      });
+
       // Find the store admin
       const storeAdmin = await StoreAdmin.findById(req.storeAdmin._id);
 
       // Check if store admin exists and registeredFarmers array is initialized
       if (storeAdmin && storeAdmin.registeredFarmers) {
+        // Log store admin and farmer association
+        req.log.info("Associating farmer with store admin", {
+          farmerId: farmer._id,
+        });
+
         // Add the farmer to the store admin's registeredFarmers array
         storeAdmin.registeredFarmers.push(farmer._id);
 
         // Save the updated store admin
         await storeAdmin.save();
+        req.log.info("Store admin updated successfully");
 
         await farmer.registeredStoreAdmins.push(req.storeAdmin._id);
         await farmer.save();
+        req.log.info("Farmer registered successfully");
 
         // Send the response
         return reply.code(200).send({
@@ -532,6 +765,9 @@ const quickRegisterFarmer = async (req, reply) => {
           message: "Farmer registered",
         });
       } else {
+        req.log.error(
+          "Store admin or registeredFarmers array is not properly initialized"
+        );
         // If store admin or registeredFarmers array is not properly initialized
         return reply.code(500).send({
           status: "Fail",
@@ -541,22 +777,32 @@ const quickRegisterFarmer = async (req, reply) => {
       }
     }
   } catch (err) {
-    // Handle errors
+    // Handle errors with logging
+    req.log.error("Error occurred during farmer registration", {
+      error: err.message,
+    });
     reply.code(500).send({
       status: "Fail",
-      message: err.message,
+      message: "Some error occurred while adding farmer",
+      errorMessage: err.message,
     });
   }
 };
 
 // ORDER ROUTES CONTROLLER FUCNTIONS
 
-// GET LOT NUMBER
-const getLotNumber = async (req, reply) => {
+//@desc  Get receipt number
+//@route GET/api/store-admin/receipt-number
+//@access Private
+const getReceiptNumber = async (req, reply) => {
   try {
     const storeAdminId = req.storeAdmin._id;
 
+    // Log the store admin ID
+    req.log.info("Fetching receipt number for store admin", { storeAdminId });
+
     // Using aggregation pipeline to count documents
+    req.log.info("Running aggregation pipeline to count orders");
     const result = await Order.aggregate([
       {
         $match: { coldStorageId: storeAdminId },
@@ -570,18 +816,24 @@ const getLotNumber = async (req, reply) => {
     ]);
 
     // Extracting count from result
-    const lotNumber = result.length > 0 ? result[0].count : 0;
+    const receiptNumber = result.length > 0 ? result[0].count : 0;
 
-    // Sending response with lot number
+    // Log the receipt number result
+    req.log.info("Receipt number calculation complete", { receiptNumber });
+
+    // Sending response with receipt number
     reply.code(200).send({
       status: "Success",
-      lotNumber: lotNumber,
+      receiptNumber: receiptNumber,
     });
   } catch (err) {
-    console.log(err.message);
+    // Log error
+    req.log.error("Error occurred while getting receipt number", {
+      errorMessage: err.message,
+    });
     reply.code(500).send({
       status: "Fail",
-      message: "Error occurred while getting lot number",
+      message: "Error occurred while getting receipt number",
     });
   }
 };
@@ -589,7 +841,7 @@ const getLotNumber = async (req, reply) => {
 const createNewOrder = async (req, reply) => {
   try {
     // Extracting data from the request
-    const storeAdminId = req.storeAdmin._id; // Assuming you have a storeAdmin object in the request
+    const storeAdminId = req.storeAdmin._id;
     const { farmerId, cropDetails } = req.body;
 
     // Creating a new order
@@ -602,7 +854,7 @@ const createNewOrder = async (req, reply) => {
     // Saving the new order to the database
     await newOrder.save();
 
-    // Sending a success response
+    // Send a success response
     reply.code(201).send({
       status: "Success",
       newOrder,
@@ -613,6 +865,7 @@ const createNewOrder = async (req, reply) => {
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while creating a new order",
+      errorMessage: err.message,
     });
   }
 };
@@ -647,38 +900,6 @@ const getFarmerOrders = async (req, reply) => {
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while getting farmer orders",
-    });
-  }
-};
-
-// @desc    Get user by ID
-// @route   GET /api/users/:id
-// @access  Private/store-admin
-const getFarmerById = async (req, reply) => {
-  try {
-    const { farmerId } = req.body;
-    const farmer = await Farmer.findById(farmerId);
-
-    const farmerInfo = {
-      name: farmer.name,
-      address: farmer.address,
-      mobileNumber: farmer.mobileNumber,
-      isVerified: farmer.isVerified,
-      imageUrl: farmer.imageUrl,
-      role: farmer.role,
-      farmerId: farmer.farmerId,
-      _id: farmer._id,
-    };
-    if (farmer) {
-      reply.code(200).send({
-        status: "Success",
-        farmerInfo,
-      });
-    }
-  } catch (err) {
-    reply.code(500).send({
-      status: "Fail",
-      message: "Some error occured while finding farmer",
     });
   }
 };
@@ -938,15 +1159,13 @@ export {
   getNumberOfStoreAdmins,
   getFarmers,
   getFarmerById,
-  updateUser,
-  deleteUser,
   sendRequestToFarmer,
   quickRegisterFarmer,
   createNewOrder,
   getFarmerOrders,
   createOutgoingOrder,
   updateOrdersAfterOutgoing,
-  getLotNumber,
+  getReceiptNumber,
   getFarmerOutgoingOrders,
   updateFarmerOutgoingOrder,
   deleteFarmerOutgoingOrder,
