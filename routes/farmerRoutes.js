@@ -9,9 +9,6 @@ import {
   getStoreAdminRequests,
   acceptRequest,
   rejectRequest,
-  getOrdersFromColdStorage,
-  getFarmerOutgoingOrders,
-  getPaymentHistory,
 } from "../controllers/farmerController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
@@ -75,26 +72,26 @@ function userRoutes(fastify, options, done) {
   fastify.post("/requests/accept", { preHandler: [protect] }, acceptRequest);
   fastify.delete("/requests/reject", { preHandler: [protect] }, rejectRequest);
 
-  //ORDER CONTROLLER FUNCTIONS
-  fastify.post(
-    "/cold-storage-orders",
-    { preHandler: [protect] },
-    getOrdersFromColdStorage
-  );
+  // //ORDER CONTROLLER FUNCTIONS
+  // fastify.post(
+  //   "/cold-storage-orders",
+  //   { preHandler: [protect] },
+  //   getOrdersFromColdStorage
+  // );
 
-  // Outgoing order controller functions
-  fastify.post(
-    "/extracted",
-    { preHandler: [protect] },
-    getFarmerOutgoingOrders
-  );
+  // // Outgoing order controller functions
+  // fastify.post(
+  //   "/extracted",
+  //   { preHandler: [protect] },
+  //   getFarmerOutgoingOrders
+  // );
 
-  // get payment history
-  fastify.post(
-    "/extracted-payment-history",
-    { preHandler: [protect] },
-    getPaymentHistory
-  );
+  // // get payment history
+  // fastify.post(
+  //   "/extracted-payment-history",
+  //   { preHandler: [protect] },
+  //   getPaymentHistory
+  // );
   done();
 }
 

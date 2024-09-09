@@ -1,15 +1,21 @@
 import {
-  loginStoreAdmin,
   registerStoreAdmin,
+  loginStoreAdmin,
   logoutStoreAdmin,
   getStoreAdminProfile,
+  updateStoreAdminProfile,
   getNumberOfStoreAdmins,
-  quickRegisterFarmer,
   sendRequestToFarmer,
   getFarmers,
+  getFarmerById,
+  updateFarmer,
+  deleteFarmer,
+  quickRegisterFarmer,
+} from "../controllers/store-adminAuthController.js";
+
+import {
   createNewOrder,
   getFarmerOrders,
-  getFarmerById,
   createOutgoingOrder,
   updateOrdersAfterOutgoing,
   getReceiptNumber,
@@ -17,7 +23,8 @@ import {
   updateFarmerOutgoingOrder,
   deleteFarmerOutgoingOrder,
   getPaymentHistory,
-} from "../controllers/store-adminController.js";
+} from "../controllers/store-adminOrderController.js";
+
 import { storeAdminProtect } from "../middleware/authMiddleware.js";
 import {
   mobileOtpHandler,

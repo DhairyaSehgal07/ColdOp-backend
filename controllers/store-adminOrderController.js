@@ -1,0 +1,378 @@
+import Order from "../models/orderModel.js";
+import OutgoingOrder from "../models/outgoingOrderModel.js";
+import PaymentHistory from "../models/paymentHistoryModel.js";
+// Auth controllers
+
+// ORDER ROUTES CONTROLLER FUCNTIONS
+
+//@desc  Get receipt number
+//@route GET/api/store-admin/receipt-number
+//@access Private
+const getReceiptNumber = async (req, reply) => {
+  try {
+    const storeAdminId = req.storeAdmin._id;
+
+    // Log the store admin ID
+    req.log.info("Fetching receipt number for store admin", { storeAdminId });
+
+    // Using aggregation pipeline to count documents
+    req.log.info("Running aggregation pipeline to count orders");
+    const result = await Order.aggregate([
+      {
+        $match: { coldStorageId: storeAdminId },
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Extracting count from result
+    const receiptNumber = result.length > 0 ? result[0].count : 0;
+
+    // Log the receipt number result
+    req.log.info("Receipt number calculation complete", { receiptNumber });
+
+    // Sending response with receipt number
+    reply.code(200).send({
+      status: "Success",
+      receiptNumber: receiptNumber,
+    });
+  } catch (err) {
+    // Log error
+    req.log.error("Error occurred while getting receipt number", {
+      errorMessage: err.message,
+    });
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while getting receipt number",
+    });
+  }
+};
+
+const createNewOrder = async (req, reply) => {
+  try {
+    // Extracting data from the request
+    const storeAdminId = req.storeAdmin._id;
+    const { farmerId, cropDetails } = req.body;
+
+    // Creating a new order
+    const newOrder = new Order({
+      coldStorageId: storeAdminId,
+      farmerId,
+      cropDetails,
+    });
+
+    // Saving the new order to the database
+    await newOrder.save();
+
+    // Send a success response
+    reply.code(201).send({
+      status: "Success",
+      newOrder,
+    });
+  } catch (err) {
+    // Handling errors
+    console.error("Error creating new order:", err);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Some error occurred while creating a new order",
+      errorMessage: err.message,
+    });
+  }
+};
+
+const getFarmerOrders = async (req, reply) => {
+  try {
+    const storeAdminId = req.storeAdmin._id;
+    const { farmerId } = req.body;
+
+    // Perform the Mongoose query to find orders
+    const orders = await Order.find({
+      coldStorageId: storeAdminId,
+      farmerId,
+      orderStatus: "inStore",
+    });
+
+    if (!orders) {
+      return reply.code(200).send({
+        status: "Fail",
+        message: "no order created",
+      });
+    }
+
+    // Sending a success response with the orders
+    reply.code(200).send({
+      status: "Success",
+      data: orders,
+    });
+  } catch (err) {
+    // Handling errors
+    console.error("Error getting farmer orders:", err);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Some error occurred while getting farmer orders",
+    });
+  }
+};
+
+// outgoing order controller functions
+const createOutgoingOrder = async (req, reply) => {
+  try {
+    const storeAdminId = req.storeAdmin._id;
+    const { farmerId, orders, totalAmount, amountPaid, date } = req.body;
+
+    const newOrder = await OutgoingOrder.create({
+      storeAdminId,
+      farmerId,
+      orders,
+      totalAmount,
+      amountPaid,
+      date,
+    });
+
+    if (newOrder) {
+      reply.code(201).send({
+        status: "Success",
+        newOrder,
+      });
+    }
+  } catch (err) {
+    console.log(err.message);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Some error occured while creating outgoing order",
+    });
+  }
+};
+
+// when new order has been created then delete the order from store
+const updateOrdersAfterOutgoing = async (req, reply) => {
+  try {
+    const { orderIds } = req.body;
+
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return reply
+        .code(400)
+        .send({ status: "Fail", message: "Invalid order ids provided" });
+    }
+
+    // Update orders to set order status to "extracted"
+    const updateResult = await Order.updateMany(
+      { _id: { $in: orderIds } },
+      { $set: { orderStatus: "extracted" } }
+    );
+
+    if (updateResult.nModified === 0) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "No orders found with the provided IDs",
+      });
+    }
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Orders updated",
+    });
+  } catch (err) {
+    console.log(err.message);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Some error occurred while updating orders",
+    });
+  }
+};
+
+// get outgoing orders for previous orders screen
+const getFarmerOutgoingOrders = async (req, reply) => {
+  try {
+    const storeAdminId = req.storeAdmin._id;
+    const { farmerId } = req.body;
+
+    // Query the OutgoingOrder collection using Mongoose
+    const outgoingOrders = await OutgoingOrder.find({
+      storeAdminId: storeAdminId,
+      farmerId: farmerId,
+    }).exec();
+
+    // Check if any orders were found
+    if (outgoingOrders.length === 0) {
+      return reply.code(200).send({
+        status: "Fail",
+        message: "No outgoing orders found for the current farmer",
+      });
+    }
+
+    // Send the outgoing orders as a response
+    reply.code(200).send({
+      status: "Success",
+      outgoingOrders: outgoingOrders,
+    });
+  } catch (err) {
+    console.log(err.message);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while getting outgoing orders",
+    });
+  }
+};
+
+const updateFarmerOutgoingOrder = async (req, reply) => {
+  try {
+    const { orderId, amountPaid, currentDate } = req.body;
+
+    if (amountPaid <= 0) {
+      reply.code(500).send({
+        status: "Fail",
+        message: "Please enter a valid amount",
+      });
+    }
+    if (amountPaid == 1 / 0) {
+      reply.code(500).send({
+        status: "Fail",
+        message: "Inavalid input",
+      });
+    }
+
+    // Validate input data
+    if (!orderId || !amountPaid || !currentDate) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid input data",
+      });
+    }
+
+    const foundOrder = await OutgoingOrder.findById(orderId);
+
+    // Check if the order exists
+    if (!foundOrder) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Order not found",
+      });
+    }
+
+    // Update order details
+    foundOrder.amountPaid = foundOrder.amountPaid + parseFloat(amountPaid);
+    foundOrder.date = currentDate;
+
+    // Save the updated order
+    await foundOrder.save();
+
+    // Find existing payment history or create new if not exists
+    let paymentHistory = await PaymentHistory.findOne({
+      outgoingOrderId: orderId,
+    });
+
+    if (!paymentHistory) {
+      paymentHistory = new PaymentHistory({ outgoingOrderId: orderId });
+      paymentHistory.totalAmount = foundOrder.totalAmount;
+    }
+
+    // Create payment entry
+    const paymentEntry = {
+      amountPaid: parseFloat(amountPaid),
+      amountLeft: foundOrder.totalAmount - foundOrder.amountPaid, // Assuming totalAmount is available in foundOrder
+      date: currentDate,
+    };
+
+    // Add payment entry to payment history
+    paymentHistory.paymentEntries.push(paymentEntry);
+
+    // Save the payment history
+    await paymentHistory.save();
+
+    // Send success response
+    reply.code(200).send({
+      status: "Success",
+      updatedOrder: foundOrder,
+      paymentHistory: paymentHistory,
+    });
+  } catch (err) {
+    console.log(err.message);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Failed to update outgoing order",
+    });
+  }
+};
+
+const deleteFarmerOutgoingOrder = async (req, reply) => {
+  try {
+    const { orderId } = req.body;
+
+    // Assuming you are using some ORM like Mongoose
+    const deletedOrder = await OutgoingOrder.findByIdAndDelete(orderId);
+
+    if (!deletedOrder) {
+      return reply.status(404).send({
+        status: "Fail",
+        message: "Order not found",
+      });
+    }
+
+    reply.send({
+      status: "Success",
+      message: "Order deleted successfully",
+    });
+  } catch (err) {
+    console.log(err.message);
+    reply.status(500).send({
+      status: "Fail",
+      message: "Some error occurred while deleting order",
+    });
+  }
+};
+
+const getPaymentHistory = async (req, reply) => {
+  try {
+    const { orderId } = req.body;
+
+    // Validate input data
+    if (!orderId) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid input data",
+      });
+    }
+
+    // Find payment history based on orderId
+    const paymentHistory = await PaymentHistory.findOne({
+      outgoingOrderId: orderId,
+    });
+
+    // Check if payment history exists
+    if (!paymentHistory) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Payment history not found",
+      });
+    }
+
+    // Send success response with payment history
+    reply.code(200).send({
+      status: "Success",
+      paymentHistory: paymentHistory,
+    });
+  } catch (err) {
+    console.log(err.message);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Failed to fetch payment history",
+    });
+  }
+};
+
+export {
+  createNewOrder,
+  getFarmerOrders,
+  createOutgoingOrder,
+  updateOrdersAfterOutgoing,
+  getReceiptNumber,
+  getFarmerOutgoingOrders,
+  updateFarmerOutgoingOrder,
+  deleteFarmerOutgoingOrder,
+  getPaymentHistory,
+};
