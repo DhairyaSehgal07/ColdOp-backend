@@ -35,11 +35,23 @@ const protect = async (request, reply) => {
 const storeAdminProtect = async (request, reply) => {
   try {
     let token;
-    token = request.cookies.jwt;
 
-    if (!token) {
-      reply.code(401).send({ message: "Not authorized, no token" });
-      return;
+    if (request.cookies.jwt) {
+      token = request.cookies.jwt;
+
+      if (!token) {
+        reply.code(401).send({ message: "Not authorized, no token" });
+        return;
+      }
+    } else if (
+      request.headers.authorization &&
+      request.headers.authorization.startsWith("Bearer")
+    ) {
+      token = request.headers.authorization.split(" ")[1];
+      if (!token) {
+        reply.code(401).send({ message: "Not authorized, no token" });
+        return;
+      }
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);

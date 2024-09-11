@@ -5,6 +5,7 @@ const trolleyDetailsSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  // array of objects , each object with 2 properties size and qty
   bagSizes: [
     {
       size: {
@@ -56,10 +57,11 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
     orderDetails: [trolleyDetailsSchema],
-    orderStatus: {
+
+    type: {
       type: String,
-      enum: ["inStore", "extracted"],
-      default: "inStore",
+      enum: ["INCOMING", "OUTGOING"], // Possible values for 'type'
+      required: true,
     },
   },
   { timestamps: true }
