@@ -14,7 +14,7 @@ import {
 } from "../controllers/store-adminAuthController.js";
 
 import {
-  createNewOrder,
+  createNewIncomingOrder,
   getFarmerOrders,
   createOutgoingOrder,
   updateOrdersAfterOutgoing,
@@ -94,7 +94,11 @@ function storeAdminRoutes(fastify, options, done) {
     { preHandler: [storeAdminProtect] },
     getReceiptNumber
   );
-  fastify.post("/orders", { preHandler: [storeAdminProtect] }, createNewOrder);
+  fastify.post(
+    "/orders",
+    { preHandler: [storeAdminProtect] },
+    createNewIncomingOrder
+  );
   fastify.post(
     "/all-orders",
     { preHandler: [storeAdminProtect] },

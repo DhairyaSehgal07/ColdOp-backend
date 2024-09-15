@@ -1,6 +1,7 @@
 import Order from "../models/orderModel.js";
 import OutgoingOrder from "../models/outgoingOrderModel.js";
 import PaymentHistory from "../models/paymentHistoryModel.js";
+import { orderSchema } from "../utils/validationSchemas.js";
 // Auth controllers
 
 // ORDER ROUTES CONTROLLER FUCNTIONS
@@ -15,16 +16,19 @@ const getReceiptNumber = async (req, reply) => {
     // Log the store admin ID
     req.log.info("Fetching receipt number for store admin", { storeAdminId });
 
-    // Using aggregation pipeline to count documents
-    req.log.info("Running aggregation pipeline to count orders");
+    // Using aggregation pipeline to count orders where voucher.type is "RECEIT"
+    req.log.info("Running aggregation pipeline to count RECEIT type orders");
     const result = await Order.aggregate([
       {
-        $match: { coldStorageId: storeAdminId },
+        $match: {
+          coldStorageId: storeAdminId, // Match orders belonging to the specific store admin
+          "voucher.type": "RECEIT", // Match orders where voucher type is "RECEIT"
+        },
       },
       {
         $group: {
-          _id: null,
-          count: { $sum: 1 },
+          _id: null, // We don't care about grouping by any field, just counting
+          count: { $sum: 1 }, // Sum the number of documents that match
         },
       },
     ]);
@@ -52,26 +56,40 @@ const getReceiptNumber = async (req, reply) => {
   }
 };
 
-const createNewOrder = async (req, reply) => {
-  try {
-    // Extracting data from the request
-    const storeAdminId = req.storeAdmin._id;
-    const { farmerId, cropDetails } = req.body;
+// @desc Create new Incoming Order
+//@route POST/api/store-admin/orders
+//@access Private
 
-    // Creating a new order
-    const newOrder = new Order({
-      coldStorageId: storeAdminId,
+const createNewIncomingOrder = async (req, reply) => {
+  try {
+    orderSchema.parse(req.body);
+
+    const {
+      coldStorageId,
       farmerId,
-      cropDetails,
+      voucherNumber,
+      dateOfSubmission,
+      orderDetails,
+    } = req.body;
+
+    const newOrder = new Order({
+      coldStorageId,
+      farmerId,
+      voucher: {
+        type: "RECEIT", // Set voucher type to RECEIT
+        voucherNumber: voucherNumber,
+      },
+      dateOfSubmission,
+      orderDetails,
     });
 
-    // Saving the new order to the database
+    // save the new order
     await newOrder.save();
 
-    // Send a success response
     reply.code(201).send({
       status: "Success",
-      newOrder,
+      message: "Incoming order created successfully",
+      data: newOrder,
     });
   } catch (err) {
     // Handling errors
@@ -366,7 +384,7 @@ const getPaymentHistory = async (req, reply) => {
 };
 
 export {
-  createNewOrder,
+  createNewIncomingOrder,
   getFarmerOrders,
   createOutgoingOrder,
   updateOrdersAfterOutgoing,

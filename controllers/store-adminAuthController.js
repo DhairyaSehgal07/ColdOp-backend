@@ -30,6 +30,7 @@ const registerStoreAdmin = async (req, reply) => {
       coldStorageAddress,
       coldStorageContactNumber,
       isVerified,
+      isMobile,
       imageUrl,
     } = req.body;
 
@@ -72,7 +73,7 @@ const registerStoreAdmin = async (req, reply) => {
         storeAdminId,
         name,
       });
-      generateToken(reply, storeAdmin._id);
+      const token = generateToken(reply, storeAdmin._id, isMobile);
       return reply.code(201).send({
         status: "Success",
         data: {
@@ -85,6 +86,7 @@ const registerStoreAdmin = async (req, reply) => {
           isPaid: storeAdmin.isPaid,
           role: storeAdmin.role,
           storeAdminId: storeAdminId,
+          token: token,
           imageUrl: req.body.imageUrl,
           _id: storeAdmin._id,
         },
@@ -113,7 +115,7 @@ const loginStoreAdmin = async (req, reply) => {
       mobileNumber: req.body.mobileNumber,
     });
 
-    const { mobileNumber, password } = req.body;
+    const { mobileNumber, password, isMobile } = req.body;
 
     // Check if the store admin exists
     const storeAdmin = await StoreAdmin.findOne({ mobileNumber });
@@ -133,7 +135,8 @@ const loginStoreAdmin = async (req, reply) => {
         });
 
         // Generate token and send success response
-        generateToken(reply, storeAdmin._id);
+        const token = generateToken(reply, storeAdmin._id, isMobile);
+
         req.log.info("Token generated for store admin", {
           storeAdminId: storeAdmin.storeAdminId,
         });
@@ -149,6 +152,7 @@ const loginStoreAdmin = async (req, reply) => {
             isActive: storeAdmin.isActive,
             isPaid: storeAdmin.isPaid,
             role: storeAdmin.role,
+            token: token,
             storeAdminId: storeAdmin.storeAdminId,
             imageUrl: storeAdmin.imageUrl,
             _id: storeAdmin._id,

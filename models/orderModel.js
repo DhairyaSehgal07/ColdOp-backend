@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const trolleyDetailsSchema = new mongoose.Schema({
+const orderDetailsSchema = new mongoose.Schema({
   variety: {
     type: String,
     required: true,
@@ -48,21 +48,22 @@ const orderSchema = new mongoose.Schema(
       ref: "Farmer",
       required: true,
     },
-    trolleyNumber: {
-      type: Number,
-      required: true,
+    voucher: {
+      type: {
+        type: String,
+        enum: ["RECEIT", "DELIVERY", "RESTORE"],
+        required: true,
+      },
+      voucherNumber: {
+        type: Number,
+        required: true,
+      },
     },
     dateOfSubmission: {
       type: String,
       required: true,
     },
-    orderDetails: [trolleyDetailsSchema],
-
-    type: {
-      type: String,
-      enum: ["INCOMING", "OUTGOING"], // Possible values for 'type'
-      required: true,
-    },
+    orderDetails: [orderDetailsSchema],
   },
   { timestamps: true }
 );

@@ -6,11 +6,13 @@ const registerSchema = z.object({
   mobileNumber: z.string().length(10),
   password: z.string().min(6),
   imageUrl: z.string(),
+  isMobile: z.boolean(),
 });
 
 const loginSchema = z.object({
   mobileNumber: z.string().length(10),
   password: z.string().min(6),
+  isMobile: z.boolean(),
 });
 
 const updateSchema = z.object({
@@ -36,6 +38,7 @@ const storeAdminRegisterSchema = z.object({
   password: z.string().min(6),
   coldStorageName: z.string().min(2),
   coldStorageAddress: z.string(),
+  isMobile: z.boolean(),
   coldStorageContactNumber: z.union([
     z.string().length(8), // Landline number with 8 digits
     z.string().length(10), // Mobile number with 10 digits
@@ -47,6 +50,7 @@ const storeAdminRegisterSchema = z.object({
 const storeAdminUpdateSchmea = z.object({
   name: z.string().min(2).max(50).optional(),
   personalAddress: z.string().min(2).max(100).optional(),
+  isMobile: z.boolean(), // Boolean field for 'isMobile'
   mobileNumber: z.string().length(10).optional(),
   password: z.string().min(6).optional(),
   coldStorageName: z.string().min(2).optional(),
@@ -83,19 +87,26 @@ const quickRegisterSchema = z.object({
 });
 
 const orderSchema = z.object({
-  coldStorageId: z.string().nonempty(),
-  farmerId: z.string().nonempty(),
-  cropDetails: z.object({
-    dateOfSubmission: z.string().nonempty(),
-    variety: z.string().nonempty(),
-    typeOfBag: z.string().nonempty(),
-    lotNumber: z.string().nonempty(),
-    quantity: z.string().nonempty(),
-    floor: z.string().nonempty(),
-    row: z.string().nonempty(),
-    chamber: z.string().nonempty(),
-  }),
-  orderStatus: z.enum(["inStore", "extracted"]).default("inStore"),
+  coldStorageId: z.string().regex(/^[a-fA-F0-9]{24}$/, "Invalid ObjectId"),
+  farmerId: z.string().regex(/^[a-fA-F0-9]{24}$/, "Invalid ObjectId"),
+  voucherNumber: z.number().int().positive(),
+  dateOfSubmission: z.string().min(1),
+  orderDetails: z.array(
+    z.object({
+      variety: z.string().min(1),
+      bagSizes: z.array(
+        z.object({
+          size: z.enum(["Goli", "number-12", "seed", "ration", "cut"]),
+          quantity: z.number().min(0),
+        })
+      ),
+      location: z.object({
+        floor: z.string().min(1),
+        row: z.string().min(1),
+        chamber: z.string().min(1),
+      }),
+    })
+  ),
 });
 
 export {

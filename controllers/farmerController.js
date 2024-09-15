@@ -21,7 +21,8 @@ const registerFarmer = async (req, reply) => {
     req.log.info("Request body validated successfully");
 
     // Extract data from the request body
-    const { name, address, mobileNumber, password, imageUrl } = req.body;
+    const { name, address, mobileNumber, password, imageUrl, isMobile } =
+      req.body;
 
     // Check if a farmer with the given mobile number already exists
     req.log.info("Checking if a farmer with the mobile number exists", {
@@ -72,11 +73,21 @@ const registerFarmer = async (req, reply) => {
       });
 
       // Generate token and send response
-      generateToken(reply, farmer._id);
+      const token = generateToken(reply, farmer._id, isMobile);
 
       reply.code(201).send({
         status: "Success",
-        data: farmer,
+        data: {
+          name: farmer.name,
+          address: farmer.address,
+          mobileNumber: farmer.mobileNumber,
+          isVerified: farmer.isVerified,
+          imageUrl: farmer.imageUrl,
+          role: farmer.role,
+          token: token,
+          farmerId: farmer.farmerId,
+          _id: farmer._id,
+        },
       });
     }
   } catch (err) {
@@ -101,7 +112,7 @@ const loginFarmer = async (req, reply) => {
     loginSchema.parse(req.body);
     req.log.info("Request body validated successfully");
 
-    const { mobileNumber, password } = req.body;
+    const { mobileNumber, password, isMobile } = req.body;
 
     // Check if the farmer exists
     req.log.info("Searching for farmer with mobile number", { mobileNumber });
@@ -115,7 +126,7 @@ const loginFarmer = async (req, reply) => {
 
       if (isPasswordMatch) {
         req.log.info("Password match successful, generating token");
-        generateToken(reply, farmer._id);
+        const token = generateToken(reply, farmer._id, isMobile);
 
         return reply.code(200).send({
           status: "Success",
@@ -126,6 +137,7 @@ const loginFarmer = async (req, reply) => {
             isVerified: farmer.isVerified,
             imageUrl: farmer.imageUrl,
             role: farmer.role,
+            token: token,
             farmerId: farmer.farmerId,
             _id: farmer._id,
           },
