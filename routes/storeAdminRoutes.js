@@ -82,7 +82,7 @@ function storeAdminRoutes(fastify, options, done) {
     quickRegisterFarmer
   );
   // get single farmer for StoreAdminViewFarmerProfileScreen
-  fastify.post(
+  fastify.get(
     "/farmers/:id",
     { preHandler: [storeAdminProtect] },
     getFarmerById
