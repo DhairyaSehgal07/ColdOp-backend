@@ -99,8 +99,8 @@ function storeAdminRoutes(fastify, options, done) {
     { preHandler: [storeAdminProtect] },
     createNewIncomingOrder
   );
-  fastify.post(
-    "/all-orders",
+  fastify.get(
+    "/farmers/:id/orders",
     { preHandler: [storeAdminProtect] },
     getFarmerOrders
   );

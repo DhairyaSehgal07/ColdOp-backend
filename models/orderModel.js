@@ -14,9 +14,14 @@ const orderDetailsSchema = new mongoose.Schema({
         required: true,
       },
       quantity: {
-        type: Number,
-        required: true,
-        default: 0, // Default quantity to 0 if not provided
+        initialQuantity: {
+          type: Number, // This will be used for creating markas
+          required: true,
+        },
+        currentQuantity: {
+          type: Number,
+          required: true,
+        },
       },
     },
   ],
@@ -62,6 +67,10 @@ const orderSchema = new mongoose.Schema(
     dateOfSubmission: {
       type: String,
       required: true,
+    },
+    fulfilled: {
+      type: Boolean,
+      default: false,
     },
     orderDetails: [orderDetailsSchema],
   },

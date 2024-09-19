@@ -79,6 +79,7 @@ const createNewIncomingOrder = async (req, reply) => {
         type: "RECEIT", // Set voucher type to RECEIT
         voucherNumber: voucherNumber,
       },
+      fulfilled: false,
       dateOfSubmission,
       orderDetails,
     });
@@ -105,21 +106,34 @@ const createNewIncomingOrder = async (req, reply) => {
 const getFarmerOrders = async (req, reply) => {
   try {
     const storeAdminId = req.storeAdmin._id;
-    const { farmerId } = req.body;
+    const { id } = req.params;
+
+    // Log the start of the request
+    console.log(
+      `Fetching orders for Farmer ID: ${id} by Store Admin ID: ${storeAdminId}`
+    );
 
     // Perform the Mongoose query to find orders
     const orders = await Order.find({
       coldStorageId: storeAdminId,
-      farmerId,
-      orderStatus: "inStore",
+      farmerId: id,
     });
 
-    if (!orders) {
+    // Log the query result
+    console.log(`Query executed. Orders found: ${orders.length}`);
+
+    if (!orders || orders.length === 0) {
+      // Log when no orders are found
+      console.log("No orders found for the given farmer.");
+
       return reply.code(200).send({
         status: "Fail",
-        message: "no order created",
+        message: "Farmer doesn't have any orders",
       });
     }
+
+    // Log the successful response
+    console.log("Orders retrieved successfully.");
 
     // Sending a success response with the orders
     reply.code(200).send({
@@ -127,8 +141,10 @@ const getFarmerOrders = async (req, reply) => {
       data: orders,
     });
   } catch (err) {
-    // Handling errors
+    // Log the error
     console.error("Error getting farmer orders:", err);
+
+    // Sending error response
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while getting farmer orders",
