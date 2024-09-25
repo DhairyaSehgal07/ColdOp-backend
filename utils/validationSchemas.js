@@ -96,7 +96,7 @@ const orderSchema = z.object({
       variety: z.string().min(1),
       bagSizes: z.array(
         z.object({
-          size: z.enum(["Goli", "number-12", "seed", "ration", "cut"]),
+          size: z.string(),
           quantity: z.object({
             initialQuantity: z.number(),
             currentQuantity: z.number(),
