@@ -22,7 +22,7 @@ const getReceiptNumber = async (req, reply) => {
       {
         $match: {
           coldStorageId: storeAdminId, // Match orders belonging to the specific store admin
-          "voucher.type": "RECEIT", // Match orders where voucher type is "RECEIT"
+          "voucher.type": "RECEIPT", // Match orders where voucher type is "RECEIT"
         },
       },
       {
@@ -42,7 +42,7 @@ const getReceiptNumber = async (req, reply) => {
     // Sending response with receipt number
     reply.code(200).send({
       status: "Success",
-      receiptNumber: receiptNumber,
+      receiptNumber: receiptNumber + 1,
     });
   } catch (err) {
     // Log error
@@ -52,6 +52,7 @@ const getReceiptNumber = async (req, reply) => {
     reply.code(500).send({
       status: "Fail",
       message: "Error occurred while getting receipt number",
+      errorMessage: err.message,
     });
   }
 };
@@ -148,6 +149,7 @@ const getFarmerOrders = async (req, reply) => {
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while getting farmer orders",
+      errorMessage: err.message,
     });
   }
 };
@@ -155,29 +157,21 @@ const getFarmerOrders = async (req, reply) => {
 // outgoing order controller functions
 const createOutgoingOrder = async (req, reply) => {
   try {
-    const storeAdminId = req.storeAdmin._id;
-    const { farmerId, orders, totalAmount, amountPaid, date } = req.body;
+    // we  know that voucher number for every order for that year is unique
+    // step 1 is find the orders via the voucherNumber,
+    // then whichever quantity is selected , enter it's quantity , which is to be reduced ,
+    // if all the quantities of all bag sizes become 0 then we can mark the fulfilled value as true
 
-    const newOrder = await OutgoingOrder.create({
-      storeAdminId,
-      farmerId,
-      orders,
-      totalAmount,
-      amountPaid,
-      date,
+    reply.code(200).send({
+      message: "creating new outgoing order",
     });
-
-    if (newOrder) {
-      reply.code(201).send({
-        status: "Success",
-        newOrder,
-      });
-    }
   } catch (err) {
-    console.log(err.message);
+    console.error("Error creating new outgoing order:", err);
+
     reply.code(500).send({
       status: "Fail",
-      message: "Some error occured while creating outgoing order",
+      message: "Some error occured while creating new outgoing order",
+      errorMessage: err.message,
     });
   }
 };

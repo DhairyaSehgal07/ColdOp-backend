@@ -107,7 +107,7 @@ function storeAdminRoutes(fastify, options, done) {
 
   // OUTGOING ORDER ROUTES
   fastify.post(
-    "/create-outgoing-order",
+    "/orders/outgoing",
     { preHandler: [storeAdminProtect] },
     createOutgoingOrder
   );

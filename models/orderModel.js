@@ -1,21 +1,22 @@
 import mongoose from "mongoose";
 
 const orderDetailsSchema = new mongoose.Schema({
+  _id: false,
   variety: {
     type: String,
     required: true,
   },
-  // array of objects , each object with 2 properties size and qty
+
   bagSizes: [
     {
+      _id: false,
       size: {
         type: String,
-        // enum: ["goli", "number-12", "seed", "ration", "cut"], // Added enum for bag sizes
         required: true,
       },
       quantity: {
         initialQuantity: {
-          type: Number, // This will be used for creating markas
+          type: Number,
           required: true,
         },
         currentQuantity: {
