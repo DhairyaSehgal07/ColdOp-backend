@@ -76,7 +76,7 @@ const createNewIncomingOrder = async (req, reply) => {
       coldStorageId,
       farmerId,
       voucher: {
-        type: "RECEIT", // Set voucher type to RECEIT
+        type: "RECEIPT", // Set voucher type to RECEIT
         voucherNumber: voucherNumber,
       },
       fulfilled: false,

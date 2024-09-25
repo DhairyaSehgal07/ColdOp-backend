@@ -10,7 +10,7 @@ const orderDetailsSchema = new mongoose.Schema({
     {
       size: {
         type: String,
-        enum: ["Goli", "number-12", "seed", "ration", "cut"], // Added enum for bag sizes
+        // enum: ["goli", "number-12", "seed", "ration", "cut"], // Added enum for bag sizes
         required: true,
       },
       quantity: {
@@ -56,7 +56,7 @@ const orderSchema = new mongoose.Schema(
     voucher: {
       type: {
         type: String,
-        enum: ["RECEIT", "DELIVERY", "RESTORE"],
+        enum: ["RECEIPT", "DELIVERY", "RESTORE"],
         required: true,
       },
       voucherNumber: {
