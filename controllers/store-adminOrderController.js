@@ -157,58 +157,55 @@ const getFarmerOrders = async (req, reply) => {
 // outgoing order controller functions
 const createOutgoingOrder = async (req, reply) => {
   try {
-    // we  know that voucher number for every order for that year is unique
-    // step 1 is find the orders via the voucherNumber,
-    // then whichever quantity is selected , enter it's quantity , which is to be reduced ,
-    // if all the quantities of all bag sizes become 0 then we can mark the fulfilled value as true
+    const { orderId, variety, bagUpdates } = req.body;
 
-    reply.code(200).send({
-      message: "creating new outgoing order",
-    });
-  } catch (err) {
-    console.error("Error creating new outgoing order:", err);
+    const bulkOps = bagUpdates.map((update) => ({
+      updateOne: {
+        filter: {
+          _id: orderId, // Match the order by ID
+          "orderDetails.variety": variety, // Match the correct variety (Pukhraj)
+          "orderDetails.bagSizes.size": update.size, // Match the bag size (e.g., goli, ration)
+        },
+        update: {
+          $inc: {
+            "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
+              -update.quantityToRemove, // Subtract the quantity
+          },
+        },
+        arrayFilters: [
+          { "i.variety": variety }, // Filter to ensure we are updating the correct variety
+          { "j.size": update.size }, // Filter to ensure we are updating the correct size
+        ],
+      },
+    }));
 
-    reply.code(500).send({
-      status: "Fail",
-      message: "Some error occured while creating new outgoing order",
-      errorMessage: err.message,
-    });
-  }
-};
+    // Execute the bulk operations
+    const result = await Order.bulkWrite(bulkOps);
 
-// when new order has been created then delete the order from store
-const updateOrdersAfterOutgoing = async (req, reply) => {
-  try {
-    const { orderIds } = req.body;
+    // Check if all bag quantities for the variety are 0
+    const updatedOrder = await Order.findOne({ _id: orderId });
 
-    if (!Array.isArray(orderIds) || orderIds.length === 0) {
-      return reply
-        .code(400)
-        .send({ status: "Fail", message: "Invalid order ids provided" });
+    const isFulfilled = updatedOrder.orderDetails
+      .filter((detail) => detail.variety === variety)
+      .every((detail) =>
+        detail.bagSizes.every((bag) => bag.quantity.currentQuantity === 0)
+      );
+
+    // Update the fulfilled status if all quantities are 0
+    if (isFulfilled) {
+      await Order.updateOne({ _id: orderId }, { $set: { fulfilled: true } });
     }
 
-    // Update orders to set order status to "extracted"
-    const updateResult = await Order.updateMany(
-      { _id: { $in: orderIds } },
-      { $set: { orderStatus: "extracted" } }
-    );
-
-    if (updateResult.nModified === 0) {
-      return reply.code(404).send({
-        status: "Fail",
-        message: "No orders found with the provided IDs",
-      });
-    }
-
-    reply.code(200).send({
+    return reply.code(200).send({
       status: "Success",
-      message: "Orders updated",
+      message: "Bag quantities updated successfully",
+      result,
     });
   } catch (err) {
-    console.log(err.message);
-    reply.code(500).send({
+    return reply.code(500).send({
       status: "Fail",
-      message: "Some error occurred while updating orders",
+      message: "Error occurred while updating bag quantities",
+      errorMessage: err.message,
     });
   }
 };
@@ -354,53 +351,12 @@ const deleteFarmerOutgoingOrder = async (req, reply) => {
   }
 };
 
-const getPaymentHistory = async (req, reply) => {
-  try {
-    const { orderId } = req.body;
-
-    // Validate input data
-    if (!orderId) {
-      return reply.code(400).send({
-        status: "Fail",
-        message: "Invalid input data",
-      });
-    }
-
-    // Find payment history based on orderId
-    const paymentHistory = await PaymentHistory.findOne({
-      outgoingOrderId: orderId,
-    });
-
-    // Check if payment history exists
-    if (!paymentHistory) {
-      return reply.code(404).send({
-        status: "Fail",
-        message: "Payment history not found",
-      });
-    }
-
-    // Send success response with payment history
-    reply.code(200).send({
-      status: "Success",
-      paymentHistory: paymentHistory,
-    });
-  } catch (err) {
-    console.log(err.message);
-    reply.code(500).send({
-      status: "Fail",
-      message: "Failed to fetch payment history",
-    });
-  }
-};
-
 export {
   createNewIncomingOrder,
   getFarmerOrders,
   createOutgoingOrder,
-  updateOrdersAfterOutgoing,
   getReceiptNumber,
   getFarmerOutgoingOrders,
   updateFarmerOutgoingOrder,
   deleteFarmerOutgoingOrder,
-  getPaymentHistory,
 };

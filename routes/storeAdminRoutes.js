@@ -17,12 +17,10 @@ import {
   createNewIncomingOrder,
   getFarmerOrders,
   createOutgoingOrder,
-  updateOrdersAfterOutgoing,
   getReceiptNumber,
   getFarmerOutgoingOrders,
   updateFarmerOutgoingOrder,
   deleteFarmerOutgoingOrder,
-  getPaymentHistory,
 } from "../controllers/store-adminOrderController.js";
 
 import { storeAdminProtect } from "../middleware/authMiddleware.js";
@@ -112,13 +110,6 @@ function storeAdminRoutes(fastify, options, done) {
     createOutgoingOrder
   );
 
-  // delete the orders from order model after new outgoing order has been created
-  fastify.delete(
-    "/update-orders",
-    { preHandler: [storeAdminProtect] },
-    updateOrdersAfterOutgoing
-  );
-
   // get farmer outgoing orders
   fastify.post(
     "/farmer-outgoing",
@@ -136,13 +127,6 @@ function storeAdminRoutes(fastify, options, done) {
     "/farmer-outgoing",
     { preHandler: [storeAdminProtect] },
     deleteFarmerOutgoingOrder
-  );
-
-  // get payment history of the outgoing order
-  fastify.post(
-    "/farmer-payment-history",
-    { preHandler: [storeAdminProtect] },
-    getPaymentHistory
   );
 
   done();
