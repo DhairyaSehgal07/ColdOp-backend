@@ -1,65 +1,66 @@
 import mongoose from "mongoose";
 
-const outgoingOrderSchema = new mongoose.Schema({
-  storeAdminId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "StoreAdmin",
+const orderDetailsSchema = new mongoose.Schema({
+  _id: false,
+  variety: {
+    type: String,
     required: true,
   },
-  farmerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Farmer",
-    required: true,
-  },
-  orders: [
+  bagSizes: [
     {
-      dateOfSubmission: {
+      _id: false,
+      size: {
         type: String,
         required: true,
-      },
-      variety: {
-        type: String,
-        required: true,
-      },
-      typeOfBag: {
-        type: String,
-        required: true,
-      },
-      lotNumber: {
-        type: String,
-        required: true,
-        unique: true,
       },
       quantity: {
-        type: String,
-        required: true,
-      },
-      floor: {
-        type: String,
-        required: true,
-      },
-      row: {
-        type: String,
-        required: true,
-      },
-      chamber: {
-        type: [String],
+        type: Number,
         required: true,
       },
     },
   ],
-  totalAmount: {
-    type: Number,
-    required: true,
-  },
-  amountPaid: {
-    type: Number,
-    required: true,
-  },
-  date: {
-    type: String,
-  },
 });
+
+const outgoingOrderSchema = new mongoose.Schema(
+  {
+    coldStorageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "StoreAdmin",
+      required: true,
+    },
+    farmerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Farmer",
+      required: true,
+    },
+    voucher: {
+      type: {
+        type: String,
+        default: "DELIVERY",
+        required: true,
+      },
+      voucherNumber: {
+        type: Number,
+        required: true,
+      },
+    },
+    dateOfExtraction: {
+      type: String,
+      required: true,
+    },
+    orderDetails: [orderDetailsSchema],
+
+    // Add the new array of orderModel references
+    relatedOrders: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Order",
+        required: true,
+      },
+    ],
+  },
+  { timestamps: true }
+);
 
 const OutgoingOrder = mongoose.model("OutgoingOrder", outgoingOrderSchema);
 

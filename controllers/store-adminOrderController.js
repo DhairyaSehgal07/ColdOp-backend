@@ -2,6 +2,11 @@ import Order from "../models/orderModel.js";
 import OutgoingOrder from "../models/outgoingOrderModel.js";
 import PaymentHistory from "../models/paymentHistoryModel.js";
 import { orderSchema } from "../utils/validationSchemas.js";
+import {
+  getDeliveryVoucherNumberHelper,
+  getReceiptNumberHelper,
+} from "../utils/helpers.js";
+import mongoose from "mongoose";
 // Auth controllers
 
 // ORDER ROUTES CONTROLLER FUCNTIONS
@@ -57,6 +62,53 @@ const getReceiptNumber = async (req, reply) => {
   }
 };
 
+const getDeliveryVoucherNumber = async (req, reply) => {
+  try {
+    const storeAdminId = req.storeAdminId._id;
+
+    req.log.info("Fetching Delivery voucher number for store admin", {
+      storeAdminId,
+    });
+
+    req.log.info(
+      "Running aggregation pipeline to count DELIVERY voucher number"
+    );
+
+    const result = await OutgoingOrder.aggregate([
+      {
+        $match: {
+          coldStorageId: storeAdminId,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 }, // sum of the number of documents
+        },
+      },
+    ]);
+
+    const deliveryVoucherNumber = result.length > 0 ? result[0].count : 0;
+
+    req.log.info("Deliver voucher count: ", { deliveryVoucherNumber });
+
+    reply.code(200).send({
+      status: "Success",
+      deliveryVoucherNumber: deliveryVoucherNumber + 1,
+    });
+  } catch (err) {
+    req.log.error("Error occurred while getting receipt number", {
+      errorMessage: err.message,
+    });
+
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occured while getting delivery voucher number",
+      errorMessage: err.message,
+    });
+  }
+};
+
 // @desc Create new Incoming Order
 //@route POST/api/store-admin/orders
 //@access Private
@@ -65,20 +117,24 @@ const createNewIncomingOrder = async (req, reply) => {
   try {
     orderSchema.parse(req.body);
 
-    const {
-      coldStorageId,
-      farmerId,
-      voucherNumber,
-      dateOfSubmission,
-      orderDetails,
-    } = req.body;
+    const { coldStorageId, farmerId, dateOfSubmission, orderDetails } =
+      req.body;
+
+    const receiptNumber = await getReceiptNumberHelper(req.storeAdmin._id);
+
+    if (!receiptNumber) {
+      reply.code(500).send({
+        status: "Fail",
+        message: "Failed to get RECEIPT number",
+      });
+    }
 
     const newOrder = new Order({
       coldStorageId,
       farmerId,
       voucher: {
-        type: "RECEIPT", // Set voucher type to RECEIT
-        voucherNumber: voucherNumber,
+        type: "RECEIPT",
+        voucherNumber: receiptNumber,
       },
       fulfilled: false,
       dateOfSubmission,
@@ -104,7 +160,7 @@ const createNewIncomingOrder = async (req, reply) => {
   }
 };
 
-const getFarmerOrders = async (req, reply) => {
+const getFarmerIncomingOrders = async (req, reply) => {
   try {
     const storeAdminId = req.storeAdmin._id;
     const { id } = req.params;
@@ -154,57 +210,180 @@ const getFarmerOrders = async (req, reply) => {
   }
 };
 
-// outgoing order controller functions
-const createOutgoingOrder = async (req, reply) => {
+const getAllFarmerOrders = async (req, reply) => {
   try {
-    const { orderId, variety, bagUpdates } = req.body;
+    const storeAdminId = req.storeAdmin._id;
+    const { id } = req.params;
 
-    const bulkOps = bagUpdates.map((update) => ({
-      updateOne: {
-        filter: {
-          _id: orderId, // Match the order by ID
-          "orderDetails.variety": variety, // Match the correct variety (Pukhraj)
-          "orderDetails.bagSizes.size": update.size, // Match the bag size (e.g., goli, ration)
-        },
-        update: {
-          $inc: {
-            "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
-              -update.quantityToRemove, // Subtract the quantity
-          },
-        },
-        arrayFilters: [
-          { "i.variety": variety }, // Filter to ensure we are updating the correct variety
-          { "j.size": update.size }, // Filter to ensure we are updating the correct size
-        ],
-      },
-    }));
+    // Log the start of the request
+    console.log(
+      `Fetching all orders for Farmer ID: ${id} by Store Admin ID: ${storeAdminId}`
+    );
 
-    // Execute the bulk operations
-    const result = await Order.bulkWrite(bulkOps);
+    // Fetch both incoming orders and outgoing orders concurrently
+    const [incomingOrders, outgoingOrders] = await Promise.all([
+      Order.find({ coldStorageId: storeAdminId, farmerId: id }), // Incoming orders
+      OutgoingOrder.find({ coldStorageId: storeAdminId, farmerId: id }), // Outgoing orders
+    ]);
 
-    // Check if all bag quantities for the variety are 0
-    const updatedOrder = await Order.findOne({ _id: orderId });
+    // Log the result of both queries
+    console.log(
+      `Incoming Orders: ${incomingOrders.length}, Outgoing Orders: ${outgoingOrders.length}`
+    );
 
-    const isFulfilled = updatedOrder.orderDetails
-      .filter((detail) => detail.variety === variety)
-      .every((detail) =>
-        detail.bagSizes.every((bag) => bag.quantity.currentQuantity === 0)
-      );
+    // Combine the results from both models
+    const allOrders = [...incomingOrders, ...outgoingOrders];
 
-    // Update the fulfilled status if all quantities are 0
-    if (isFulfilled) {
-      await Order.updateOne({ _id: orderId }, { $set: { fulfilled: true } });
+    if (!allOrders || allOrders.length === 0) {
+      // Log when no orders are found
+      console.log("No orders found for the given farmer.");
+
+      return reply.code(200).send({
+        status: "Fail",
+        message: "Farmer doesn't have any orders",
+      });
     }
 
-    return reply.code(200).send({
+    // Log the successful response
+    console.log("All orders retrieved successfully.");
+
+    // Sending a success response with the combined orders
+    reply.code(200).send({
       status: "Success",
-      message: "Bag quantities updated successfully",
-      result,
+      data: allOrders,
     });
   } catch (err) {
+    // Log the error
+    console.error("Error getting farmer orders:", err);
+
+    // Sending error response
+    reply.code(500).send({
+      status: "Fail",
+      message: "Some error occurred while getting farmer orders",
+      errorMessage: err.message,
+    });
+  }
+};
+
+// outgoing order controller functions
+const createOutgoingOrder = async (req, reply) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const orders = req.body;
+    const bulkOps = [];
+
+    const { id } = req.params;
+
+    const relatedOrders = [];
+
+    // Prepare bulk operations for all orders
+    for (const { orderId, variety, bagUpdates } of orders) {
+      relatedOrders.push(orderId);
+      bagUpdates.forEach((update) => {
+        bulkOps.push({
+          updateOne: {
+            filter: {
+              _id: orderId,
+              "orderDetails.variety": variety,
+              "orderDetails.bagSizes.size": update.size,
+            },
+            update: {
+              $inc: {
+                "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
+                  -update.quantityToRemove, // Decrease the current quantity
+              },
+            },
+            arrayFilters: [
+              { "i.variety": variety }, // Filter for correct variety
+              { "j.size": update.size }, // Filter for correct bag size
+            ],
+          },
+        });
+      });
+    }
+
+    // Execute the bulk write operations as part of the transaction
+    const result = await Order.bulkWrite(bulkOps, { session });
+
+    // Now check if any variety has been fulfilled (currentQuantity === 0 for all sizes)
+    const fulfilledOrders = await Promise.all(
+      orders.map(async ({ orderId, variety }) => {
+        const updatedOrder = await Order.findOne({ _id: orderId }).session(
+          session
+        ); // Query in the same transaction session
+
+        const isFulfilled = updatedOrder.orderDetails
+          .filter((detail) => detail.variety === variety)
+          .every((detail) =>
+            detail.bagSizes.every((bag) => bag.quantity.currentQuantity === 0)
+          );
+
+        // If all quantities for the variety are 0, mark the order as fulfilled
+        if (isFulfilled) {
+          await Order.updateOne(
+            { _id: orderId },
+            { $set: { fulfilled: true } },
+            { session }
+          );
+          return orderId; // Return the order ID if fulfilled
+        }
+
+        return null; // No fulfillment for this order
+      })
+    );
+
+    // Filter out any null values from fulfilledOrders
+    const filteredFulfilledOrders = fulfilledOrders.filter(Boolean);
+
+    // create new outgoing order
+
+    const deliveryVoucherNumber = await getDeliveryVoucherNumberHelper(
+      req.storeAdmin._id
+    );
+    const outgoingOrder = new OutgoingOrder({
+      coldStorageId: req.storeAdmin._id,
+      farmerId: id,
+      voucher: {
+        type: "DELIVERY",
+        voucherNumber: deliveryVoucherNumber,
+      },
+      dateOfExtraction: new Date().toISOString(), // You can use the current date
+      orderDetails: orders.map(({ variety, bagUpdates }) => ({
+        variety,
+        bagSizes: bagUpdates.map((update) => ({
+          size: update.size,
+          quantity: update.quantityToRemove, // Add removed quantity to outgoing order
+        })),
+      })),
+      relatedOrders,
+    });
+
+    await outgoingOrder.save({ session }); // Save the new document in the same transaction
+
+    // Commit the transaction after both operations
+    await session.commitTransaction();
+    session.endSession(); // End the session
+
+    // Return success response
+    return reply.code(200).send({
+      status: "Success",
+      message:
+        "Bag quantities updated successfully, and outgoing order created",
+      result,
+      fulfilledOrders: filteredFulfilledOrders,
+    });
+  } catch (err) {
+    // Rollback the transaction in case of an error
+    await session.abortTransaction();
+    session.endSession(); // End the session
+
+    // Return failure response
     return reply.code(500).send({
       status: "Fail",
-      message: "Error occurred while updating bag quantities",
+      message:
+        "Error occurred while updating bag quantities and creating outgoing order",
       errorMessage: err.message,
     });
   }
@@ -353,7 +532,8 @@ const deleteFarmerOutgoingOrder = async (req, reply) => {
 
 export {
   createNewIncomingOrder,
-  getFarmerOrders,
+  getFarmerIncomingOrders,
+  getAllFarmerOrders,
   createOutgoingOrder,
   getReceiptNumber,
   getFarmerOutgoingOrders,

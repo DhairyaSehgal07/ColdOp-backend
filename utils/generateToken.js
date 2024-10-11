@@ -20,7 +20,7 @@ const generateToken = (reply, userId, isMobile) => {
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
   });
 
-  return {}; // Optional return if you need the token to be available in the response
+  return {};
 };
 
 export default generateToken;

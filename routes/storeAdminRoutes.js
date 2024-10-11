@@ -15,11 +15,12 @@ import {
 
 import {
   createNewIncomingOrder,
-  getFarmerOrders,
   createOutgoingOrder,
   getReceiptNumber,
+  getFarmerIncomingOrders,
   getFarmerOutgoingOrders,
   updateFarmerOutgoingOrder,
+  getAllFarmerOrders,
   deleteFarmerOutgoingOrder,
 } from "../controllers/store-adminOrderController.js";
 
@@ -97,15 +98,23 @@ function storeAdminRoutes(fastify, options, done) {
     { preHandler: [storeAdminProtect] },
     createNewIncomingOrder
   );
+
+  // get all farmer orders
   fastify.get(
     "/farmers/:id/orders",
     { preHandler: [storeAdminProtect] },
-    getFarmerOrders
+    getAllFarmerOrders
+  );
+
+  fastify.get(
+    "/farmers/:id/orders/incoming",
+    { preHandler: [storeAdminProtect] },
+    getFarmerIncomingOrders
   );
 
   // OUTGOING ORDER ROUTES
   fastify.post(
-    "/orders/outgoing",
+    "/farmers/:id/outgoing",
     { preHandler: [storeAdminProtect] },
     createOutgoingOrder
   );

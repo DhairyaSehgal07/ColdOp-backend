@@ -1,3 +1,5 @@
+import Order from "../models/orderModel.js";
+import OutgoingOrder from "../models/outgoingOrderModel.js";
 export const formatDate = (date) => {
   const day = date.getDate();
   const monthIndex = date.getMonth();
@@ -37,5 +39,53 @@ const addOrdinalSuffix = (day) => {
       return day + "rd";
     default:
       return day + "th";
+  }
+};
+
+export const getReceiptNumberHelper = async (storeAdminId) => {
+  try {
+    const result = await Order.aggregate([
+      {
+        $match: {
+          coldStorageId: storeAdminId, // Match orders belonging to the specific store admin
+          "voucher.type": "RECEIPT", // Match orders where voucher type is "RECEIPT"
+        },
+      },
+      {
+        $group: {
+          _id: null, // We don't care about grouping by any field, just counting
+          count: { $sum: 1 }, // Sum the number of documents that match
+        },
+      },
+    ]);
+
+    // If no matching documents are found, result will be an empty array, so handle that case
+    return result.length > 0 ? result[0].count + 1 : 0;
+  } catch (err) {
+    throw new Error("Some error occurred while getting receipt Number");
+  }
+};
+
+export const getDeliveryVoucherNumberHelper = async (storeAdminId) => {
+  try {
+    const result = await OutgoingOrder.aggregate([
+      {
+        $match: {
+          coldStorageId: storeAdminId,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 }, // sum of the number of documents
+        },
+      },
+    ]);
+
+    const deliveryVoucherNumber = result.length > 0 ? result[0].count : 0;
+
+    return deliveryVoucherNumber + 1;
+  } catch (err) {
+    throw new Error("Some error occurred while getting deliver voucher Number");
   }
 };
