@@ -89,7 +89,6 @@ const quickRegisterSchema = z.object({
 const orderSchema = z.object({
   coldStorageId: z.string().regex(/^[a-fA-F0-9]{24}$/, "Invalid ObjectId"),
   farmerId: z.string().regex(/^[a-fA-F0-9]{24}$/, "Invalid ObjectId"),
-  voucherNumber: z.number().int().positive(),
   dateOfSubmission: z.string().min(1),
   orderDetails: z.array(
     z.object({

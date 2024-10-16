@@ -265,7 +265,6 @@ const getAllFarmerOrders = async (req, reply) => {
   }
 };
 
-// outgoing order controller functions
 const createOutgoingOrder = async (req, reply) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -273,15 +272,32 @@ const createOutgoingOrder = async (req, reply) => {
   try {
     const orders = req.body;
     const bulkOps = [];
-
     const { id } = req.params;
-
     const relatedOrders = [];
 
-    // Prepare bulk operations for all orders
-    for (const { orderId, variety, bagUpdates } of orders) {
+    // Object to accumulate quantities of the same bag size
+    const bagSizeMap = {};
+
+    let variety = ""; // To store the common variety for the outgoing order
+
+    for (const { orderId, variety: currentVariety, bagUpdates } of orders) {
+      // Track related order IDs
       relatedOrders.push(orderId);
+
+      // Store the variety (assuming all orders have the same variety)
+      variety = currentVariety;
+
+      // Iterate through each bag update
       bagUpdates.forEach((update) => {
+        const { size, quantityToRemove } = update;
+
+        // Accumulate quantities for each size
+        if (bagSizeMap[size]) {
+          bagSizeMap[size] += quantityToRemove;
+        } else {
+          bagSizeMap[size] = quantityToRemove;
+        }
+
         bulkOps.push({
           updateOne: {
             filter: {
@@ -304,10 +320,8 @@ const createOutgoingOrder = async (req, reply) => {
       });
     }
 
-    // Execute the bulk write operations as part of the transaction
     const result = await Order.bulkWrite(bulkOps, { session });
 
-    // Now check if any variety has been fulfilled (currentQuantity === 0 for all sizes)
     const fulfilledOrders = await Promise.all(
       orders.map(async ({ orderId, variety }) => {
         const updatedOrder = await Order.findOne({ _id: orderId }).session(
@@ -334,52 +348,43 @@ const createOutgoingOrder = async (req, reply) => {
       })
     );
 
-    // Filter out any null values from fulfilledOrders
-    const filteredFulfilledOrders = fulfilledOrders.filter(Boolean);
-
-    // create new outgoing order
+    const outgoingOrderInfo = {
+      variety,
+      bagSizes: Object.entries(bagSizeMap).map(([size, quantity]) => ({
+        size,
+        quantity,
+      })),
+    };
 
     const deliveryVoucherNumber = await getDeliveryVoucherNumberHelper(
       req.storeAdmin._id
     );
+
     const outgoingOrder = new OutgoingOrder({
       coldStorageId: req.storeAdmin._id,
       farmerId: id,
       voucher: {
-        type: "DELIVERY",
+        type: "Delivery",
         voucherNumber: deliveryVoucherNumber,
       },
-      dateOfExtraction: new Date().toISOString(), // You can use the current date
-      orderDetails: orders.map(({ variety, bagUpdates }) => ({
-        variety,
-        bagSizes: bagUpdates.map((update) => ({
-          size: update.size,
-          quantity: update.quantityToRemove, // Add removed quantity to outgoing order
-        })),
-      })),
+      dateOfExtraction: new Date().toISOString(),
+      orderDetails: outgoingOrderInfo,
       relatedOrders,
     });
 
-    await outgoingOrder.save({ session }); // Save the new document in the same transaction
+    await outgoingOrder.save();
 
-    // Commit the transaction after both operations
     await session.commitTransaction();
-    session.endSession(); // End the session
+    await session.endSession();
 
-    // Return success response
     return reply.code(200).send({
-      status: "Success",
-      message:
-        "Bag quantities updated successfully, and outgoing order created",
-      result,
-      fulfilledOrders: filteredFulfilledOrders,
+      message: "Outgoing order processed successfully.",
+      outgoingOrder,
     });
   } catch (err) {
-    // Rollback the transaction in case of an error
     await session.abortTransaction();
-    session.endSession(); // End the session
+    session.endSession();
 
-    // Return failure response
     return reply.code(500).send({
       status: "Fail",
       message:

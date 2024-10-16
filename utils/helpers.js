@@ -60,7 +60,8 @@ export const getReceiptNumberHelper = async (storeAdminId) => {
     ]);
 
     // If no matching documents are found, result will be an empty array, so handle that case
-    return result.length > 0 ? result[0].count + 1 : 0;
+    const ReceiptVoucherNumber = result.length > 0 ? result[0].count : 0;
+    return ReceiptVoucherNumber + 1;
   } catch (err) {
     throw new Error("Some error occurred while getting receipt Number");
   }
