@@ -270,63 +270,62 @@ const createOutgoingOrder = async (req, reply) => {
   session.startTransaction();
 
   try {
+    req.log.info("Starting createOutgoingOrder process", {
+      storeAdminId: req.storeAdmin._id,
+      farmerId: req.params.id,
+    });
+
     const orders = req.body;
-    const bulkOps = [];
     const { id } = req.params;
+
+    req.log.info("Orders received", { ordersCount: orders.length });
+
+    const bulkOps = [];
     const relatedOrders = [];
-
-    // Object to accumulate quantities of the same bag size
-    const bagSizeMap = {};
-
-    let variety = ""; // To store the common variety for the outgoing order
+    const bagSizeMap = {}; // Accumulates quantities per bag size
+    let variety = ""; // Common variety for outgoing order
 
     for (const { orderId, variety: currentVariety, bagUpdates } of orders) {
-      // Track related order IDs
       relatedOrders.push(orderId);
-
-      // Store the variety (assuming all orders have the same variety)
       variety = currentVariety;
 
-      // Iterate through each bag update
+      req.log.info("Processing order", { orderId, variety });
+
       bagUpdates.forEach((update) => {
         const { size, quantityToRemove } = update;
 
-        // Accumulate quantities for each size
-        if (bagSizeMap[size]) {
-          bagSizeMap[size] += quantityToRemove;
-        } else {
-          bagSizeMap[size] = quantityToRemove;
-        }
+        // Accumulate bag size quantities
+        bagSizeMap[size] = (bagSizeMap[size] || 0) + quantityToRemove;
+
+        req.log.info("Bag update", { size, quantityToRemove });
 
         bulkOps.push({
           updateOne: {
             filter: {
               _id: orderId,
               "orderDetails.variety": variety,
-              "orderDetails.bagSizes.size": update.size,
+              "orderDetails.bagSizes.size": size,
             },
             update: {
               $inc: {
                 "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
-                  -update.quantityToRemove, // Decrease the current quantity
+                  -quantityToRemove,
               },
             },
-            arrayFilters: [
-              { "i.variety": variety }, // Filter for correct variety
-              { "j.size": update.size }, // Filter for correct bag size
-            ],
+            arrayFilters: [{ "i.variety": variety }, { "j.size": size }],
           },
         });
       });
     }
 
     const result = await Order.bulkWrite(bulkOps, { session });
+    req.log.info("Bulk write completed", { matchedCount: result.matchedCount });
 
     const fulfilledOrders = await Promise.all(
       orders.map(async ({ orderId, variety }) => {
         const updatedOrder = await Order.findOne({ _id: orderId }).session(
           session
-        ); // Query in the same transaction session
+        );
 
         const isFulfilled = updatedOrder.orderDetails
           .filter((detail) => detail.variety === variety)
@@ -334,17 +333,18 @@ const createOutgoingOrder = async (req, reply) => {
             detail.bagSizes.every((bag) => bag.quantity.currentQuantity === 0)
           );
 
-        // If all quantities for the variety are 0, mark the order as fulfilled
         if (isFulfilled) {
           await Order.updateOne(
             { _id: orderId },
             { $set: { fulfilled: true } },
             { session }
           );
-          return orderId; // Return the order ID if fulfilled
+          req.log.info("Order fulfilled", { orderId });
+          return orderId;
         }
 
-        return null; // No fulfillment for this order
+        req.log.info("Order not fulfilled", { orderId });
+        return null;
       })
     );
 
@@ -360,6 +360,8 @@ const createOutgoingOrder = async (req, reply) => {
       req.storeAdmin._id
     );
 
+    req.log.info("Generating delivery voucher", { deliveryVoucherNumber });
+
     const outgoingOrder = new OutgoingOrder({
       coldStorageId: req.storeAdmin._id,
       farmerId: id,
@@ -373,15 +375,24 @@ const createOutgoingOrder = async (req, reply) => {
     });
 
     await outgoingOrder.save();
+    req.log.info("Outgoing order saved", {
+      outgoingOrderId: outgoingOrder._id,
+    });
 
     await session.commitTransaction();
-    await session.endSession();
+    session.endSession();
+
+    req.log.info("Transaction committed successfully");
 
     return reply.code(200).send({
       message: "Outgoing order processed successfully.",
       outgoingOrder,
     });
   } catch (err) {
+    req.log.error("Error processing outgoing order", {
+      errorMessage: err.message,
+    });
+
     await session.abortTransaction();
     session.endSession();
 
