@@ -327,6 +327,8 @@ const createOutgoingOrder = async (req, reply) => {
           session
         );
 
+        console.log("Updated order is: ", updatedOrder);
+
         const isFulfilled = updatedOrder.orderDetails
           .filter((detail) => detail.variety === variety)
           .every((detail) =>
