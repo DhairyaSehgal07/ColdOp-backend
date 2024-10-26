@@ -22,6 +22,7 @@ import {
   updateFarmerOutgoingOrder,
   getAllFarmerOrders,
   deleteFarmerOutgoingOrder,
+  searchFarmers,
 } from "../controllers/store-adminOrderController.js";
 
 import { storeAdminProtect } from "../middleware/authMiddleware.js";
@@ -93,6 +94,13 @@ function storeAdminRoutes(fastify, options, done) {
     { preHandler: [storeAdminProtect] },
     getReceiptNumber
   );
+
+  fastify.get(
+    "/:id/farmers/search",
+    { preHandler: [storeAdminProtect] },
+    searchFarmers
+  );
+
   fastify.post(
     "/orders",
     { preHandler: [storeAdminProtect] },

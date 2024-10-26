@@ -1,6 +1,7 @@
 import Order from "../models/orderModel.js";
 import OutgoingOrder from "../models/outgoingOrderModel.js";
 import PaymentHistory from "../models/paymentHistoryModel.js";
+import Farmer from "../models/farmerModel.js";
 import { orderSchema } from "../utils/validationSchemas.js";
 import {
   getDeliveryVoucherNumberHelper,
@@ -105,6 +106,56 @@ const getDeliveryVoucherNumber = async (req, reply) => {
       status: "Fail",
       message: "Error occured while getting delivery voucher number",
       errorMessage: err.message,
+    });
+  }
+};
+
+// @desc Create new Incoming Order
+//@route POST/api/store-admin/orders
+//@access Private
+const searchFarmers = async (req, reply) => {
+  try {
+    // Accessing searchQuery directly from req.query
+    console.log("REQUEST QUERY IS: ", req.query.query);
+    const searchQuery = req.query.query; // Assuming the search query is passed as a parameter named 'q'
+    const { id } = req.params;
+
+    // MongoDB aggregation pipeline
+    const result = await Farmer.aggregate([
+      {
+        $search: {
+          index: "farmer-name",
+          autocomplete: {
+            query: searchQuery, // Using searchQuery directly
+            path: "name",
+            fuzzy: {
+              maxEdits: 2,
+              prefixLength: 1,
+            },
+          },
+        },
+      },
+      {
+        $match: {
+          registeredStoreAdmins: new mongoose.Types.ObjectId(`${id}`),
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          name: 1,
+          mobileNumber: 1,
+        },
+      },
+    ]);
+
+    reply.code(200).send(result);
+  } catch (err) {
+    // Improved error handling
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while searching farmers",
+      errorMessage: err.message || "An unexpected error occurred.",
     });
   }
 };
@@ -549,6 +600,7 @@ const deleteFarmerOutgoingOrder = async (req, reply) => {
 };
 
 export {
+  searchFarmers,
   createNewIncomingOrder,
   getFarmerIncomingOrders,
   getAllFarmerOrders,
