@@ -3,6 +3,7 @@ import OutgoingOrder from "../models/outgoingOrderModel.js";
 import PaymentHistory from "../models/paymentHistoryModel.js";
 import Farmer from "../models/farmerModel.js";
 import { orderSchema } from "../utils/validationSchemas.js";
+import { formatVarietyName } from "../utils/helpers.js";
 import {
   getDeliveryVoucherNumberHelper,
   getReceiptNumberHelper,
@@ -117,7 +118,7 @@ const searchFarmers = async (req, reply) => {
   try {
     // Accessing searchQuery directly from req.query
     console.log("REQUEST QUERY IS: ", req.query.query);
-    const searchQuery = req.query.query; // Assuming the search query is passed as a parameter named 'q'
+    const searchQuery = req.query.query;
     const { id } = req.params;
 
     // MongoDB aggregation pipeline
@@ -126,7 +127,7 @@ const searchFarmers = async (req, reply) => {
         $search: {
           index: "farmer-name",
           autocomplete: {
-            query: searchQuery, // Using searchQuery directly
+            query: searchQuery,
             path: "name",
             fuzzy: {
               maxEdits: 2,
@@ -171,10 +172,36 @@ const createNewIncomingOrder = async (req, reply) => {
     const { coldStorageId, farmerId, dateOfSubmission, orderDetails } =
       req.body;
 
+    // Format variety and bagSizes for each orderDetail item
+    const formattedOrderDetails = orderDetails.map((order) => {
+      // Format variety
+      const formattedVariety = order.variety
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/^./, (char) => char.toUpperCase());
+
+      // Format size in each bagSize
+      const formattedBagSizes = order.bagSizes.map((bag) => {
+        const formattedSize = bag.size
+          .toLowerCase()
+          .replace(/\s+/g, "-")
+          .replace(/^./, (char) => char.toUpperCase()); // Capitalize first letter
+
+        return { ...bag, size: formattedSize };
+      });
+
+      // Return modified order object with formatted variety and bagSizes
+      return {
+        ...order,
+        variety: formattedVariety,
+        bagSizes: formattedBagSizes,
+      };
+    });
+
     const receiptNumber = await getReceiptNumberHelper(req.storeAdmin._id);
 
     if (!receiptNumber) {
-      reply.code(500).send({
+      return reply.code(500).send({
         status: "Fail",
         message: "Failed to get RECEIPT number",
       });
@@ -189,10 +216,10 @@ const createNewIncomingOrder = async (req, reply) => {
       },
       fulfilled: false,
       dateOfSubmission,
-      orderDetails,
+      orderDetails: formattedOrderDetails, // Use the formatted orderDetails
     });
 
-    // save the new order
+    // Save the new order
     await newOrder.save();
 
     reply.code(201).send({
@@ -311,6 +338,46 @@ const getAllFarmerOrders = async (req, reply) => {
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while getting farmer orders",
+      errorMessage: err.message,
+    });
+  }
+};
+
+const filterOrdersByVariety = async (req, reply) => {
+  try {
+    const { varietyName, farmerId, coldStorageId } = req.body;
+
+    const filteredOrders = await Order.aggregate([
+      {
+        $match: {
+          farmerId: new mongoose.Types.ObjectId(farmerId),
+          coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+          orderDetails: {
+            $elemMatch: {
+              variety: varietyName,
+            },
+          },
+        },
+      },
+    ]);
+
+    if (!filteredOrders || filteredOrders.length === 0) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "No orders found with the specified variety",
+      });
+    }
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Orders filtered successfully",
+      data: filteredOrders,
+    });
+  } catch (err) {
+    console.error("Error occurred while filtering orders:", err);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Some error occurred while filtering orders",
       errorMessage: err.message,
     });
   }
@@ -602,6 +669,7 @@ const deleteFarmerOutgoingOrder = async (req, reply) => {
 export {
   searchFarmers,
   createNewIncomingOrder,
+  filterOrdersByVariety,
   getFarmerIncomingOrders,
   getAllFarmerOrders,
   createOutgoingOrder,

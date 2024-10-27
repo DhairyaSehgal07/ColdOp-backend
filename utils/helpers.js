@@ -90,3 +90,12 @@ export const getDeliveryVoucherNumberHelper = async (storeAdminId) => {
     throw new Error("Some error occurred while getting deliver voucher Number");
   }
 };
+
+export const formatVarietyName = (name) => {
+  return name
+    .split(" ") // Split the string by spaces
+    .map(
+      (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() // Capitalize each word
+    )
+    .join("-"); // Join the words with hyphens
+};

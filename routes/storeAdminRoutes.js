@@ -23,6 +23,7 @@ import {
   getAllFarmerOrders,
   deleteFarmerOutgoingOrder,
   searchFarmers,
+  filterOrdersByVariety,
 } from "../controllers/store-adminOrderController.js";
 
 import { storeAdminProtect } from "../middleware/authMiddleware.js";
@@ -118,6 +119,12 @@ function storeAdminRoutes(fastify, options, done) {
     "/farmers/:id/orders/incoming",
     { preHandler: [storeAdminProtect] },
     getFarmerIncomingOrders
+  );
+
+  fastify.post(
+    "/farmers/outgoing/filter",
+    { preHandler: [storeAdminProtect] },
+    filterOrdersByVariety
   );
 
   // OUTGOING ORDER ROUTES
