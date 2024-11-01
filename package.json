@@ -20,6 +20,7 @@
     "@fastify/view": "^9.0.0",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.0.3",
+    "date-fns": "^4.1.0",
     "dotenv": "^16.4.5",
     "ejs": "^3.1.9",
     "fastify": "^4.26.2",
@@ -30,6 +31,6 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.1.4"
   }
 }

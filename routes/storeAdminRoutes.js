@@ -39,6 +39,10 @@ import {
   handleResetPasswordSuccess,
 } from "../utils/store-admin/store-adminForgotPassword.js";
 import { deleteProfilePhoto } from "../utils/deleteImageFromCloudinary.js";
+import {
+  dayBookOrders,
+  testController,
+} from "../controllers/store-adminDayBookController.js";
 
 function storeAdminRoutes(fastify, options, done) {
   fastify.post("/register", registerStoreAdmin);
@@ -87,6 +91,14 @@ function storeAdminRoutes(fastify, options, done) {
     "/farmers/:id",
     { preHandler: [storeAdminProtect] },
     getFarmerById
+  );
+
+  // day book routes
+
+  fastify.get(
+    "/daybook/orders",
+    { preHandler: [storeAdminProtect] },
+    dayBookOrders
   );
 
   // ORDER ROUTES
@@ -152,6 +164,8 @@ function storeAdminRoutes(fastify, options, done) {
     { preHandler: [storeAdminProtect] },
     deleteFarmerOutgoingOrder
   );
+
+  fastify.get("/test", testController);
 
   done();
 }

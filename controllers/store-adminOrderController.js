@@ -9,7 +9,6 @@ import {
   getReceiptNumberHelper,
 } from "../utils/helpers.js";
 import mongoose from "mongoose";
-// Auth controllers
 
 // ORDER ROUTES CONTROLLER FUCNTIONS
 
@@ -143,7 +142,7 @@ const searchFarmers = async (req, reply) => {
       },
       {
         $project: {
-          _id: 0,
+          _id: 1,
           name: 1,
           mobileNumber: 1,
         },
@@ -486,7 +485,7 @@ const createOutgoingOrder = async (req, reply) => {
       coldStorageId: req.storeAdmin._id,
       farmerId: id,
       voucher: {
-        type: "Delivery",
+        type: "DELIVERY",
         voucherNumber: deliveryVoucherNumber,
       },
       dateOfExtraction: new Date().toISOString(),
