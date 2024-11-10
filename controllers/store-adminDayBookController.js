@@ -20,14 +20,14 @@ const dayBookOrders = async (req, reply) => {
             .limit(limit)
             .sort({ sortOrder })
             .select(
-              "_id , coldStorageId , farmerId , voucher, dateOfSubmission , orderDetails"
+              "_id  coldStorageId  farmerId  voucher dateOfSubmission  orderDetails"
             ),
           OutgoingOrder.find({})
             .skip(skip)
             .limit(limit)
             .sort({ createdAt: -1 })
             .select(
-              "_id, coldStorageId, farmerId, voucher, dateOfExtraction , orderDetails"
+              "_id coldStorageId  farmerId voucher dateOfExtraction orderDetails"
             ),
         ]);
 
@@ -55,7 +55,7 @@ const dayBookOrders = async (req, reply) => {
           .limit(limit)
           .sort({ sortOrder })
           .select(
-            "_id , coldStorageId , farmerId , voucher, dateOfSubmission , orderDetails"
+            "_id  coldStorageId  farmerId  voucher dateOfSubmission  orderDetails"
           );
         if (!incomingOrders || incomingOrders.length === 0) {
           return reply.code(200).send({
@@ -75,7 +75,7 @@ const dayBookOrders = async (req, reply) => {
           .limit(limit)
           .sort({ createdAt: -1 })
           .select(
-            "_id, coldStorageId, farmerId, voucher, dateOfExtraction , orderDetails"
+            "_id coldStorageId farmerId, voucher dateOfExtraction  orderDetails"
           );
         if (!outgoingOrders || outgoingOrders.length === 0) {
           return reply.code(200).send({
