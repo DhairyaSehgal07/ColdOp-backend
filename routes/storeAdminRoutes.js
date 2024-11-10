@@ -40,8 +40,8 @@ import {
 } from "../utils/store-admin/store-adminForgotPassword.js";
 import { deleteProfilePhoto } from "../utils/deleteImageFromCloudinary.js";
 import {
+  dayBookOrderController,
   dayBookOrders,
-  testController,
 } from "../controllers/store-adminDayBookController.js";
 
 function storeAdminRoutes(fastify, options, done) {
@@ -165,7 +165,7 @@ function storeAdminRoutes(fastify, options, done) {
     deleteFarmerOutgoingOrder
   );
 
-  fastify.get("/test", testController);
+  // fastify.get("/test", testController);
 
   done();
 }

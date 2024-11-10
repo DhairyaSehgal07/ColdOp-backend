@@ -7,6 +7,7 @@ import { formatVarietyName } from "../utils/helpers.js";
 import {
   getDeliveryVoucherNumberHelper,
   getReceiptNumberHelper,
+  formatDate,
 } from "../utils/helpers.js";
 import mongoose from "mongoose";
 
@@ -488,7 +489,7 @@ const createOutgoingOrder = async (req, reply) => {
         type: "DELIVERY",
         voucherNumber: deliveryVoucherNumber,
       },
-      dateOfExtraction: new Date().toISOString(),
+      dateOfExtraction: formatDate(new Date()),
       orderDetails: outgoingOrderInfo,
       relatedOrders,
     });
