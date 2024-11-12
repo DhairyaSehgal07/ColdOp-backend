@@ -18,10 +18,7 @@ import {
   createOutgoingOrder,
   getReceiptNumber,
   getFarmerIncomingOrders,
-  getFarmerOutgoingOrders,
-  updateFarmerOutgoingOrder,
   getAllFarmerOrders,
-  deleteFarmerOutgoingOrder,
   searchFarmers,
   filterOrdersByVariety,
 } from "../controllers/store-adminOrderController.js";
@@ -42,6 +39,7 @@ import { deleteProfilePhoto } from "../utils/deleteImageFromCloudinary.js";
 import {
   dayBookOrderController,
   dayBookOrders,
+  testController,
 } from "../controllers/store-adminDayBookController.js";
 
 function storeAdminRoutes(fastify, options, done) {
@@ -146,26 +144,7 @@ function storeAdminRoutes(fastify, options, done) {
     createOutgoingOrder
   );
 
-  // get farmer outgoing orders
-  fastify.post(
-    "/farmer-outgoing",
-    { preHandler: [storeAdminProtect] },
-    getFarmerOutgoingOrders
-  );
-
-  fastify.put(
-    "/farmer-outgoing",
-    { preHandler: [storeAdminProtect] },
-    updateFarmerOutgoingOrder
-  );
-
-  fastify.delete(
-    "/farmer-outgoing",
-    { preHandler: [storeAdminProtect] },
-    deleteFarmerOutgoingOrder
-  );
-
-  // fastify.get("/test", testController);
+  fastify.get("/test", testController);
 
   done();
 }

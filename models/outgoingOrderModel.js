@@ -1,26 +1,35 @@
 import mongoose from "mongoose";
 
+// Updated bagSizeSchema with 'quantityRemoved' field
+const bagSizeSchema = new mongoose.Schema({
+  _id: false,
+  size: {
+    type: String,
+    required: true,
+  },
+  quantityRemoved: {
+    // Updated field name from 'quantityToBeRemoved' to 'quantityRemoved'
+    type: Number,
+    required: true,
+  },
+});
+
 const orderDetailsSchema = new mongoose.Schema({
   _id: false,
+  incomingOrder: {
+    // Store orderId for each order detail
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Order",
+    required: true,
+  },
   variety: {
     type: String,
     required: true,
   },
-  bagSizes: [
-    {
-      _id: false,
-      size: {
-        type: String,
-        required: true,
-      },
-      quantity: {
-        type: Number,
-        required: true,
-      },
-    },
-  ],
+  bagSizes: [bagSizeSchema], // Use bagSizeSchema to hold multiple bag sizes for each order
 });
 
+// Updated outgoing order schema
 const outgoingOrderSchema = new mongoose.Schema(
   {
     coldStorageId: {
@@ -48,16 +57,8 @@ const outgoingOrderSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    orderDetails: [orderDetailsSchema],
-
-    // Add the new array of orderModel references
-    relatedOrders: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Order",
-        required: true,
-      },
-    ],
+    orderDetails: [orderDetailsSchema], // Store the order details with orderId, variety, and bag sizes as requested
+    incomingOrderDetails: [],
   },
   { timestamps: true }
 );

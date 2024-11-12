@@ -75,7 +75,7 @@ const dayBookOrders = async (req, reply) => {
           .limit(limit)
           .sort({ createdAt: -1 })
           .select(
-            "_id coldStorageId farmerId, voucher dateOfExtraction  orderDetails"
+            "_id coldStorageId incomingOrderDetails farmerId, voucher dateOfExtraction  orderDetails"
           );
         if (!outgoingOrders || outgoingOrders.length === 0) {
           return reply.code(200).send({
@@ -109,4 +109,30 @@ const dayBookOrders = async (req, reply) => {
 
 const dayBookOrderController = async (req, reply) => {};
 
-export { dayBookOrders, dayBookOrderController };
+const testController = async (req, reply) => {
+  try {
+    const outgoingOrders = await OutgoingOrder.find()
+      .select("voucher dateOfExtraction orderDetails ")
+      .populate({
+        path: "orderDetails.incomingOrder", // Populate the orderId inside orderDetails
+        model: "Order",
+        select: "voucher.voucherNumber dateOfSubmission orderDetails",
+      })
+      .exec();
+
+    // Respond with populated data
+    reply.status(200).send({
+      status: "Success",
+      data: outgoingOrders,
+    });
+  } catch (error) {
+    console.error("Error in testController:", error);
+    reply.status(500).send({
+      status: "Error",
+      message:
+        "Failed to retrieve outgoing orders with populated order details.",
+    });
+  }
+};
+
+export { dayBookOrders, dayBookOrderController, testController };

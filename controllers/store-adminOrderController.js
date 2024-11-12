@@ -1,9 +1,7 @@
 import Order from "../models/orderModel.js";
 import OutgoingOrder from "../models/outgoingOrderModel.js";
-import PaymentHistory from "../models/paymentHistoryModel.js";
 import Farmer from "../models/farmerModel.js";
 import { orderSchema } from "../utils/validationSchemas.js";
-import { formatVarietyName } from "../utils/helpers.js";
 import {
   getDeliveryVoucherNumberHelper,
   getReceiptNumberHelper,
@@ -398,53 +396,97 @@ const createOutgoingOrder = async (req, reply) => {
 
     req.log.info("Orders received", { ordersCount: orders.length });
 
+    const orderIds = orders.map((order) => order.orderId);
+
+    // Initialize bulk operations array
     const bulkOps = [];
-    const relatedOrders = [];
-    const bagSizeMap = {}; // Accumulates quantities per bag size
     let variety = ""; // Common variety for outgoing order
 
-    for (const { orderId, variety: currentVariety, bagUpdates } of orders) {
-      relatedOrders.push(orderId);
-      variety = currentVariety;
+    // Prepare outgoing order details in the new format
+    const outgoingOrderDetails = orders.map(
+      ({ orderId: incomingOrder, variety: currentVariety, bagUpdates }) => {
+        variety = currentVariety;
 
-      req.log.info("Processing order", { orderId, variety });
+        req.log.info("Processing order", { incomingOrder, variety });
 
-      bagUpdates.forEach((update) => {
-        const { size, quantityToRemove } = update;
+        // Process bag updates for bulk operations and outgoing order details
+        const bagDetails = bagUpdates.map((update) => {
+          const { size, quantityToRemove } = update;
+          req.log.info("Bag update", { size, quantityToRemove });
 
-        // Accumulate bag size quantities
-        bagSizeMap[size] = (bagSizeMap[size] || 0) + quantityToRemove;
-
-        req.log.info("Bag update", { size, quantityToRemove });
-
-        bulkOps.push({
-          updateOne: {
-            filter: {
-              _id: orderId,
-              "orderDetails.variety": variety,
-              "orderDetails.bagSizes.size": size,
-            },
-            update: {
-              $inc: {
-                "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
-                  -quantityToRemove,
+          // Prepare bulk operation for updating quantities in the source order
+          bulkOps.push({
+            updateOne: {
+              filter: {
+                _id: incomingOrder,
+                "orderDetails.variety": variety,
+                "orderDetails.bagSizes.size": size,
               },
+              update: {
+                $inc: {
+                  "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
+                    -quantityToRemove,
+                },
+              },
+              arrayFilters: [{ "i.variety": variety }, { "j.size": size }],
             },
-            arrayFilters: [{ "i.variety": variety }, { "j.size": size }],
-          },
-        });
-      });
-    }
+          });
 
+          return { size, quantityRemoved: quantityToRemove }; // Updated field name here
+        });
+
+        // Return the order detail in the desired structure
+        return {
+          incomingOrder, // Changed from orderId to incomingOrder
+          variety,
+          bagSizes: bagDetails,
+        };
+      }
+    );
+
+    // Execute bulk write for inventory updates
     const result = await Order.bulkWrite(bulkOps, { session });
     req.log.info("Bulk write completed", { matchedCount: result.matchedCount });
 
-    const fulfilledOrders = await Promise.all(
-      orders.map(async ({ orderId, variety }) => {
-        const updatedOrder = await Order.findOne({ _id: orderId }).session(
-          session
+    // Refetch updated incoming order details
+    const incomingOrderDetails = await Order.find({
+      _id: { $in: orderIds },
+    })
+      .session(session)
+      .select("-createdAt -updatedAt -fulfilled -coldStorageId -farmerId")
+      .lean();
+
+    // Filter incoming order details to only include the bagSizes with removed quantities
+    const filteredIncomingOrderDetails = incomingOrderDetails.map((order) => {
+      const relevantOrder = orders.find(
+        (o) => o.orderId === order._id.toString()
+      );
+
+      const filteredOrderDetails = order.orderDetails.map((detail) => {
+        const relevantBagSizes = relevantOrder.bagUpdates.map(
+          (update) => update.size
         );
 
+        return {
+          ...detail,
+          bagSizes: detail.bagSizes.filter((bag) =>
+            relevantBagSizes.includes(bag.size)
+          ),
+        };
+      });
+
+      return {
+        ...order,
+        orderDetails: filteredOrderDetails,
+      };
+    });
+
+    // Check if each order is fulfilled and update accordingly
+    const fulfilledOrders = await Promise.all(
+      orders.map(async ({ orderId: incomingOrder, variety }) => {
+        const updatedOrder = await Order.findOne({
+          _id: incomingOrder,
+        }).session(session);
         console.log("Updated order is: ", updatedOrder);
 
         const isFulfilled = updatedOrder.orderDetails
@@ -455,33 +497,25 @@ const createOutgoingOrder = async (req, reply) => {
 
         if (isFulfilled) {
           await Order.updateOne(
-            { _id: orderId },
+            { _id: incomingOrder },
             { $set: { fulfilled: true } },
             { session }
           );
-          req.log.info("Order fulfilled", { orderId });
-          return orderId;
+          req.log.info("Order fulfilled", { incomingOrder });
+          return incomingOrder;
         }
 
-        req.log.info("Order not fulfilled", { orderId });
+        req.log.info("Order not fulfilled", { incomingOrder });
         return null;
       })
     );
 
-    const outgoingOrderInfo = {
-      variety,
-      bagSizes: Object.entries(bagSizeMap).map(([size, quantity]) => ({
-        size,
-        quantity,
-      })),
-    };
-
     const deliveryVoucherNumber = await getDeliveryVoucherNumberHelper(
       req.storeAdmin._id
     );
-
     req.log.info("Generating delivery voucher", { deliveryVoucherNumber });
 
+    // Create the outgoing order document with the new format
     const outgoingOrder = new OutgoingOrder({
       coldStorageId: req.storeAdmin._id,
       farmerId: id,
@@ -490,8 +524,8 @@ const createOutgoingOrder = async (req, reply) => {
         voucherNumber: deliveryVoucherNumber,
       },
       dateOfExtraction: formatDate(new Date()),
-      orderDetails: outgoingOrderInfo,
-      relatedOrders,
+      orderDetails: outgoingOrderDetails,
+      incomingOrderDetails: filteredIncomingOrderDetails,
     });
 
     await outgoingOrder.save();
@@ -525,147 +559,6 @@ const createOutgoingOrder = async (req, reply) => {
   }
 };
 
-// get outgoing orders for previous orders screen
-const getFarmerOutgoingOrders = async (req, reply) => {
-  try {
-    const storeAdminId = req.storeAdmin._id;
-    const { farmerId } = req.body;
-
-    // Query the OutgoingOrder collection using Mongoose
-    const outgoingOrders = await OutgoingOrder.find({
-      storeAdminId: storeAdminId,
-      farmerId: farmerId,
-    }).exec();
-
-    // Check if any orders were found
-    if (outgoingOrders.length === 0) {
-      return reply.code(200).send({
-        status: "Fail",
-        message: "No outgoing orders found for the current farmer",
-      });
-    }
-
-    // Send the outgoing orders as a response
-    reply.code(200).send({
-      status: "Success",
-      outgoingOrders: outgoingOrders,
-    });
-  } catch (err) {
-    console.log(err.message);
-    reply.code(500).send({
-      status: "Fail",
-      message: "Error occurred while getting outgoing orders",
-    });
-  }
-};
-
-const updateFarmerOutgoingOrder = async (req, reply) => {
-  try {
-    const { orderId, amountPaid, currentDate } = req.body;
-
-    if (amountPaid <= 0) {
-      reply.code(500).send({
-        status: "Fail",
-        message: "Please enter a valid amount",
-      });
-    }
-    if (amountPaid == 1 / 0) {
-      reply.code(500).send({
-        status: "Fail",
-        message: "Inavalid input",
-      });
-    }
-
-    // Validate input data
-    if (!orderId || !amountPaid || !currentDate) {
-      return reply.code(400).send({
-        status: "Fail",
-        message: "Invalid input data",
-      });
-    }
-
-    const foundOrder = await OutgoingOrder.findById(orderId);
-
-    // Check if the order exists
-    if (!foundOrder) {
-      return reply.code(404).send({
-        status: "Fail",
-        message: "Order not found",
-      });
-    }
-
-    // Update order details
-    foundOrder.amountPaid = foundOrder.amountPaid + parseFloat(amountPaid);
-    foundOrder.date = currentDate;
-
-    // Save the updated order
-    await foundOrder.save();
-
-    // Find existing payment history or create new if not exists
-    let paymentHistory = await PaymentHistory.findOne({
-      outgoingOrderId: orderId,
-    });
-
-    if (!paymentHistory) {
-      paymentHistory = new PaymentHistory({ outgoingOrderId: orderId });
-      paymentHistory.totalAmount = foundOrder.totalAmount;
-    }
-
-    // Create payment entry
-    const paymentEntry = {
-      amountPaid: parseFloat(amountPaid),
-      amountLeft: foundOrder.totalAmount - foundOrder.amountPaid, // Assuming totalAmount is available in foundOrder
-      date: currentDate,
-    };
-
-    // Add payment entry to payment history
-    paymentHistory.paymentEntries.push(paymentEntry);
-
-    // Save the payment history
-    await paymentHistory.save();
-
-    // Send success response
-    reply.code(200).send({
-      status: "Success",
-      updatedOrder: foundOrder,
-      paymentHistory: paymentHistory,
-    });
-  } catch (err) {
-    console.log(err.message);
-    reply.code(500).send({
-      status: "Fail",
-      message: "Failed to update outgoing order",
-    });
-  }
-};
-
-const deleteFarmerOutgoingOrder = async (req, reply) => {
-  try {
-    const { orderId } = req.body;
-
-    // Assuming you are using some ORM like Mongoose
-    const deletedOrder = await OutgoingOrder.findByIdAndDelete(orderId);
-
-    if (!deletedOrder) {
-      return reply.status(404).send({
-        status: "Fail",
-        message: "Order not found",
-      });
-    }
-
-    reply.send({
-      status: "Success",
-      message: "Order deleted successfully",
-    });
-  } catch (err) {
-    console.log(err.message);
-    reply.status(500).send({
-      status: "Fail",
-      message: "Some error occurred while deleting order",
-    });
-  }
-};
-
 export {
   searchFarmers,
   createNewIncomingOrder,
@@ -674,7 +567,4 @@ export {
   getAllFarmerOrders,
   createOutgoingOrder,
   getReceiptNumber,
-  getFarmerOutgoingOrders,
-  updateFarmerOutgoingOrder,
-  deleteFarmerOutgoingOrder,
 };
