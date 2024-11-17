@@ -10,12 +10,12 @@ const userVerificationSchema = mongoose.Schema(
     mobileOtp: { type: String, default: "" },
     mobileOtpTimestamp: { type: Date, default: "" },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const UserVerification = mongoose.model(
   "UserVerification",
-  userVerificationSchema
+  userVerificationSchema,
 );
 
 export default UserVerification;

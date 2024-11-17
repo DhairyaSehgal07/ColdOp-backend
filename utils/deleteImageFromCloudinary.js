@@ -21,7 +21,7 @@ const deleteProfilePhoto = async (req, reply) => {
     // Delete the image from Cloudinary using promises
     const result = await cloudinary.v2.api.delete_resources(
       [prefixedPublicId], // Use the prefixed public ID
-      { type: "upload", resource_type: "image" }
+      { type: "upload", resource_type: "image" },
     );
 
     // Send the response back after successful deletion

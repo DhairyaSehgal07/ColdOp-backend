@@ -60,7 +60,7 @@ const outgoingOrderSchema = new mongoose.Schema(
     orderDetails: [orderDetailsSchema], // Store the order details with orderId, variety, and bag sizes as requested
     incomingOrderDetails: [],
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const OutgoingOrder = mongoose.model("OutgoingOrder", outgoingOrderSchema);

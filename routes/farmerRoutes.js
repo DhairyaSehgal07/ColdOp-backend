@@ -1,28 +1,28 @@
 import {
-  registerFarmer,
-  loginFarmer,
-  getRegisteredStoreAdmins,
-  updateFarmerProfile,
-  logoutFarmer,
-  getStoreAdminDetails,
-  getAllColdStorages,
-  getStoreAdminRequests,
   acceptRequest,
+  getAllColdStorages,
+  getRegisteredStoreAdmins,
+  getStoreAdminDetails,
+  getStoreAdminRequests,
+  loginFarmer,
+  logoutFarmer,
+  registerFarmer,
   rejectRequest,
+  updateFarmerProfile,
 } from "../controllers/farmerController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
 import { deleteProfilePhoto } from "../utils/deleteImageFromCloudinary.js";
 import {
   forgotPasswordGetMobile,
+  handleResetPasswordSuccess,
   resetPasswordForm,
   updatePassword,
-  handleResetPasswordSuccess,
 } from "../utils/farmers/forgotPassword.js";
 import {
   mobileOtpHandler,
-  verifyFarmerMobile,
   resendMobileOtpHandler,
+  verifyFarmerMobile,
 } from "../utils/farmers/mobileVerification.js";
 
 function userRoutes(fastify, options, done) {
@@ -34,7 +34,7 @@ function userRoutes(fastify, options, done) {
   fastify.get(
     "/registered-store-admins",
     { preHandler: [protect] },
-    getRegisteredStoreAdmins
+    getRegisteredStoreAdmins,
   );
   fastify.put("/profile", { preHandler: [protect] }, updateFarmerProfile);
 
@@ -60,14 +60,14 @@ function userRoutes(fastify, options, done) {
   fastify.get(
     "/all-cold-storages",
     { preHandler: [protect] },
-    getAllColdStorages
+    getAllColdStorages,
   );
 
   // get register requests from store-admins
   fastify.get(
     "/all-requests",
     { preHandler: [protect] },
-    getStoreAdminRequests
+    getStoreAdminRequests,
   );
   fastify.post("/requests/accept", { preHandler: [protect] }, acceptRequest);
   fastify.delete("/requests/reject", { preHandler: [protect] }, rejectRequest);

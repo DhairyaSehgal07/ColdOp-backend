@@ -381,6 +381,57 @@ const filterOrdersByVariety = async (req, reply) => {
   }
 };
 
+const getVarietyAvailableForFarmer = async (req, reply) => {
+  try {
+    const coldStorageId = req.storeAdmin._id;
+    const farmerId = req.params.id;
+
+    if (!farmerId || !coldStorageId) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "farmerId and coldStorageId are required",
+      });
+    }
+
+    const varieties = await Order.aggregate([
+      {
+        $match: {
+          farmerId: new mongoose.Types.ObjectId("66eab27610eb613c2efca3bc"),
+          coldStorageId: new mongoose.Types.ObjectId(
+            "66e1f22d782bbd67d3446805"
+          ),
+        },
+      },
+      {
+        $unwind: "$orderDetails",
+      },
+      {
+        $group: {
+          _id: "$orderDetails.variety",
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          variety: "$_id",
+        },
+      },
+    ]);
+
+    reply.code(200).send({
+      status: "Success",
+      varieties: varieties.map((v) => v.variety),
+    });
+  } catch (err) {
+    req.log.error("Some error occurred while getting varieties", err);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Some error occurred while getting available varieties",
+      errorMessage: err.message,
+    });
+  }
+};
+
 const createOutgoingOrder = async (req, reply) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -567,4 +618,5 @@ export {
   getAllFarmerOrders,
   createOutgoingOrder,
   getReceiptNumber,
+  getVarietyAvailableForFarmer,
 };

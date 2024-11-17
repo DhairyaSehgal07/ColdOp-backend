@@ -2,7 +2,8 @@
 
 ## Description
 
-A more detailed description of your project, its purpose, and the problem it solves.
+A more detailed description of your project, its purpose, and the problem it
+solves.
 
 ## Installation
 
@@ -40,7 +41,8 @@ Instructions for running and using your project.
 
 ### API Endpoints
 
-Describe the available endpoints, including their methods, paths, and expected inputs/outputs.
+Describe the available endpoints, including their methods, paths, and expected
+inputs/outputs.
 
 - **GET /api/example**
 
@@ -53,19 +55,14 @@ Describe the available endpoints, including their methods, paths, and expected i
   Explain any configuration options, environment variables, or settings.
 
 Create a `.env` file in the root directory and add the following variables:
-NODE_ENV = development
-PORT = 5000
-MONGO_URI= your_mongo_uri
-JWT_SECRET= your_jwt_secret
-TWILIO_ACCOUNT_SID= your_twilio_sid
-TWILIO_AUTH_TOKEN = your_twilio_auth_token
-TWILIO_PHONE_NUMBER=your_twilio_phone_number
-DOMAIN = http://localhost:5000/api/farmers
-STORE_ADMIN_DOMAIN=http:localhost:5000/api/store-admin
-SESSION_SECRET = your_session_secret
-CLOUDINARY_CLOUD_NAME = your_cloudinary_name
-CLOUDINARY_API_KEY= your_cloudinary_api_key
-CLOUDINARY_API_SECRET= your_cloudinary_api_secret
+NODE_ENV = development PORT = 5000 MONGO_URI= your_mongo_uri JWT_SECRET=
+your_jwt_secret TWILIO_ACCOUNT_SID= your_twilio_sid TWILIO_AUTH_TOKEN =
+your_twilio_auth_token TWILIO_PHONE_NUMBER=your_twilio_phone_number DOMAIN =
+http://localhost:5000/api/farmers
+STORE_ADMIN_DOMAIN=http:localhost:5000/api/store-admin SESSION_SECRET =
+your_session_secret CLOUDINARY_CLOUD_NAME = your_cloudinary_name
+CLOUDINARY_API_KEY= your_cloudinary_api_key CLOUDINARY_API_SECRET=
+your_cloudinary_api_secret
 
 ### 6. Contributing
 
@@ -81,5 +78,5 @@ Guidelines for contributing to your project.
 
 ## Acknowledgements
 
-Thanks to my friends Gourish Narang and Anurag Anand who helped me
-in building this project
+Thanks to my friends Gourish Narang and Anurag Anand who helped me in building
+this project

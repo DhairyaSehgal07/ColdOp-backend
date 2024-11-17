@@ -62,7 +62,7 @@ const farmerSchema = mongoose.Schema(
     forgotPasswordToken: String,
     forgotPasswordTokenExpiry: Date,
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const Farmer = mongoose.model("Farmers", farmerSchema);

@@ -87,7 +87,7 @@ const start = async () => {
   try {
     await app.listen({ port: PORT, host: "0.0.0.0" });
     app.log.info(
-      `Server started in ${process.env.NODE_ENV} mode on port ${PORT}`
+      `Server started in ${process.env.NODE_ENV} mode on port ${PORT}`,
     );
     // console.log(
     //   `Server started in ${process.env.NODE_ENV} mode on port ${PORT}`

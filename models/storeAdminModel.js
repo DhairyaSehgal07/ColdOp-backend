@@ -68,7 +68,7 @@ const storeAdminSchema = mongoose.Schema(
     forgotPasswordToken: String,
     forgotPasswordTokenExpiry: Date,
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const StoreAdmin = mongoose.model("StoreAdmin", storeAdminSchema);

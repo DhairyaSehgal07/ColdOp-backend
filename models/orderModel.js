@@ -75,7 +75,7 @@ const orderSchema = new mongoose.Schema(
     },
     orderDetails: [orderDetailsSchema],
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Define the model

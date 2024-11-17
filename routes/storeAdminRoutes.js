@@ -1,39 +1,40 @@
 import {
-  registerStoreAdmin,
+  deleteFarmer,
+  getFarmerById,
+  getFarmers,
+  getNumberOfStoreAdmins,
+  getStoreAdminProfile,
   loginStoreAdmin,
   logoutStoreAdmin,
-  getStoreAdminProfile,
-  updateStoreAdminProfile,
-  getNumberOfStoreAdmins,
-  sendRequestToFarmer,
-  getFarmers,
-  getFarmerById,
-  updateFarmer,
-  deleteFarmer,
   quickRegisterFarmer,
+  registerStoreAdmin,
+  sendRequestToFarmer,
+  updateFarmer,
+  updateStoreAdminProfile,
 } from "../controllers/store-adminAuthController.js";
 
 import {
   createNewIncomingOrder,
   createOutgoingOrder,
-  getReceiptNumber,
-  getFarmerIncomingOrders,
-  getAllFarmerOrders,
-  searchFarmers,
   filterOrdersByVariety,
+  getAllFarmerOrders,
+  getFarmerIncomingOrders,
+  getReceiptNumber,
+  getVarietyAvailableForFarmer,
+  searchFarmers,
 } from "../controllers/store-adminOrderController.js";
 
 import { storeAdminProtect } from "../middleware/authMiddleware.js";
 import {
   mobileOtpHandler,
-  verifyStoreAdminMobile,
   resendOtpHandler,
+  verifyStoreAdminMobile,
 } from "../utils/store-admin/storeAdminMobileVerification.js";
 import {
   forgotPasswordGetMobile,
+  handleResetPasswordSuccess,
   resetPasswordForm,
   updatePassword,
-  handleResetPasswordSuccess,
 } from "../utils/store-admin/store-adminForgotPassword.js";
 import { deleteProfilePhoto } from "../utils/deleteImageFromCloudinary.js";
 import {
@@ -138,6 +139,12 @@ function storeAdminRoutes(fastify, options, done) {
   );
 
   // OUTGOING ORDER ROUTES
+  fastify.get(
+    "/farmers/:id/outgoing/varities",
+    { preHandler: [storeAdminProtect] },
+    getVarietyAvailableForFarmer
+  );
+
   fastify.post(
     "/farmers/:id/outgoing",
     { preHandler: [storeAdminProtect] },
