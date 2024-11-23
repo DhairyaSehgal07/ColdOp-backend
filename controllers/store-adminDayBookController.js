@@ -19,15 +19,25 @@ const dayBookOrders = async (req, reply) => {
             .skip(skip)
             .limit(limit)
             .sort({ sortOrder })
+            .populate({
+              path: "farmerId",
+              model: Farmer,
+              select: "_id name", // Select only the _id and name
+            })
             .select(
-              "_id  coldStorageId  farmerId  voucher dateOfSubmission  orderDetails"
+              "_id coldStorageId farmerId voucher dateOfSubmission orderDetails"
             ),
           OutgoingOrder.find({})
             .skip(skip)
             .limit(limit)
             .sort({ createdAt: -1 })
+            .populate({
+              path: "farmerId",
+              model: Farmer,
+              select: "_id name", // Select only the _id and name
+            })
             .select(
-              "_id coldStorageId  farmerId voucher dateOfExtraction orderDetails"
+              "_id coldStorageId incomingOrderDetails farmerId voucher dateOfExtraction orderDetails"
             ),
         ]);
 
@@ -54,8 +64,13 @@ const dayBookOrders = async (req, reply) => {
           .skip(skip)
           .limit(limit)
           .sort({ sortOrder })
+          .populate({
+            path: "farmerId",
+            model: Farmer,
+            select: "_id name", // Select only the _id and name
+          })
           .select(
-            "_id  coldStorageId  farmerId  voucher dateOfSubmission  orderDetails"
+            "_id coldStorageId farmerId voucher dateOfSubmission orderDetails"
           );
         if (!incomingOrders || incomingOrders.length === 0) {
           return reply.code(200).send({
@@ -74,8 +89,13 @@ const dayBookOrders = async (req, reply) => {
           .skip(skip)
           .limit(limit)
           .sort({ createdAt: -1 })
+          .populate({
+            path: "farmerId",
+            model: Farmer,
+            select: "_id name", // Select only the _id and name
+          })
           .select(
-            "_id coldStorageId incomingOrderDetails farmerId, voucher dateOfExtraction  orderDetails"
+            "_id coldStorageId incomingOrderDetails farmerId voucher dateOfExtraction orderDetails"
           );
         if (!outgoingOrders || outgoingOrders.length === 0) {
           return reply.code(200).send({
