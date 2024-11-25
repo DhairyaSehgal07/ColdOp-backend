@@ -8,7 +8,6 @@ const bagSizeSchema = new mongoose.Schema({
     required: true,
   },
   quantityRemoved: {
-    // Updated field name from 'quantityToBeRemoved' to 'quantityRemoved'
     type: Number,
     required: true,
   },
@@ -16,16 +15,60 @@ const bagSizeSchema = new mongoose.Schema({
 
 const orderDetailsSchema = new mongoose.Schema({
   _id: false,
-  incomingOrder: {
-    // Store orderId for each order detail
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Order",
-    required: true,
-  },
+
   variety: {
     type: String,
     required: true,
   },
+
+  incomingOrder: {
+    _id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Order",
+      required: true,
+    },
+    location: {
+      floor: {
+        type: String,
+        required: true,
+      },
+      row: {
+        type: String,
+        required: true,
+      },
+      chamber: {
+        type: String,
+        required: true,
+      },
+    },
+    voucher: {
+      type: {
+        type: String,
+        required: true,
+      },
+      voucherNumber: {
+        type: Number,
+        required: true,
+      },
+    },
+    incomingBagSizes: [
+      {
+        size: {
+          type: String,
+          required: true,
+        },
+        currentQuantity: {
+          type: Number,
+          required: true,
+        },
+        initialQuantity: {
+          type: Number,
+          required: true,
+        },
+      },
+    ],
+  },
+
   bagSizes: [bagSizeSchema], // Use bagSizeSchema to hold multiple bag sizes for each order
 });
 
@@ -57,10 +100,9 @@ const outgoingOrderSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    orderDetails: [orderDetailsSchema], // Store the order details with orderId, variety, and bag sizes as requested
-    incomingOrderDetails: [],
+    orderDetails: [orderDetailsSchema],
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 const OutgoingOrder = mongoose.model("OutgoingOrder", outgoingOrderSchema);

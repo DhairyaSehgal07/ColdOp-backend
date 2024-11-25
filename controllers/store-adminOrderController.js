@@ -447,7 +447,57 @@ const createOutgoingOrder = async (req, reply) => {
 
     req.log.info("Orders received", { ordersCount: orders.length });
 
-    const orderIds = orders.map((order) => order.orderId);
+    // Fetch incomingOrders
+    const incomingOrders = await Promise.all(
+      orders.map(async (order) => {
+        const { orderId, variety, bagUpdates } = order;
+
+        // Fetch the order details from the database
+        const fetchedOrder = await Order.findById(orderId).lean();
+
+        if (!fetchedOrder) {
+          throw new Error(`Order with ID ${orderId} not found`);
+        }
+
+        // Find the specific detail matching the variety
+        const matchingDetail = fetchedOrder.orderDetails.find(
+          (detail) => detail.variety === variety
+        );
+
+        if (!matchingDetail) {
+          throw new Error(
+            `Variety ${variety} not found in Order ID ${orderId}`
+          );
+        }
+
+        // Filter bagSizes based on provided sizes in req.body
+        const filteredBagSizes = matchingDetail.bagSizes.filter((bag) =>
+          bagUpdates.some((update) => update.size === bag.size)
+        );
+
+        return {
+          _id: fetchedOrder._id,
+          location: matchingDetail.location, // Extract location from the matched variety
+          voucher: fetchedOrder.voucher,
+          orderDetails: [
+            {
+              ...matchingDetail,
+              incomingBagSizes: filteredBagSizes.map((bag) => ({
+                size: bag.size,
+                currentQuantity: bag.quantity.currentQuantity,
+                initialQuantity: bag.quantity.initialQuantity,
+              })),
+            },
+          ],
+        };
+      })
+    );
+
+    // Create a map for quick lookup
+    const incomingOrderMap = incomingOrders.reduce((acc, order) => {
+      acc[order._id] = order;
+      return acc;
+    }, {});
 
     // Initialize bulk operations array
     const bulkOps = [];
@@ -455,10 +505,10 @@ const createOutgoingOrder = async (req, reply) => {
 
     // Prepare outgoing order details in the new format
     const outgoingOrderDetails = orders.map(
-      ({ orderId: incomingOrder, variety: currentVariety, bagUpdates }) => {
+      ({ orderId, variety: currentVariety, bagUpdates }) => {
         variety = currentVariety;
 
-        req.log.info("Processing order", { incomingOrder, variety });
+        req.log.info("Processing order", { variety });
 
         // Process bag updates for bulk operations and outgoing order details
         const bagDetails = bagUpdates.map((update) => {
@@ -469,7 +519,6 @@ const createOutgoingOrder = async (req, reply) => {
           bulkOps.push({
             updateOne: {
               filter: {
-                _id: incomingOrder,
                 "orderDetails.variety": variety,
                 "orderDetails.bagSizes.size": size,
               },
@@ -483,88 +532,43 @@ const createOutgoingOrder = async (req, reply) => {
             },
           });
 
-          return { size, quantityRemoved: quantityToRemove }; // Updated field name here
+          return {
+            size,
+            quantityRemoved: quantityToRemove,
+          };
         });
 
-        // Return the order detail in the desired structure
+        // Add incomingOrder details from the map
+        const incomingOrder = incomingOrderMap[orderId];
+
+        // Fix: Ensure `currentQuantity` and `initialQuantity` are being mapped correctly
+        const incomingBagSizes = incomingOrder.orderDetails.flatMap((detail) =>
+          detail.incomingBagSizes.map((bag) => ({
+            size: bag.size,
+            currentQuantity: bag.currentQuantity, // Ensure this is mapped correctly
+            initialQuantity: bag.initialQuantity, // Ensure this is mapped correctly
+          }))
+        );
+
         return {
-          incomingOrder, // Changed from orderId to incomingOrder
           variety,
           bagSizes: bagDetails,
+          incomingOrder: {
+            _id: incomingOrder._id,
+            location: incomingOrder.location,
+            voucher: incomingOrder.voucher,
+            incomingBagSizes, // Make sure you're using the correct field names
+          },
         };
       }
     );
 
     // Execute bulk write for inventory updates
     const result = await Order.bulkWrite(bulkOps, { session });
-    req.log.info("Bulk write completed", { matchedCount: result.matchedCount });
-
-    // Refetch updated incoming order details
-    const incomingOrderDetails = await Order.find({
-      _id: { $in: orderIds },
-    })
-      .session(session)
-      .select("-createdAt -updatedAt -fulfilled -coldStorageId -farmerId")
-      .lean();
-
-    // Filter incoming order details to only include the bagSizes with removed quantities
-    const filteredIncomingOrderDetails = incomingOrderDetails.map((order) => {
-      const relevantOrder = orders.find(
-        (o) => o.orderId === order._id.toString()
-      );
-
-      const filteredOrderDetails = order.orderDetails.map((detail) => {
-        const relevantBagSizes = relevantOrder.bagUpdates.map(
-          (update) => update.size
-        );
-
-        return {
-          ...detail,
-          bagSizes: detail.bagSizes.filter((bag) =>
-            relevantBagSizes.includes(bag.size)
-          ),
-        };
-      });
-
-      return {
-        ...order,
-        orderDetails: filteredOrderDetails,
-      };
-    });
-
-    // Check if each order is fulfilled and update accordingly
-    const fulfilledOrders = await Promise.all(
-      orders.map(async ({ orderId: incomingOrder, variety }) => {
-        const updatedOrder = await Order.findOne({
-          _id: incomingOrder,
-        }).session(session);
-        console.log("Updated order is: ", updatedOrder);
-
-        const isFulfilled = updatedOrder.orderDetails
-          .filter((detail) => detail.variety === variety)
-          .every((detail) =>
-            detail.bagSizes.every((bag) => bag.quantity.currentQuantity === 0)
-          );
-
-        if (isFulfilled) {
-          await Order.updateOne(
-            { _id: incomingOrder },
-            { $set: { fulfilled: true } },
-            { session }
-          );
-          req.log.info("Order fulfilled", { incomingOrder });
-          return incomingOrder;
-        }
-
-        req.log.info("Order not fulfilled", { incomingOrder });
-        return null;
-      })
-    );
 
     const deliveryVoucherNumber = await getDeliveryVoucherNumberHelper(
       req.storeAdmin._id
     );
-    req.log.info("Generating delivery voucher", { deliveryVoucherNumber });
 
     // Create the outgoing order document with the new format
     const outgoingOrder = new OutgoingOrder({
@@ -576,7 +580,6 @@ const createOutgoingOrder = async (req, reply) => {
       },
       dateOfExtraction: formatDate(new Date()),
       orderDetails: outgoingOrderDetails,
-      incomingOrderDetails: filteredIncomingOrderDetails,
     });
 
     await outgoingOrder.save();
