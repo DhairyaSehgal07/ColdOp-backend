@@ -519,6 +519,7 @@ const createOutgoingOrder = async (req, reply) => {
           bulkOps.push({
             updateOne: {
               filter: {
+                _id: new mongoose.Types.ObjectId(orderId),
                 "orderDetails.variety": variety,
                 "orderDetails.bagSizes.size": size,
               },
