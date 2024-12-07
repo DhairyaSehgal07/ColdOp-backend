@@ -19,6 +19,7 @@ import {
   filterOrdersByVariety,
   getAllFarmerOrders,
   getFarmerIncomingOrders,
+  getFarmerStockSummary,
   getReceiptNumber,
   getVarietyAvailableForFarmer,
   searchFarmers,
@@ -139,6 +140,13 @@ function storeAdminRoutes(fastify, options, done) {
   );
 
   // OUTGOING ORDER ROUTES
+
+  fastify.get(
+    "/farmers/:id/stock-summary",
+    { preHandler: [storeAdminProtect] },
+    getFarmerStockSummary
+  );
+
   fastify.get(
     "/farmers/:id/outgoing/varities",
     { preHandler: [storeAdminProtect] },

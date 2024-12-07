@@ -11,6 +11,7 @@ import {
 import Farmer from "../models/farmerModel.js";
 import Request from "../models/requestModel.js";
 import generateUniqueAlphaNumeric from "../utils/farmers/generateUniqueAlphaNumeric.js";
+import { formatName } from "../utils/helpers.js";
 
 // @desc register a store-admin
 // @route POST/api/store-admin/register
@@ -686,6 +687,7 @@ const quickRegisterFarmer = async (req, reply) => {
 
     // Extract data from the request body
     const { name, address, mobileNumber, password, imageUrl } = req.body;
+    const formattedName = formatName(name);
 
     // Log farmer existence check
     req.log.info("Checking if farmer already exists", { mobileNumber });
@@ -721,7 +723,7 @@ const quickRegisterFarmer = async (req, reply) => {
     // Create the new farmer record
     req.log.info("Creating new farmer record", { name, mobileNumber });
     const farmer = await Farmer.create({
-      name,
+      name: formattedName,
       address,
       mobileNumber,
       password: hashedPassword,

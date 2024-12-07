@@ -91,11 +91,11 @@ export const getDeliveryVoucherNumberHelper = async (storeAdminId) => {
   }
 };
 
-export const formatVarietyName = (name) => {
+export const formatName = (name) => {
   return name
     .split(" ") // Split the string by spaces
     .map(
-      (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(), // Capitalize each word
+      (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() // Capitalize each word
     )
     .join("-"); // Join the words with hyphens
 };

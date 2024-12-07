@@ -291,48 +291,51 @@ const getAllFarmerOrders = async (req, reply) => {
     const storeAdminId = req.storeAdmin._id;
     const { id } = req.params;
 
-    // Log the start of the request
     console.log(
       `Fetching all orders for Farmer ID: ${id} by Store Admin ID: ${storeAdminId}`
     );
 
-    // Fetch both incoming orders and outgoing orders concurrently
+    // Fetch orders concurrently
     const [incomingOrders, outgoingOrders] = await Promise.all([
-      Order.find({ coldStorageId: storeAdminId, farmerId: id }), // Incoming orders
-      OutgoingOrder.find({ coldStorageId: storeAdminId, farmerId: id }), // Outgoing orders
+      Order.find({ coldStorageId: storeAdminId, farmerId: id })
+        .populate({
+          path: "farmerId",
+          model: Farmer,
+          select: "_id name", // Ensure data consistency with dayBookOrders
+        })
+        .select(
+          "_id coldStorageId farmerId voucher dateOfSubmission orderDetails"
+        ),
+      OutgoingOrder.find({ coldStorageId: storeAdminId, farmerId: id })
+        .populate({
+          path: "farmerId",
+          model: Farmer,
+          select: "_id name", // Ensure data consistency with dayBookOrders
+        })
+        .select(
+          "_id coldStorageId farmerId voucher dateOfExtraction orderDetails"
+        ),
     ]);
 
-    // Log the result of both queries
-    console.log(
-      `Incoming Orders: ${incomingOrders.length}, Outgoing Orders: ${outgoingOrders.length}`
-    );
-
-    // Combine the results from both models
     const allOrders = [...incomingOrders, ...outgoingOrders];
 
-    if (!allOrders || allOrders.length === 0) {
-      // Log when no orders are found
+    if (allOrders.length === 0) {
       console.log("No orders found for the given farmer.");
-
       return reply.code(200).send({
         status: "Fail",
         message: "Farmer doesn't have any orders",
+        data: [],
       });
     }
 
-    // Log the successful response
     console.log("All orders retrieved successfully.");
-
-    // Sending a success response with the combined orders
     reply.code(200).send({
       status: "Success",
+      message: "Orders retrieved successfully.",
       data: allOrders,
     });
   } catch (err) {
-    // Log the error
     console.error("Error getting farmer orders:", err);
-
-    // Sending error response
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while getting farmer orders",
@@ -396,10 +399,8 @@ const getVarietyAvailableForFarmer = async (req, reply) => {
     const varieties = await Order.aggregate([
       {
         $match: {
-          farmerId: new mongoose.Types.ObjectId("66eab27610eb613c2efca3bc"),
-          coldStorageId: new mongoose.Types.ObjectId(
-            "66e1f22d782bbd67d3446805"
-          ),
+          farmerId: new mongoose.Types.ObjectId(farmerId),
+          coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
         },
       },
       {
@@ -614,12 +615,94 @@ const createOutgoingOrder = async (req, reply) => {
   }
 };
 
+const getFarmerStockSummary = async (req, reply) => {
+  try {
+    const coldStorageId = req.storeAdmin._id;
+    const farmerId = req.params.id;
+
+    if (!farmerId || !coldStorageId) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "farmerId and coldStorageId are required",
+      });
+    }
+    // Find relevant orders
+    const incomingOrders = await Order.aggregate([
+      {
+        $match: {
+          farmerId: new mongoose.Types.ObjectId(farmerId),
+          coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+        },
+      },
+      {
+        $unwind: "$orderDetails",
+      },
+      {
+        $unwind: "$orderDetails.bagSizes",
+      },
+      {
+        $group: {
+          _id: null,
+          totalInitialQuantity: {
+            $sum: "$orderDetails.bagSizes.quantity.initialQuantity",
+          },
+        },
+      },
+    ]);
+
+    // Extract total initial quantity from incoming orders
+    const totalInitialQuantity = incomingOrders[0]?.totalInitialQuantity || 0;
+
+    // Find relevant outgoing orders
+    const outgoingOrders = await OutgoingOrder.aggregate([
+      {
+        $match: {
+          farmerId: new mongoose.Types.ObjectId(farmerId),
+          coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+        },
+      },
+      {
+        $unwind: "$orderDetails",
+      },
+      {
+        $unwind: "$orderDetails.bagSizes",
+      },
+      {
+        $group: {
+          _id: null,
+          totalQuantityRemoved: {
+            $sum: "$orderDetails.bagSizes.quantityRemoved",
+          },
+        },
+      },
+    ]);
+
+    // Extract total quantity removed from outgoing orders
+    const totalQuantityRemoved = outgoingOrders[0]?.totalQuantityRemoved || 0;
+
+    // Respond with the calculated totals
+    reply.code(200).send({
+      status: "Success",
+      totalInitialQuantity,
+      totalQuantityRemoved,
+    });
+  } catch (err) {
+    req.log.error("Error occurred while calculating totals", err);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while calculating totals",
+      errorMessage: err.message,
+    });
+  }
+};
+
 export {
   searchFarmers,
   createNewIncomingOrder,
   filterOrdersByVariety,
   getFarmerIncomingOrders,
   getAllFarmerOrders,
+  getFarmerStockSummary,
   createOutgoingOrder,
   getReceiptNumber,
   getVarietyAvailableForFarmer,
