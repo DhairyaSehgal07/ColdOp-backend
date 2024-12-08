@@ -31,7 +31,7 @@ const dayBookOrders = async (req, reply) => {
           OutgoingOrder.find({})
             .skip(skip)
             .limit(limit)
-            .sort({ createdAt: -1 })
+            .sort({ sortOrder })
             .populate({
               path: "farmerId",
               model: Farmer,
@@ -89,7 +89,7 @@ const dayBookOrders = async (req, reply) => {
         const outgoingOrders = await OutgoingOrder.find({})
           .skip(skip)
           .limit(limit)
-          .sort({ createdAt: -1 })
+          .sort({ sortOrder })
           .populate({
             path: "farmerId",
             model: Farmer,

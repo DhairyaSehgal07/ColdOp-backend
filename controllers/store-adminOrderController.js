@@ -295,22 +295,23 @@ const getAllFarmerOrders = async (req, reply) => {
       `Fetching all orders for Farmer ID: ${id} by Store Admin ID: ${storeAdminId}`
     );
 
-    // Fetch orders concurrently
     const [incomingOrders, outgoingOrders] = await Promise.all([
       Order.find({ coldStorageId: storeAdminId, farmerId: id })
+        .sort({ dateOfSubmission: -1 }) // Correctly specify the sorting field
         .populate({
           path: "farmerId",
           model: Farmer,
-          select: "_id name", // Ensure data consistency with dayBookOrders
+          select: "_id name",
         })
         .select(
           "_id coldStorageId farmerId voucher dateOfSubmission orderDetails"
         ),
       OutgoingOrder.find({ coldStorageId: storeAdminId, farmerId: id })
+        .sort({ dateOfExtraction: -1 }) // Correctly specify the sorting field
         .populate({
           path: "farmerId",
           model: Farmer,
-          select: "_id name", // Ensure data consistency with dayBookOrders
+          select: "_id name",
         })
         .select(
           "_id coldStorageId farmerId voucher dateOfExtraction orderDetails"
@@ -327,7 +328,6 @@ const getAllFarmerOrders = async (req, reply) => {
         data: [],
       });
     }
-
     console.log("All orders retrieved successfully.");
     reply.code(200).send({
       status: "Success",
