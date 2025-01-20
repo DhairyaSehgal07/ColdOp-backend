@@ -9,9 +9,11 @@ const dayBookOrders = async (req, reply) => {
     const { sortBy } = req.query;
     const { page } = req.query || 1;
     const { limit } = req.query || 1;
-    const sortOrder = sortBy === "latest" ? 1 : -1;
+    const sortOrder = sortBy === "latest" ? -1 : 1;
 
     const skip = (page - 1) * limit;
+
+    console.log("sort order is: ", sortOrder);
 
     switch (type) {
       case "all": {
@@ -19,7 +21,7 @@ const dayBookOrders = async (req, reply) => {
           Order.find({})
             .skip(skip)
             .limit(limit)
-            .sort({ sortOrder })
+            .sort({ createdAt: sortOrder })
             .populate({
               path: "farmerId",
               model: Farmer,
@@ -31,7 +33,7 @@ const dayBookOrders = async (req, reply) => {
           OutgoingOrder.find({})
             .skip(skip)
             .limit(limit)
-            .sort({ sortOrder })
+            .sort({ createdAt: sortOrder })
             .populate({
               path: "farmerId",
               model: Farmer,
@@ -64,7 +66,7 @@ const dayBookOrders = async (req, reply) => {
         const incomingOrders = await Order.find({})
           .skip(skip)
           .limit(limit)
-          .sort({ sortOrder })
+          .sort({ createdAt: sortOrder })
           .populate({
             path: "farmerId",
             model: Farmer,
@@ -89,7 +91,7 @@ const dayBookOrders = async (req, reply) => {
         const outgoingOrders = await OutgoingOrder.find({})
           .skip(skip)
           .limit(limit)
-          .sort({ sortOrder })
+          .sort({ createdAt: sortOrder })
           .populate({
             path: "farmerId",
             model: Farmer,

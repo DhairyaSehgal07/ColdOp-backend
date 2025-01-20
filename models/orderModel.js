@@ -27,18 +27,11 @@ const orderDetailsSchema = new mongoose.Schema({
     },
   ],
   location: {
-    floor: {
-      type: String,
-      required: true,
-    },
-    row: {
-      type: String,
-      required: true,
-    },
-    chamber: {
-      type: String,
-      required: true,
-    },
+    type: String, // Changed from object to string
+    required: true,
+  },
+  remarks: {
+    type: String, // Added the remarks field
   },
 });
 

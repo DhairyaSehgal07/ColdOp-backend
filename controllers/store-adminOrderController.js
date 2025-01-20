@@ -148,7 +148,15 @@ const searchFarmers = async (req, reply) => {
       },
     ]);
 
-    reply.code(200).send(result);
+    // Check if result is empty
+    if (result.length === 0) {
+      reply.code(404).send({
+        status: "Fail",
+        message: "No results found",
+      });
+    } else {
+      reply.code(200).send(result);
+    }
   } catch (err) {
     // Improved error handling
     reply.code(500).send({
@@ -304,7 +312,7 @@ const getAllFarmerOrders = async (req, reply) => {
           select: "_id name",
         })
         .select(
-          "_id coldStorageId farmerId voucher dateOfSubmission orderDetails"
+          "_id coldStorageId farmerId remarks voucher dateOfSubmission orderDetails"
         ),
       OutgoingOrder.find({ coldStorageId: storeAdminId, farmerId: id })
         .sort({ dateOfExtraction: -1 }) // Correctly specify the sorting field
@@ -314,7 +322,7 @@ const getAllFarmerOrders = async (req, reply) => {
           select: "_id name",
         })
         .select(
-          "_id coldStorageId farmerId voucher dateOfExtraction orderDetails"
+          "_id coldStorageId farmerId remarks voucher dateOfExtraction orderDetails"
         ),
     ]);
 
@@ -445,6 +453,11 @@ const createOutgoingOrder = async (req, reply) => {
 
     const orders = req.body;
     const { id } = req.params;
+
+    console.log("orders are ", orders);
+
+    const { remarks } = orders;
+    console.log("remarks: ", remarks);
 
     req.log.info("Orders received", { ordersCount: orders.length });
 
@@ -626,7 +639,8 @@ const getFarmerStockSummary = async (req, reply) => {
         message: "farmerId and coldStorageId are required",
       });
     }
-    // Find relevant orders
+
+    // Aggregate incoming orders
     const incomingOrders = await Order.aggregate([
       {
         $match: {
@@ -642,18 +656,21 @@ const getFarmerStockSummary = async (req, reply) => {
       },
       {
         $group: {
-          _id: null,
-          totalInitialQuantity: {
+          _id: {
+            variety: "$orderDetails.variety",
+            size: "$orderDetails.bagSizes.size",
+          },
+          initialQuantity: {
             $sum: "$orderDetails.bagSizes.quantity.initialQuantity",
+          },
+          currentQuantity: {
+            $sum: "$orderDetails.bagSizes.quantity.currentQuantity",
           },
         },
       },
     ]);
 
-    // Extract total initial quantity from incoming orders
-    const totalInitialQuantity = incomingOrders[0]?.totalInitialQuantity || 0;
-
-    // Find relevant outgoing orders
+    // Aggregate outgoing orders
     const outgoingOrders = await OutgoingOrder.aggregate([
       {
         $match: {
@@ -669,28 +686,51 @@ const getFarmerStockSummary = async (req, reply) => {
       },
       {
         $group: {
-          _id: null,
-          totalQuantityRemoved: {
+          _id: {
+            variety: "$orderDetails.variety",
+            size: "$orderDetails.bagSizes.size",
+          },
+          quantityRemoved: {
             $sum: "$orderDetails.bagSizes.quantityRemoved",
           },
         },
       },
     ]);
 
-    // Extract total quantity removed from outgoing orders
-    const totalQuantityRemoved = outgoingOrders[0]?.totalQuantityRemoved || 0;
+    // Transform incoming orders into a structured object
+    const incomingSummary = incomingOrders.reduce((acc, order) => {
+      const { variety, size } = order._id;
+      if (!acc[variety]) acc[variety] = {};
+      acc[variety][size] = {
+        initialQuantity: order.initialQuantity,
+        currentQuantity: order.currentQuantity,
+      };
+      return acc;
+    }, {});
 
-    // Respond with the calculated totals
+    // Add outgoing quantities to the structured object
+    outgoingOrders.forEach((order) => {
+      const { variety, size } = order._id;
+      if (!incomingSummary[variety]) incomingSummary[variety] = {};
+      if (!incomingSummary[variety][size]) {
+        incomingSummary[variety][size] = {
+          initialQuantity: 0,
+          currentQuantity: 0,
+        };
+      }
+      incomingSummary[variety][size].quantityRemoved = order.quantityRemoved;
+    });
+
+    // Respond with the detailed stock summary
     reply.code(200).send({
       status: "Success",
-      totalInitialQuantity,
-      totalQuantityRemoved,
+      stockSummary: incomingSummary,
     });
   } catch (err) {
-    req.log.error("Error occurred while calculating totals", err);
+    req.log.error("Error occurred while calculating stock summary", err);
     reply.code(500).send({
       status: "Fail",
-      message: "Error occurred while calculating totals",
+      message: "Error occurred while calculating stock summary",
       errorMessage: err.message,
     });
   }

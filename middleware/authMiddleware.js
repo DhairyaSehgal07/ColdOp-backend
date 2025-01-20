@@ -12,6 +12,7 @@ const protect = async (request, reply) => {
         reply.code(401).send({ message: "Not authorized, no token" });
         return;
       }
+      console.log("token is: ", token);
     } else if (
       request.headers.authorization &&
       request.headers.authorization.startsWith("Bearer")
