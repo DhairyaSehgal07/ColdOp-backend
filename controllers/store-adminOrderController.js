@@ -175,7 +175,7 @@ const createNewIncomingOrder = async (req, reply) => {
   try {
     orderSchema.parse(req.body);
 
-    const { coldStorageId, farmerId, dateOfSubmission, orderDetails } =
+    const { coldStorageId, farmerId, dateOfSubmission, orderDetails, remarks } =
       req.body;
 
     // Format variety and bagSizes for each orderDetail item
@@ -222,6 +222,7 @@ const createNewIncomingOrder = async (req, reply) => {
       },
       fulfilled: false,
       dateOfSubmission,
+      remarks: remarks,
       orderDetails: formattedOrderDetails, // Use the formatted orderDetails
     });
 
@@ -451,13 +452,8 @@ const createOutgoingOrder = async (req, reply) => {
       farmerId: req.params.id,
     });
 
-    const orders = req.body;
+    const { orders, remarks } = req.body;
     const { id } = req.params;
-
-    console.log("orders are ", orders);
-
-    const { remarks } = orders;
-    console.log("remarks: ", remarks);
 
     req.log.info("Orders received", { ordersCount: orders.length });
 
@@ -595,6 +591,7 @@ const createOutgoingOrder = async (req, reply) => {
       },
       dateOfExtraction: formatDate(new Date()),
       orderDetails: outgoingOrderDetails,
+      remarks: remarks,
     });
 
     await outgoingOrder.save();
@@ -648,12 +645,8 @@ const getFarmerStockSummary = async (req, reply) => {
           coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
         },
       },
-      {
-        $unwind: "$orderDetails",
-      },
-      {
-        $unwind: "$orderDetails.bagSizes",
-      },
+      { $unwind: "$orderDetails" },
+      { $unwind: "$orderDetails.bagSizes" },
       {
         $group: {
           _id: {
@@ -678,12 +671,8 @@ const getFarmerStockSummary = async (req, reply) => {
           coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
         },
       },
-      {
-        $unwind: "$orderDetails",
-      },
-      {
-        $unwind: "$orderDetails.bagSizes",
-      },
+      { $unwind: "$orderDetails" },
+      { $unwind: "$orderDetails.bagSizes" },
       {
         $group: {
           _id: {
@@ -721,10 +710,21 @@ const getFarmerStockSummary = async (req, reply) => {
       incomingSummary[variety][size].quantityRemoved = order.quantityRemoved;
     });
 
+    // Convert the stock summary object into an array
+    const stockSummaryArray = Object.entries(incomingSummary).map(
+      ([variety, sizes]) => ({
+        variety,
+        sizes: Object.entries(sizes).map(([size, quantities]) => ({
+          size,
+          ...quantities,
+        })),
+      })
+    );
+
     // Respond with the detailed stock summary
     reply.code(200).send({
       status: "Success",
-      stockSummary: incomingSummary,
+      stockSummary: stockSummaryArray,
     });
   } catch (err) {
     req.log.error("Error occurred while calculating stock summary", err);

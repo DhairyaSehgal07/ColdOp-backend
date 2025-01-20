@@ -90,6 +90,7 @@ const orderSchema = z.object({
   coldStorageId: z.string().regex(/^[a-fA-F0-9]{24}$/, "Invalid ObjectId"),
   farmerId: z.string().regex(/^[a-fA-F0-9]{24}$/, "Invalid ObjectId"),
   dateOfSubmission: z.string().min(1),
+  remarks: z.string().min(1),
   orderDetails: z.array(
     z.object({
       variety: z.string().min(1),
@@ -102,11 +103,7 @@ const orderSchema = z.object({
           }),
         })
       ),
-      location: z.object({
-        floor: z.string().min(1),
-        row: z.string().min(1),
-        chamber: z.string().min(1),
-      }),
+      location: z.string().min(1),
     })
   ),
 });

@@ -30,9 +30,6 @@ const orderDetailsSchema = new mongoose.Schema({
     type: String, // Changed from object to string
     required: true,
   },
-  remarks: {
-    type: String, // Added the remarks field
-  },
 });
 
 const orderSchema = new mongoose.Schema(
@@ -65,6 +62,9 @@ const orderSchema = new mongoose.Schema(
     fulfilled: {
       type: Boolean,
       default: false,
+    },
+    remarks: {
+      type: String, // Added the remarks field
     },
     orderDetails: [orderDetailsSchema],
   },

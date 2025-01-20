@@ -28,18 +28,8 @@ const orderDetailsSchema = new mongoose.Schema({
       required: true,
     },
     location: {
-      floor: {
-        type: String,
-        required: true,
-      },
-      row: {
-        type: String,
-        required: true,
-      },
-      chamber: {
-        type: String,
-        required: true,
-      },
+      type: String,
+      required: true,
     },
     voucher: {
       type: {
@@ -99,6 +89,9 @@ const outgoingOrderSchema = new mongoose.Schema(
     dateOfExtraction: {
       type: String,
       required: true,
+    },
+    remarks: {
+      type: String,
     },
     orderDetails: [orderDetailsSchema],
   },
