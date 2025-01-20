@@ -14,6 +14,7 @@ import {
 } from "../controllers/store-adminAuthController.js";
 
 import {
+  coldStorageSummary,
   createNewIncomingOrder,
   createOutgoingOrder,
   filterOrdersByVariety,
@@ -145,6 +146,12 @@ function storeAdminRoutes(fastify, options, done) {
     "/farmers/:id/stock-summary",
     { preHandler: [storeAdminProtect] },
     getFarmerStockSummary
+  );
+
+  fastify.get(
+    "/cold-storage-summary",
+    { preHandler: [storeAdminProtect] },
+    coldStorageSummary
   );
 
   fastify.get(

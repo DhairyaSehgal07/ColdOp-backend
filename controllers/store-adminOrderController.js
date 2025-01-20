@@ -736,6 +736,114 @@ const getFarmerStockSummary = async (req, reply) => {
   }
 };
 
+const coldStorageSummary = async (req, reply) => {
+  try {
+    const coldStorageId = req.storeAdmin._id; // Assume storeAdmin._id is the coldStorageId
+
+    if (!coldStorageId) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "coldStorageId is required",
+      });
+    }
+
+    // Aggregate incoming orders by coldStorageId
+    const incomingOrders = await Order.aggregate([
+      {
+        $match: {
+          coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+        },
+      },
+      { $unwind: "$orderDetails" },
+      { $unwind: "$orderDetails.bagSizes" },
+      {
+        $group: {
+          _id: {
+            variety: "$orderDetails.variety",
+            size: "$orderDetails.bagSizes.size",
+          },
+          initialQuantity: {
+            $sum: "$orderDetails.bagSizes.quantity.initialQuantity",
+          },
+          currentQuantity: {
+            $sum: "$orderDetails.bagSizes.quantity.currentQuantity",
+          },
+        },
+      },
+    ]);
+
+    // Aggregate outgoing orders by coldStorageId
+    const outgoingOrders = await OutgoingOrder.aggregate([
+      {
+        $match: {
+          coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+        },
+      },
+      { $unwind: "$orderDetails" },
+      { $unwind: "$orderDetails.bagSizes" },
+      {
+        $group: {
+          _id: {
+            variety: "$orderDetails.variety",
+            size: "$orderDetails.bagSizes.size",
+          },
+          quantityRemoved: {
+            $sum: "$orderDetails.bagSizes.quantityRemoved",
+          },
+        },
+      },
+    ]);
+
+    // Transform incoming orders into a structured object
+    const incomingSummary = incomingOrders.reduce((acc, order) => {
+      const { variety, size } = order._id;
+      if (!acc[variety]) acc[variety] = {};
+      acc[variety][size] = {
+        initialQuantity: order.initialQuantity,
+        currentQuantity: order.currentQuantity,
+      };
+      return acc;
+    }, {});
+
+    // Add outgoing quantities to the structured object
+    outgoingOrders.forEach((order) => {
+      const { variety, size } = order._id;
+      if (!incomingSummary[variety]) incomingSummary[variety] = {};
+      if (!incomingSummary[variety][size]) {
+        incomingSummary[variety][size] = {
+          initialQuantity: 0,
+          currentQuantity: 0,
+        };
+      }
+      incomingSummary[variety][size].quantityRemoved = order.quantityRemoved;
+    });
+
+    // Convert the stock summary object into an array
+    const stockSummaryArray = Object.entries(incomingSummary).map(
+      ([variety, sizes]) => ({
+        variety,
+        sizes: Object.entries(sizes).map(([size, quantities]) => ({
+          size,
+          ...quantities,
+        })),
+      })
+    );
+
+    // Respond with the detailed stock summary
+    reply.code(200).send({
+      status: "Success",
+      stockSummary: stockSummaryArray,
+    });
+  } catch (err) {
+    req.log.error("Error occurred while calculating cold storage summary", err);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while calculating cold storage summary",
+      errorMessage: err.message,
+    });
+  }
+};
+
 export {
   searchFarmers,
   createNewIncomingOrder,
@@ -743,6 +851,7 @@ export {
   getFarmerIncomingOrders,
   getAllFarmerOrders,
   getFarmerStockSummary,
+  coldStorageSummary,
   createOutgoingOrder,
   getReceiptNumber,
   getVarietyAvailableForFarmer,
