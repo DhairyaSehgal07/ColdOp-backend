@@ -16,6 +16,7 @@ import Request from "../models/requestModel.js";
 // @access Public
 const registerFarmer = async (req, reply) => {
   try {
+    console.log("reqbody is: ", req.body);
     // Validate the request body
     registerSchema.parse(req.body);
     req.log.info("Request body validated successfully");
@@ -40,14 +41,13 @@ const registerFarmer = async (req, reply) => {
       });
     }
 
-    let farmerId;
-    let isIdTaken = true;
+    let farmerId = (await Farmer.countDocuments()) + 1; // Start with length + 1
+    req.log.info("Starting farmerId generation with length + 1", { farmerId });
 
-    // Keep generating a unique farmerId until it's not already taken
-    req.log.info("Generating unique farmerId");
-    while (isIdTaken) {
-      farmerId = generateUniqueAlphaNumeric(); // Generate a unique alphanumeric code
-      isIdTaken = await Farmer.findOne({ farmerId });
+    // Check if the generated farmerId is unique, increment until it's unique
+    while (await Farmer.findOne({ farmerId })) {
+      farmerId++;
+      req.log.info("Incrementing farmerId to ensure uniqueness", { farmerId });
     }
     req.log.info("Unique farmerId generated", { farmerId });
 
@@ -97,7 +97,7 @@ const registerFarmer = async (req, reply) => {
     });
     reply.code(500).send({
       status: "Fail",
-      message: "Some error occured while registering farmer",
+      message: "Some error occurred while registering farmer",
       errorMessage: err.message,
     });
   }

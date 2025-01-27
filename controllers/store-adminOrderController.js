@@ -255,6 +255,8 @@ const getFarmerIncomingOrders = async (req, reply) => {
       `Fetching orders for Farmer ID: ${id} by Store Admin ID: ${storeAdminId}`
     );
 
+    console.log("id is: ", id);
+
     // Perform the Mongoose query to find orders
     const orders = await Order.find({
       coldStorageId: storeAdminId,
