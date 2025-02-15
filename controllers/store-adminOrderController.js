@@ -62,64 +62,22 @@ const getReceiptNumber = async (req, reply) => {
   }
 };
 
-const getDeliveryVoucherNumber = async (req, reply) => {
-  try {
-    const storeAdminId = req.storeAdminId._id;
-
-    req.log.info("Fetching Delivery voucher number for store admin", {
-      storeAdminId,
-    });
-
-    req.log.info(
-      "Running aggregation pipeline to count DELIVERY voucher number"
-    );
-
-    const result = await OutgoingOrder.aggregate([
-      {
-        $match: {
-          coldStorageId: storeAdminId,
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          count: { $sum: 1 }, // sum of the number of documents
-        },
-      },
-    ]);
-
-    const deliveryVoucherNumber = result.length > 0 ? result[0].count : 0;
-
-    req.log.info("Deliver voucher count: ", { deliveryVoucherNumber });
-
-    reply.code(200).send({
-      status: "Success",
-      deliveryVoucherNumber: deliveryVoucherNumber + 1,
-    });
-  } catch (err) {
-    req.log.error("Error occurred while getting receipt number", {
-      errorMessage: err.message,
-    });
-
-    reply.code(500).send({
-      status: "Fail",
-      message: "Error occured while getting delivery voucher number",
-      errorMessage: err.message,
-    });
-  }
-};
-
 // @desc Create new Incoming Order
 //@route POST/api/store-admin/orders
 //@access Private
 const searchFarmers = async (req, reply) => {
   try {
-    // Accessing searchQuery directly from req.query
-    console.log("REQUEST QUERY IS: ", req.query.query);
     const searchQuery = req.query.query;
     const { id } = req.params;
 
+    // Log the search request details
+    req.log.info("Starting farmer search", {
+      searchQuery,
+      storeAdminId: id,
+    });
+
     // MongoDB aggregation pipeline
+    req.log.info("Running aggregation pipeline for farmer search");
     const result = await Farmer.aggregate([
       {
         $search: {
@@ -148,17 +106,32 @@ const searchFarmers = async (req, reply) => {
       },
     ]);
 
+    // Log the search results
+    req.log.info("Farmer search completed", {
+      resultsFound: result.length,
+    });
+
     // Check if result is empty
     if (result.length === 0) {
+      req.log.info("No farmers found matching search criteria");
       reply.code(404).send({
         status: "Fail",
         message: "No results found",
       });
     } else {
+      req.log.info("Successfully found matching farmers", {
+        farmersCount: result.length,
+      });
       reply.code(200).send(result);
     }
   } catch (err) {
-    // Improved error handling
+    // Log error details
+    req.log.error("Error occurred while searching farmers", {
+      errorMessage: err.message,
+      searchQuery: req.query.query,
+      storeAdminId: req.params.id,
+    });
+
     reply.code(500).send({
       status: "Fail",
       message: "Error occurred while searching farmers",
@@ -173,46 +146,157 @@ const searchFarmers = async (req, reply) => {
 
 const createNewIncomingOrder = async (req, reply) => {
   try {
+    req.log.info("Starting new incoming order creation", {
+      body: req.body,
+    });
+
+    // Validate request body against schema
     orderSchema.parse(req.body);
 
     const { coldStorageId, farmerId, dateOfSubmission, orderDetails, remarks } =
       req.body;
 
-    // Format variety and bagSizes for each orderDetail item
-    const formattedOrderDetails = orderDetails.map((order) => {
-      // Format variety
-      const formattedVariety = order.variety
-        .toLowerCase()
-        .replace(/\s+/g, "-")
-        .replace(/^./, (char) => char.toUpperCase());
-
-      // Format size in each bagSize
-      const formattedBagSizes = order.bagSizes.map((bag) => {
-        const formattedSize = bag.size
-          .toLowerCase()
-          .replace(/\s+/g, "-")
-          .replace(/^./, (char) => char.toUpperCase()); // Capitalize first letter
-
-        return { ...bag, size: formattedSize };
+    // Validate IDs
+    if (
+      !mongoose.Types.ObjectId.isValid(coldStorageId) ||
+      !mongoose.Types.ObjectId.isValid(farmerId)
+    ) {
+      req.log.warn("Invalid coldStorageId or farmerId provided", {
+        coldStorageId,
+        farmerId,
       });
-
-      // Return modified order object with formatted variety and bagSizes
-      return {
-        ...order,
-        variety: formattedVariety,
-        bagSizes: formattedBagSizes,
-      };
-    });
-
-    const receiptNumber = await getReceiptNumberHelper(req.storeAdmin._id);
-
-    if (!receiptNumber) {
-      return reply.code(500).send({
+      return reply.code(400).send({
         status: "Fail",
-        message: "Failed to get RECEIPT number",
+        message: "Invalid coldStorageId or farmerId format",
+        errorMessage: "Please provide valid MongoDB ObjectIds",
       });
     }
 
+    // Validate orderDetails array
+    if (!Array.isArray(orderDetails) || orderDetails.length === 0) {
+      req.log.warn("Invalid or empty orderDetails array");
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid order details",
+        errorMessage: "Order details must be a non-empty array",
+      });
+    }
+
+    // Validate each order detail
+    for (const order of orderDetails) {
+      // Check for required fields
+      if (!order.variety || !order.bagSizes || !Array.isArray(order.bagSizes)) {
+        req.log.warn("Missing required fields in order details", { order });
+        return reply.code(400).send({
+          status: "Fail",
+          message: "Invalid order details structure",
+          errorMessage: "Each order must have variety and bagSizes array",
+        });
+      }
+
+      // Validate bagSizes
+      for (const bag of order.bagSizes) {
+        // Check for required bag fields
+        if (
+          !bag.size ||
+          !bag.quantity ||
+          typeof bag.quantity.initialQuantity !== "number"
+        ) {
+          req.log.warn("Invalid bag structure", { bag });
+          return reply.code(400).send({
+            status: "Fail",
+            message: "Invalid bag details",
+            errorMessage: "Each bag must have size and valid quantity",
+          });
+        }
+
+        // Validate quantity values
+        if (bag.quantity.initialQuantity <= 0) {
+          req.log.warn("Invalid quantity value", {
+            variety: order.variety,
+            size: bag.size,
+            quantity: bag.quantity.initialQuantity,
+          });
+          return reply.code(400).send({
+            status: "Fail",
+            message: "Invalid quantity value",
+            errorMessage: "Quantity must be greater than 0",
+          });
+        }
+      }
+    }
+
+    // Format variety and bagSizes for each orderDetail item
+    const formattedOrderDetails = orderDetails.map((order) => {
+      try {
+        // Format variety
+        const formattedVariety = order.variety
+          .toLowerCase()
+          .replace(/\s+/g, "-")
+          .replace(/^./, (char) => char.toUpperCase());
+
+        // Format size in each bagSize
+        const formattedBagSizes = order.bagSizes.map((bag) => {
+          const formattedSize = bag.size
+            .toLowerCase()
+            .replace(/\s+/g, "-")
+            .replace(/^./, (char) => char.toUpperCase());
+
+          return {
+            size: formattedSize,
+            quantity: {
+              initialQuantity: Math.floor(bag.quantity.initialQuantity), // Ensure whole numbers
+              currentQuantity: Math.floor(bag.quantity.initialQuantity), // Initialize currentQuantity
+            },
+          };
+        });
+
+        return {
+          variety: formattedVariety,
+          bagSizes: formattedBagSizes,
+          location: order.location || "Default", // Provide default location if not specified
+        };
+      } catch (err) {
+        req.log.error("Error formatting order details", {
+          order,
+          error: err.message,
+        });
+        throw new Error(`Error formatting order: ${err.message}`);
+      }
+    });
+
+    // Get receipt number
+    const receiptNumber = await getReceiptNumberHelper(req.storeAdmin._id);
+    if (!receiptNumber) {
+      req.log.error("Failed to generate receipt number");
+      return reply.code(500).send({
+        status: "Fail",
+        message: "Failed to get RECEIPT number",
+        errorMessage: "Receipt number generation failed",
+      });
+    }
+
+    // Validate and format date
+    const parsedDate = new Date(dateOfSubmission);
+    if (isNaN(parsedDate.getTime())) {
+      req.log.warn("Invalid date format", { dateOfSubmission });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid date format",
+        errorMessage: "Please provide a valid date",
+      });
+    }
+
+    // Format date as DD.MM.YYYY
+    const formattedDate = parsedDate
+      .toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric", // Changed from '2-digit' to 'numeric' for full year
+      })
+      .replace(/\//g, ".");
+
+    // Create new order
     const newOrder = new Order({
       coldStorageId,
       farmerId,
@@ -221,13 +305,28 @@ const createNewIncomingOrder = async (req, reply) => {
         voucherNumber: receiptNumber,
       },
       fulfilled: false,
-      dateOfSubmission,
-      remarks: remarks,
-      orderDetails: formattedOrderDetails, // Use the formatted orderDetails
+      dateOfSubmission: formattedDate, // Using the formatted date
+      remarks: remarks || "",
+      orderDetails: formattedOrderDetails,
     });
+
+    // Validate the model before saving
+    const validationError = newOrder.validateSync();
+    if (validationError) {
+      req.log.error("Mongoose validation error", { error: validationError });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid order data",
+        errorMessage: validationError.message,
+      });
+    }
 
     // Save the new order
     await newOrder.save();
+
+    req.log.info("Successfully created new incoming order", {
+      orderId: newOrder._id,
+    });
 
     reply.code(201).send({
       status: "Success",
@@ -235,8 +334,20 @@ const createNewIncomingOrder = async (req, reply) => {
       data: newOrder,
     });
   } catch (err) {
-    // Handling errors
-    console.error("Error creating new order:", err);
+    req.log.error("Error creating new order", {
+      error: err.message,
+      stack: err.stack,
+    });
+
+    // Handle Zod validation errors
+    if (err.name === "ZodError") {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Validation error",
+        errorMessage: err.errors.map((e) => e.message).join(", "),
+      });
+    }
+
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while creating a new order",
@@ -250,12 +361,27 @@ const getFarmerIncomingOrders = async (req, reply) => {
     const storeAdminId = req.storeAdmin._id;
     const { id } = req.params;
 
-    // Log the start of the request
-    console.log(
-      `Fetching orders for Farmer ID: ${id} by Store Admin ID: ${storeAdminId}`
-    );
+    // Validate IDs
+    if (
+      !mongoose.Types.ObjectId.isValid(id) ||
+      !mongoose.Types.ObjectId.isValid(storeAdminId)
+    ) {
+      req.log.warn("Invalid farmerId or storeAdminId provided", {
+        farmerId: id,
+        storeAdminId,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid ID format",
+        errorMessage: "Please provide valid MongoDB ObjectIds",
+      });
+    }
 
-    console.log("id is: ", id);
+    // Log the start of the request
+    req.log.info("Fetching farmer incoming orders", {
+      farmerId: id,
+      storeAdminId,
+    });
 
     // Perform the Mongoose query to find orders
     const orders = await Order.find({
@@ -264,11 +390,16 @@ const getFarmerIncomingOrders = async (req, reply) => {
     });
 
     // Log the query result
-    console.log(`Query executed. Orders found: ${orders.length}`);
+    req.log.info("Query executed for farmer orders", {
+      farmerId: id,
+      ordersFound: orders.length,
+    });
 
     if (!orders || orders.length === 0) {
-      // Log when no orders are found
-      console.log("No orders found for the given farmer.");
+      req.log.info("No orders found for farmer", {
+        farmerId: id,
+        storeAdminId,
+      });
 
       return reply.code(200).send({
         status: "Fail",
@@ -277,7 +408,10 @@ const getFarmerIncomingOrders = async (req, reply) => {
     }
 
     // Log the successful response
-    console.log("Orders retrieved successfully.");
+    req.log.info("Successfully retrieved farmer orders", {
+      farmerId: id,
+      orderCount: orders.length,
+    });
 
     // Sending a success response with the orders
     reply.code(200).send({
@@ -285,8 +419,13 @@ const getFarmerIncomingOrders = async (req, reply) => {
       data: orders,
     });
   } catch (err) {
-    // Log the error
-    console.error("Error getting farmer orders:", err);
+    // Log the error with context
+    req.log.error("Error occurred while getting farmer orders", {
+      farmerId: req.params.id,
+      storeAdminId: req.storeAdmin._id,
+      errorMessage: err.message,
+      stack: err.stack,
+    });
 
     // Sending error response
     reply.code(500).send({
@@ -302,13 +441,30 @@ const getAllFarmerOrders = async (req, reply) => {
     const storeAdminId = req.storeAdmin._id;
     const { id } = req.params;
 
-    console.log(
-      `Fetching all orders for Farmer ID: ${id} by Store Admin ID: ${storeAdminId}`
-    );
+    // Validate IDs
+    if (
+      !mongoose.Types.ObjectId.isValid(id) ||
+      !mongoose.Types.ObjectId.isValid(storeAdminId)
+    ) {
+      req.log.warn("Invalid farmerId or storeAdminId provided", {
+        farmerId: id,
+        storeAdminId,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid ID format",
+        errorMessage: "Please provide valid MongoDB ObjectIds",
+      });
+    }
+
+    req.log.info("Starting to fetch all farmer orders", {
+      farmerId: id,
+      storeAdminId,
+    });
 
     const [incomingOrders, outgoingOrders] = await Promise.all([
       Order.find({ coldStorageId: storeAdminId, farmerId: id })
-        .sort({ dateOfSubmission: -1 }) // Correctly specify the sorting field
+        .sort({ dateOfSubmission: -1 })
         .populate({
           path: "farmerId",
           model: Farmer,
@@ -318,7 +474,7 @@ const getAllFarmerOrders = async (req, reply) => {
           "_id coldStorageId farmerId remarks voucher dateOfSubmission orderDetails"
         ),
       OutgoingOrder.find({ coldStorageId: storeAdminId, farmerId: id })
-        .sort({ dateOfExtraction: -1 }) // Correctly specify the sorting field
+        .sort({ dateOfExtraction: -1 })
         .populate({
           path: "farmerId",
           model: Farmer,
@@ -329,24 +485,46 @@ const getAllFarmerOrders = async (req, reply) => {
         ),
     ]);
 
+    req.log.info("Retrieved orders from database", {
+      farmerId: id,
+      incomingOrdersCount: incomingOrders.length,
+      outgoingOrdersCount: outgoingOrders.length,
+    });
+
     const allOrders = [...incomingOrders, ...outgoingOrders];
 
     if (allOrders.length === 0) {
-      console.log("No orders found for the given farmer.");
+      req.log.info("No orders found for farmer", {
+        farmerId: id,
+        storeAdminId,
+      });
       return reply.code(200).send({
         status: "Fail",
         message: "Farmer doesn't have any orders",
         data: [],
       });
     }
-    console.log("All orders retrieved successfully.");
+
+    req.log.info("Successfully retrieved all farmer orders", {
+      farmerId: id,
+      totalOrders: allOrders.length,
+      incomingOrders: incomingOrders.length,
+      outgoingOrders: outgoingOrders.length,
+    });
+
     reply.code(200).send({
       status: "Success",
       message: "Orders retrieved successfully.",
       data: allOrders,
     });
   } catch (err) {
-    console.error("Error getting farmer orders:", err);
+    req.log.error("Error occurred while getting all farmer orders", {
+      farmerId: req.params.id,
+      storeAdminId: req.storeAdmin._id,
+      errorMessage: err.message,
+      stack: err.stack,
+    });
+
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while getting farmer orders",
@@ -358,6 +536,42 @@ const getAllFarmerOrders = async (req, reply) => {
 const filterOrdersByVariety = async (req, reply) => {
   try {
     const { varietyName, farmerId, coldStorageId } = req.body;
+
+    // Validate required fields
+    if (!varietyName || !farmerId || !coldStorageId) {
+      req.log.warn("Missing required fields", {
+        varietyName,
+        farmerId,
+        coldStorageId,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Missing required fields",
+        errorMessage: "varietyName, farmerId, and coldStorageId are required",
+      });
+    }
+
+    // Validate MongoDB ObjectIds
+    if (
+      !mongoose.Types.ObjectId.isValid(farmerId) ||
+      !mongoose.Types.ObjectId.isValid(coldStorageId)
+    ) {
+      req.log.warn("Invalid ObjectId format", {
+        farmerId,
+        coldStorageId,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid ID format",
+        errorMessage: "Please provide valid MongoDB ObjectIds",
+      });
+    }
+
+    req.log.info("Starting order filtering by variety", {
+      varietyName,
+      farmerId,
+      coldStorageId,
+    });
 
     const filteredOrders = await Order.aggregate([
       {
@@ -373,12 +587,26 @@ const filterOrdersByVariety = async (req, reply) => {
       },
     ]);
 
+    req.log.info("Order filtering completed", {
+      varietyName,
+      ordersFound: filteredOrders.length,
+    });
+
     if (!filteredOrders || filteredOrders.length === 0) {
+      req.log.info("No orders found for specified variety", {
+        varietyName,
+        farmerId,
+      });
       return reply.code(404).send({
         status: "Fail",
         message: "No orders found with the specified variety",
       });
     }
+
+    req.log.info("Successfully retrieved filtered orders", {
+      varietyName,
+      orderCount: filteredOrders.length,
+    });
 
     reply.code(200).send({
       status: "Success",
@@ -386,7 +614,14 @@ const filterOrdersByVariety = async (req, reply) => {
       data: filteredOrders,
     });
   } catch (err) {
-    console.error("Error occurred while filtering orders:", err);
+    req.log.error("Error occurred while filtering orders", {
+      varietyName: req.body.varietyName,
+      farmerId: req.body.farmerId,
+      coldStorageId: req.body.coldStorageId,
+      errorMessage: err.message,
+      stack: err.stack,
+    });
+
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while filtering orders",
@@ -400,12 +635,39 @@ const getVarietyAvailableForFarmer = async (req, reply) => {
     const coldStorageId = req.storeAdmin._id;
     const farmerId = req.params.id;
 
+    // Validate required fields
     if (!farmerId || !coldStorageId) {
+      req.log.warn("Missing required IDs", {
+        farmerId,
+        coldStorageId,
+      });
       return reply.code(400).send({
         status: "Fail",
         message: "farmerId and coldStorageId are required",
+        errorMessage: "Missing required identification parameters",
       });
     }
+
+    // Validate MongoDB ObjectIds
+    if (
+      !mongoose.Types.ObjectId.isValid(farmerId) ||
+      !mongoose.Types.ObjectId.isValid(coldStorageId)
+    ) {
+      req.log.warn("Invalid ObjectId format", {
+        farmerId,
+        coldStorageId,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid ID format",
+        errorMessage: "Please provide valid MongoDB ObjectIds",
+      });
+    }
+
+    req.log.info("Starting variety availability check for farmer", {
+      farmerId,
+      coldStorageId,
+    });
 
     const varieties = await Order.aggregate([
       {
@@ -430,12 +692,31 @@ const getVarietyAvailableForFarmer = async (req, reply) => {
       },
     ]);
 
+    req.log.info("Variety aggregation completed", {
+      farmerId,
+      varietiesFound: varieties.length,
+    });
+
+    const varietyList = varieties.map((v) => v.variety);
+
+    req.log.info("Successfully retrieved varieties", {
+      farmerId,
+      varietyCount: varietyList.length,
+      varieties: varietyList,
+    });
+
     reply.code(200).send({
       status: "Success",
-      varieties: varieties.map((v) => v.variety),
+      varieties: varietyList,
     });
   } catch (err) {
-    req.log.error("Some error occurred while getting varieties", err);
+    req.log.error("Error occurred while getting varieties", {
+      farmerId: req.params.id,
+      coldStorageId: req.storeAdmin._id,
+      errorMessage: err.message,
+      stack: err.stack,
+    });
+
     reply.code(500).send({
       status: "Fail",
       message: "Some error occurred while getting available varieties",
@@ -452,44 +733,184 @@ const createOutgoingOrder = async (req, reply) => {
     req.log.info("Starting createOutgoingOrder process", {
       storeAdminId: req.storeAdmin._id,
       farmerId: req.params.id,
+      body: req.body,
     });
 
     const { orders, remarks } = req.body;
     const { id } = req.params;
 
-    req.log.info("Orders received", { ordersCount: orders.length });
+    // Validate orders array
+    if (!Array.isArray(orders) || orders.length === 0) {
+      req.log.warn("Invalid orders array provided", {
+        isArray: Array.isArray(orders),
+        length: orders?.length,
+      });
+      throw new Error("Orders array is required and cannot be empty");
+    }
 
-    // Fetch incomingOrders
+    req.log.info("Validating order structure", { orderCount: orders.length });
+
+    // Validate each order's structure
+    orders.forEach((order, index) => {
+      req.log.info("Validating order", {
+        orderIndex: index,
+        orderId: order.orderId,
+        variety: order.variety,
+        bagUpdatesCount: order.bagUpdates?.length,
+      });
+
+      if (
+        !order.orderId ||
+        !order.variety ||
+        !Array.isArray(order.bagUpdates)
+      ) {
+        req.log.warn("Invalid order structure detected", {
+          orderIndex: index,
+          hasOrderId: !!order.orderId,
+          hasVariety: !!order.variety,
+          hasBagUpdates: Array.isArray(order.bagUpdates),
+        });
+        throw new Error(
+          "Invalid order structure. Required fields: orderId, variety, bagUpdates"
+        );
+      }
+
+      // Validate bagUpdates
+      order.bagUpdates.forEach((update, bagIndex) => {
+        req.log.info("Validating bag update", {
+          orderIndex: index,
+          bagIndex,
+          size: update.size,
+          quantityToRemove: update.quantityToRemove,
+        });
+
+        if (!update.size || typeof update.quantityToRemove !== "number") {
+          req.log.warn("Invalid bag update structure", {
+            orderIndex: index,
+            bagIndex,
+            hasSize: !!update.size,
+            quantityType: typeof update.quantityToRemove,
+          });
+          throw new Error(
+            "Invalid bag update structure. Required fields: size, quantityToRemove"
+          );
+        }
+
+        // Check for negative or zero quantities
+        if (update.quantityToRemove <= 0) {
+          req.log.warn("Invalid quantity to remove detected", {
+            orderIndex: index,
+            bagIndex,
+            quantityToRemove: update.quantityToRemove,
+          });
+          throw new Error(
+            `Invalid quantity to remove: ${update.quantityToRemove}. Must be greater than 0`
+          );
+        }
+      });
+    });
+
+    req.log.info("Starting to fetch and validate incoming orders");
+
+    // Fetch and validate incomingOrders
     const incomingOrders = await Promise.all(
-      orders.map(async (order) => {
+      orders.map(async (order, index) => {
         const { orderId, variety, bagUpdates } = order;
 
-        // Fetch the order details from the database
-        const fetchedOrder = await Order.findById(orderId).lean();
+        req.log.info("Fetching order details", {
+          orderIndex: index,
+          orderId,
+          variety,
+        });
 
+        const fetchedOrder = await Order.findById(orderId).lean();
         if (!fetchedOrder) {
+          req.log.warn("Order not found", {
+            orderIndex: index,
+            orderId,
+          });
           throw new Error(`Order with ID ${orderId} not found`);
         }
 
-        // Find the specific detail matching the variety
         const matchingDetail = fetchedOrder.orderDetails.find(
           (detail) => detail.variety === variety
         );
-
         if (!matchingDetail) {
+          req.log.warn("Variety not found in order", {
+            orderIndex: index,
+            orderId,
+            variety,
+            availableVarieties: fetchedOrder.orderDetails.map((d) => d.variety),
+          });
           throw new Error(
             `Variety ${variety} not found in Order ID ${orderId}`
           );
         }
+
+        req.log.info("Validating quantities for bag updates", {
+          orderIndex: index,
+          orderId,
+          variety,
+          bagUpdatesCount: bagUpdates.length,
+        });
+
+        // Validate quantities for each bag update
+        bagUpdates.forEach((update, bagIndex) => {
+          const matchingBag = matchingDetail.bagSizes.find(
+            (bag) => bag.size === update.size
+          );
+
+          if (!matchingBag) {
+            req.log.warn("Bag size not found", {
+              orderIndex: index,
+              bagIndex,
+              size: update.size,
+              availableSizes: matchingDetail.bagSizes.map((b) => b.size),
+            });
+            throw new Error(
+              `Bag size ${update.size} not found for variety ${variety} in order ${orderId}`
+            );
+          }
+
+          req.log.info("Checking quantity availability", {
+            orderIndex: index,
+            bagIndex,
+            size: update.size,
+            requested: update.quantityToRemove,
+            available: matchingBag.quantity.currentQuantity,
+          });
+
+          if (matchingBag.quantity.currentQuantity < update.quantityToRemove) {
+            req.log.warn("Insufficient quantity available", {
+              orderIndex: index,
+              bagIndex,
+              variety,
+              size: update.size,
+              requested: update.quantityToRemove,
+              available: matchingBag.quantity.currentQuantity,
+            });
+            throw new Error(
+              `Insufficient quantity available for ${variety} size ${update.size}. ` +
+                `Requested: ${update.quantityToRemove}, Available: ${matchingBag.quantity.currentQuantity}`
+            );
+          }
+        });
 
         // Filter bagSizes based on provided sizes in req.body
         const filteredBagSizes = matchingDetail.bagSizes.filter((bag) =>
           bagUpdates.some((update) => update.size === bag.size)
         );
 
+        req.log.info("Successfully processed order", {
+          orderIndex: index,
+          orderId,
+          variety,
+          filteredBagSizesCount: filteredBagSizes.length,
+        });
+
         return {
           _id: fetchedOrder._id,
-          location: matchingDetail.location, // Extract location from the matched variety
+          location: matchingDetail.location,
           voucher: fetchedOrder.voucher,
           orderDetails: [
             {
@@ -504,6 +925,10 @@ const createOutgoingOrder = async (req, reply) => {
         };
       })
     );
+
+    req.log.info("Successfully validated all orders and quantities", {
+      processedOrdersCount: incomingOrders.length,
+    });
 
     // Create a map for quick lookup
     const incomingOrderMap = incomingOrders.reduce((acc, order) => {
@@ -632,12 +1057,48 @@ const getFarmerStockSummary = async (req, reply) => {
     const coldStorageId = req.storeAdmin._id;
     const farmerId = req.params.id;
 
+    req.log.info("Starting farmer stock summary calculation", {
+      farmerId,
+      coldStorageId,
+      requestId: req.id,
+    });
+
     if (!farmerId || !coldStorageId) {
+      req.log.warn("Missing required IDs for farmer stock summary", {
+        farmerId,
+        coldStorageId,
+        requestId: req.id,
+      });
       return reply.code(400).send({
         status: "Fail",
         message: "farmerId and coldStorageId are required",
       });
     }
+
+    // Validate MongoDB ObjectIds
+    if (
+      !mongoose.Types.ObjectId.isValid(farmerId) ||
+      !mongoose.Types.ObjectId.isValid(coldStorageId)
+    ) {
+      req.log.warn("Invalid ObjectId format in farmer stock summary", {
+        farmerId,
+        coldStorageId,
+        isValidFarmerId: mongoose.Types.ObjectId.isValid(farmerId),
+        isValidColdStorageId: mongoose.Types.ObjectId.isValid(coldStorageId),
+        requestId: req.id,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid ID format",
+        errorMessage: "Please provide valid MongoDB ObjectIds",
+      });
+    }
+
+    req.log.info("Starting farmer incoming orders aggregation", {
+      farmerId,
+      coldStorageId,
+      requestId: req.id,
+    });
 
     // Aggregate incoming orders
     const incomingOrders = await Order.aggregate([
@@ -665,6 +1126,18 @@ const getFarmerStockSummary = async (req, reply) => {
       },
     ]);
 
+    req.log.info("Completed farmer incoming orders aggregation", {
+      farmerId,
+      incomingOrdersCount: incomingOrders.length,
+      requestId: req.id,
+    });
+
+    req.log.info("Starting farmer outgoing orders aggregation", {
+      farmerId,
+      coldStorageId,
+      requestId: req.id,
+    });
+
     // Aggregate outgoing orders
     const outgoingOrders = await OutgoingOrder.aggregate([
       {
@@ -688,6 +1161,17 @@ const getFarmerStockSummary = async (req, reply) => {
       },
     ]);
 
+    req.log.info("Completed farmer outgoing orders aggregation", {
+      farmerId,
+      outgoingOrdersCount: outgoingOrders.length,
+      requestId: req.id,
+    });
+
+    req.log.info("Processing farmer summary calculations", {
+      farmerId,
+      requestId: req.id,
+    });
+
     // Transform incoming orders into a structured object
     const incomingSummary = incomingOrders.reduce((acc, order) => {
       const { variety, size } = order._id;
@@ -698,6 +1182,12 @@ const getFarmerStockSummary = async (req, reply) => {
       };
       return acc;
     }, {});
+
+    req.log.info("Processed incoming summary", {
+      farmerId,
+      varietiesCount: Object.keys(incomingSummary).length,
+      requestId: req.id,
+    });
 
     // Add outgoing quantities to the structured object
     outgoingOrders.forEach((order) => {
@@ -723,13 +1213,28 @@ const getFarmerStockSummary = async (req, reply) => {
       })
     );
 
-    // Respond with the detailed stock summary
+    req.log.info("Successfully generated farmer stock summary", {
+      farmerId,
+      varietiesCount: stockSummaryArray.length,
+      totalSizes: stockSummaryArray.reduce(
+        (acc, item) => acc + item.sizes.length,
+        0
+      ),
+      requestId: req.id,
+    });
+
     reply.code(200).send({
       status: "Success",
       stockSummary: stockSummaryArray,
     });
   } catch (err) {
-    req.log.error("Error occurred while calculating stock summary", err);
+    req.log.error("Error in farmer stock summary calculation", {
+      error: err.message,
+      stack: err.stack,
+      farmerId: req.params.id,
+      coldStorageId: req.storeAdmin._id,
+      requestId: req.id,
+    });
     reply.code(500).send({
       status: "Fail",
       message: "Error occurred while calculating stock summary",
@@ -740,16 +1245,43 @@ const getFarmerStockSummary = async (req, reply) => {
 
 const coldStorageSummary = async (req, reply) => {
   try {
-    const coldStorageId = req.storeAdmin._id; // Assume storeAdmin._id is the coldStorageId
+    const coldStorageId = req.storeAdmin._id;
+
+    req.log.info("Starting cold storage summary calculation", {
+      coldStorageId,
+      requestId: req.id,
+    });
 
     if (!coldStorageId) {
+      req.log.warn("Missing coldStorageId for cold storage summary", {
+        requestId: req.id,
+      });
       return reply.code(400).send({
         status: "Fail",
         message: "coldStorageId is required",
       });
     }
 
-    // Aggregate incoming orders by coldStorageId
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+      req.log.warn("Invalid coldStorageId format in cold storage summary", {
+        coldStorageId,
+        isValid: mongoose.Types.ObjectId.isValid(coldStorageId),
+        requestId: req.id,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid ID format",
+        errorMessage: "Please provide a valid MongoDB ObjectId",
+      });
+    }
+
+    req.log.info("Starting cold storage incoming orders aggregation", {
+      coldStorageId,
+      requestId: req.id,
+    });
+
+    // Aggregate incoming orders
     const incomingOrders = await Order.aggregate([
       {
         $match: {
@@ -774,7 +1306,18 @@ const coldStorageSummary = async (req, reply) => {
       },
     ]);
 
-    // Aggregate outgoing orders by coldStorageId
+    req.log.info("Completed cold storage incoming orders aggregation", {
+      coldStorageId,
+      incomingOrdersCount: incomingOrders.length,
+      requestId: req.id,
+    });
+
+    req.log.info("Starting cold storage outgoing orders aggregation", {
+      coldStorageId,
+      requestId: req.id,
+    });
+
+    // Aggregate outgoing orders
     const outgoingOrders = await OutgoingOrder.aggregate([
       {
         $match: {
@@ -796,6 +1339,17 @@ const coldStorageSummary = async (req, reply) => {
       },
     ]);
 
+    req.log.info("Completed cold storage outgoing orders aggregation", {
+      coldStorageId,
+      outgoingOrdersCount: outgoingOrders.length,
+      requestId: req.id,
+    });
+
+    req.log.info("Processing cold storage summary calculations", {
+      coldStorageId,
+      requestId: req.id,
+    });
+
     // Transform incoming orders into a structured object
     const incomingSummary = incomingOrders.reduce((acc, order) => {
       const { variety, size } = order._id;
@@ -806,6 +1360,12 @@ const coldStorageSummary = async (req, reply) => {
       };
       return acc;
     }, {});
+
+    req.log.info("Processed cold storage incoming summary", {
+      coldStorageId,
+      varietiesCount: Object.keys(incomingSummary).length,
+      requestId: req.id,
+    });
 
     // Add outgoing quantities to the structured object
     outgoingOrders.forEach((order) => {
@@ -831,13 +1391,27 @@ const coldStorageSummary = async (req, reply) => {
       })
     );
 
-    // Respond with the detailed stock summary
+    req.log.info("Successfully generated cold storage summary", {
+      coldStorageId,
+      varietiesCount: stockSummaryArray.length,
+      totalSizes: stockSummaryArray.reduce(
+        (acc, item) => acc + item.sizes.length,
+        0
+      ),
+      requestId: req.id,
+    });
+
     reply.code(200).send({
       status: "Success",
       stockSummary: stockSummaryArray,
     });
   } catch (err) {
-    req.log.error("Error occurred while calculating cold storage summary", err);
+    req.log.error("Error in cold storage summary calculation", {
+      error: err.message,
+      stack: err.stack,
+      coldStorageId: req.storeAdmin._id,
+      requestId: req.id,
+    });
     reply.code(500).send({
       status: "Fail",
       message: "Error occurred while calculating cold storage summary",
