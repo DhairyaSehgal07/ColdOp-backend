@@ -146,157 +146,81 @@ const searchFarmers = async (req, reply) => {
 
 const createNewIncomingOrder = async (req, reply) => {
   try {
-    req.log.info("Starting new incoming order creation", {
-      body: req.body,
-    });
-
-    // Validate request body against schema
     orderSchema.parse(req.body);
 
-    const { coldStorageId, farmerId, dateOfSubmission, orderDetails, remarks } =
-      req.body;
+    const { coldStorageId, farmerId, orderDetails, remarks } = req.body;
 
-    // Validate IDs
-    if (
-      !mongoose.Types.ObjectId.isValid(coldStorageId) ||
-      !mongoose.Types.ObjectId.isValid(farmerId)
-    ) {
-      req.log.warn("Invalid coldStorageId or farmerId provided", {
-        coldStorageId,
-        farmerId,
-      });
-      return reply.code(400).send({
-        status: "Fail",
-        message: "Invalid coldStorageId or farmerId format",
-        errorMessage: "Please provide valid MongoDB ObjectIds",
-      });
-    }
+    // Format current date to DD.MM.YY
+    const formattedDate = new Date()
+      .toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "2-digit",
+      })
+      .split("/")
+      .join(".");
 
-    // Validate orderDetails array
-    if (!Array.isArray(orderDetails) || orderDetails.length === 0) {
-      req.log.warn("Invalid or empty orderDetails array");
-      return reply.code(400).send({
-        status: "Fail",
-        message: "Invalid order details",
-        errorMessage: "Order details must be a non-empty array",
-      });
-    }
-
-    // Validate each order detail
-    for (const order of orderDetails) {
-      // Check for required fields
-      if (!order.variety || !order.bagSizes || !Array.isArray(order.bagSizes)) {
-        req.log.warn("Missing required fields in order details", { order });
-        return reply.code(400).send({
-          status: "Fail",
-          message: "Invalid order details structure",
-          errorMessage: "Each order must have variety and bagSizes array",
-        });
-      }
-
-      // Validate bagSizes
-      for (const bag of order.bagSizes) {
-        // Check for required bag fields
-        if (
-          !bag.size ||
-          !bag.quantity ||
-          typeof bag.quantity.initialQuantity !== "number"
-        ) {
-          req.log.warn("Invalid bag structure", { bag });
-          return reply.code(400).send({
-            status: "Fail",
-            message: "Invalid bag details",
-            errorMessage: "Each bag must have size and valid quantity",
-          });
-        }
-
-        // Validate quantity values
-        if (bag.quantity.initialQuantity <= 0) {
-          req.log.warn("Invalid quantity value", {
-            variety: order.variety,
-            size: bag.size,
-            quantity: bag.quantity.initialQuantity,
-          });
-          return reply.code(400).send({
-            status: "Fail",
-            message: "Invalid quantity value",
-            errorMessage: "Quantity must be greater than 0",
-          });
-        }
-      }
-    }
-
-    // Format variety and bagSizes for each orderDetail item
+    // Format and validate orderDetails
     const formattedOrderDetails = orderDetails.map((order) => {
-      try {
-        // Format variety
-        const formattedVariety = order.variety
-          .toLowerCase()
-          .replace(/\s+/g, "-")
-          .replace(/^./, (char) => char.toUpperCase());
+      // Format variety
+      const formattedVariety = order.variety
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/^./, (char) => char.toUpperCase());
 
-        // Format size in each bagSize
-        const formattedBagSizes = order.bagSizes.map((bag) => {
+      // Format and validate bagSizes, filtering out zero quantities
+      const formattedBagSizes = order.bagSizes
+        .map((bag) => {
+          // Check for negative values first
+          if (
+            bag.quantity?.initialQuantity < 0 ||
+            bag.quantity?.currentQuantity < 0
+          ) {
+            throw new Error(
+              `Negative quantities are not allowed for ${formattedVariety} - ${bag.size}`
+            );
+          }
+
           const formattedSize = bag.size
             .toLowerCase()
             .replace(/\s+/g, "-")
             .replace(/^./, (char) => char.toUpperCase());
 
           return {
+            ...bag,
             size: formattedSize,
-            quantity: {
-              initialQuantity: Math.floor(bag.quantity.initialQuantity), // Ensure whole numbers
-              currentQuantity: Math.floor(bag.quantity.initialQuantity), // Initialize currentQuantity
-            },
           };
-        });
+        })
+        // Filter out bags with zero quantities
+        .filter(
+          (bag) =>
+            bag.quantity?.initialQuantity > 0 ||
+            bag.quantity?.currentQuantity > 0
+        );
 
-        return {
-          variety: formattedVariety,
-          bagSizes: formattedBagSizes,
-          location: order.location || "Default", // Provide default location if not specified
-        };
-      } catch (err) {
-        req.log.error("Error formatting order details", {
-          order,
-          error: err.message,
-        });
-        throw new Error(`Error formatting order: ${err.message}`);
+      // Check if any bags remain after filtering
+      if (formattedBagSizes.length === 0) {
+        throw new Error(
+          `All quantities are zero for variety ${formattedVariety}. At least one bag size must have a non-zero quantity.`
+        );
       }
+
+      return {
+        ...order,
+        variety: formattedVariety,
+        bagSizes: formattedBagSizes,
+      };
     });
 
-    // Get receipt number
     const receiptNumber = await getReceiptNumberHelper(req.storeAdmin._id);
+
     if (!receiptNumber) {
-      req.log.error("Failed to generate receipt number");
       return reply.code(500).send({
         status: "Fail",
         message: "Failed to get RECEIPT number",
-        errorMessage: "Receipt number generation failed",
       });
     }
 
-    // Validate and format date
-    const parsedDate = new Date(dateOfSubmission);
-    if (isNaN(parsedDate.getTime())) {
-      req.log.warn("Invalid date format", { dateOfSubmission });
-      return reply.code(400).send({
-        status: "Fail",
-        message: "Invalid date format",
-        errorMessage: "Please provide a valid date",
-      });
-    }
-
-    // Format date as DD.MM.YYYY
-    const formattedDate = parsedDate
-      .toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric", // Changed from '2-digit' to 'numeric' for full year
-      })
-      .replace(/\//g, ".");
-
-    // Create new order
     const newOrder = new Order({
       coldStorageId,
       farmerId,
@@ -305,28 +229,12 @@ const createNewIncomingOrder = async (req, reply) => {
         voucherNumber: receiptNumber,
       },
       fulfilled: false,
-      dateOfSubmission: formattedDate, // Using the formatted date
-      remarks: remarks || "",
+      dateOfSubmission: formattedDate,
+      remarks: remarks,
       orderDetails: formattedOrderDetails,
     });
 
-    // Validate the model before saving
-    const validationError = newOrder.validateSync();
-    if (validationError) {
-      req.log.error("Mongoose validation error", { error: validationError });
-      return reply.code(400).send({
-        status: "Fail",
-        message: "Invalid order data",
-        errorMessage: validationError.message,
-      });
-    }
-
-    // Save the new order
     await newOrder.save();
-
-    req.log.info("Successfully created new incoming order", {
-      orderId: newOrder._id,
-    });
 
     reply.code(201).send({
       status: "Success",
@@ -334,23 +242,10 @@ const createNewIncomingOrder = async (req, reply) => {
       data: newOrder,
     });
   } catch (err) {
-    req.log.error("Error creating new order", {
-      error: err.message,
-      stack: err.stack,
-    });
-
-    // Handle Zod validation errors
-    if (err.name === "ZodError") {
-      return reply.code(400).send({
-        status: "Fail",
-        message: "Validation error",
-        errorMessage: err.errors.map((e) => e.message).join(", "),
-      });
-    }
-
-    reply.code(500).send({
+    console.error("Error creating new order:", err);
+    reply.code(400).send({
       status: "Fail",
-      message: "Some error occurred while creating a new order",
+      message: "Failed to create new order",
       errorMessage: err.message,
     });
   }
