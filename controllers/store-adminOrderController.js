@@ -691,15 +691,15 @@ const createOutgoingOrder = async (req, reply) => {
           );
         }
 
-        // Check for negative or zero quantities
-        if (update.quantityToRemove <= 0) {
-          req.log.warn("Invalid quantity to remove detected", {
+        // Check for negative quantities
+        if (update.quantityToRemove < 0) {
+          req.log.warn("Negative quantity to remove detected", {
             orderIndex: index,
             bagIndex,
             quantityToRemove: update.quantityToRemove,
           });
           throw new Error(
-            `Invalid quantity to remove: ${update.quantityToRemove}. Must be greater than 0`
+            `Invalid quantity to remove: ${update.quantityToRemove}. Must be greater than or equal to 0`
           );
         }
       });
@@ -843,33 +843,35 @@ const createOutgoingOrder = async (req, reply) => {
         req.log.info("Processing order", { variety });
 
         // Process bag updates for bulk operations and outgoing order details
-        const bagDetails = bagUpdates.map((update) => {
-          const { size, quantityToRemove } = update;
-          req.log.info("Bag update", { size, quantityToRemove });
+        const bagDetails = bagUpdates
+          .filter((update) => update.quantityToRemove > 0) // Filter out zero quantities
+          .map((update) => {
+            const { size, quantityToRemove } = update;
+            req.log.info("Bag update", { size, quantityToRemove });
 
-          // Prepare bulk operation for updating quantities in the source order
-          bulkOps.push({
-            updateOne: {
-              filter: {
-                _id: new mongoose.Types.ObjectId(orderId),
-                "orderDetails.variety": variety,
-                "orderDetails.bagSizes.size": size,
-              },
-              update: {
-                $inc: {
-                  "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
-                    -quantityToRemove,
+            // Prepare bulk operation for updating quantities in the source order
+            bulkOps.push({
+              updateOne: {
+                filter: {
+                  _id: new mongoose.Types.ObjectId(orderId),
+                  "orderDetails.variety": variety,
+                  "orderDetails.bagSizes.size": size,
                 },
+                update: {
+                  $inc: {
+                    "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
+                      -quantityToRemove,
+                  },
+                },
+                arrayFilters: [{ "i.variety": variety }, { "j.size": size }],
               },
-              arrayFilters: [{ "i.variety": variety }, { "j.size": size }],
-            },
-          });
+            });
 
-          return {
-            size,
-            quantityRemoved: quantityToRemove,
-          };
-        });
+            return {
+              size,
+              quantityRemoved: quantityToRemove,
+            };
+          });
 
         // Add incomingOrder details from the map
         const incomingOrder = incomingOrderMap[orderId];
