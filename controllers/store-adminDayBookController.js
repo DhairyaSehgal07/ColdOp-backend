@@ -13,6 +13,20 @@ const dayBookOrders = async (req, reply) => {
 
     const skip = (page - 1) * limit;
 
+    // Helper function to sort bag sizes
+    const sortOrderDetails = (orders) => {
+      return orders.map((order) => {
+        const orderObj = order.toObject();
+        orderObj.orderDetails = orderObj.orderDetails.map((detail) => ({
+          ...detail,
+          bagSizes: detail.bagSizes.sort((a, b) =>
+            a.size.localeCompare(b.size)
+          ),
+        }));
+        return orderObj;
+      });
+    };
+
     console.log("sort order is: ", sortOrder);
 
     switch (type) {
@@ -44,7 +58,10 @@ const dayBookOrders = async (req, reply) => {
             ),
         ]);
 
-        const allOrders = [...incomingOrders, ...outgoingOrders];
+        // Sort bag sizes in both incoming and outgoing orders
+        const sortedIncoming = sortOrderDetails(incomingOrders);
+        const sortedOutgoing = sortOrderDetails(outgoingOrders);
+        const allOrders = [...sortedIncoming, ...sortedOutgoing];
 
         if (!allOrders || allOrders.length === 0) {
           console.log("No orders found for the given farmer.");
@@ -75,7 +92,10 @@ const dayBookOrders = async (req, reply) => {
           .select(
             "_id coldStorageId farmerId voucher dateOfSubmission orderDetails"
           );
-        if (!incomingOrders || incomingOrders.length === 0) {
+
+        const sortedOrders = sortOrderDetails(incomingOrders);
+
+        if (!sortedOrders || sortedOrders.length === 0) {
           return reply.code(200).send({
             status: "Fail",
             message: "No incoming orders found.",
@@ -83,7 +103,7 @@ const dayBookOrders = async (req, reply) => {
         }
         reply.code(200).send({
           status: "Success",
-          data: incomingOrders,
+          data: sortedOrders,
         });
         break;
       }
@@ -100,7 +120,10 @@ const dayBookOrders = async (req, reply) => {
           .select(
             "_id coldStorageId  farmerId voucher dateOfExtraction orderDetails"
           );
-        if (!outgoingOrders || outgoingOrders.length === 0) {
+
+        const sortedOrders = sortOrderDetails(outgoingOrders);
+
+        if (!sortedOrders || sortedOrders.length === 0) {
           return reply.code(200).send({
             status: "Fail",
             message: "No outgoing orders found.",
@@ -108,7 +131,7 @@ const dayBookOrders = async (req, reply) => {
         }
         reply.code(200).send({
           status: "Success",
-          data: outgoingOrders,
+          data: sortedOrders,
         });
         break;
       }

@@ -284,13 +284,17 @@ const getFarmerIncomingOrders = async (req, reply) => {
       farmerId: id,
     });
 
-    // Log the query result
-    req.log.info("Query executed for farmer orders", {
-      farmerId: id,
-      ordersFound: orders.length,
+    // Sort bagSizes in each order
+    const sortedOrders = orders.map((order) => {
+      const orderObj = order.toObject();
+      orderObj.orderDetails = orderObj.orderDetails.map((detail) => ({
+        ...detail,
+        bagSizes: detail.bagSizes.sort((a, b) => a.size.localeCompare(b.size)),
+      }));
+      return orderObj;
     });
 
-    if (!orders || orders.length === 0) {
+    if (!sortedOrders || sortedOrders.length === 0) {
       req.log.info("No orders found for farmer", {
         farmerId: id,
         storeAdminId,
@@ -305,13 +309,13 @@ const getFarmerIncomingOrders = async (req, reply) => {
     // Log the successful response
     req.log.info("Successfully retrieved farmer orders", {
       farmerId: id,
-      orderCount: orders.length,
+      orderCount: sortedOrders.length,
     });
 
-    // Sending a success response with the orders
+    // Sending a success response with the sorted orders
     reply.code(200).send({
       status: "Success",
-      data: orders,
+      data: sortedOrders,
     });
   } catch (err) {
     // Log the error with context
@@ -386,7 +390,24 @@ const getAllFarmerOrders = async (req, reply) => {
       outgoingOrdersCount: outgoingOrders.length,
     });
 
-    const allOrders = [...incomingOrders, ...outgoingOrders];
+    // Helper function to sort bag sizes within orders
+    const sortOrderDetails = (orders) => {
+      return orders.map((order) => {
+        const orderObj = order.toObject();
+        orderObj.orderDetails = orderObj.orderDetails.map((detail) => ({
+          ...detail,
+          bagSizes: detail.bagSizes.sort((a, b) =>
+            a.size.localeCompare(b.size)
+          ),
+        }));
+        return orderObj;
+      });
+    };
+
+    // Sort bag sizes in both incoming and outgoing orders
+    const sortedIncoming = sortOrderDetails(incomingOrders);
+    const sortedOutgoing = sortOrderDetails(outgoingOrders);
+    const allOrders = [...sortedIncoming, ...sortedOutgoing];
 
     if (allOrders.length === 0) {
       req.log.info("No orders found for farmer", {
