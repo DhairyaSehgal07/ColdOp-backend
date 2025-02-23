@@ -70,6 +70,8 @@ const searchFarmers = async (req, reply) => {
     const searchQuery = req.query.query;
     const { id } = req.params;
 
+    console.log("SEARCH QUERY IS: ", searchQuery);
+    console.log("id is : ", id);
     // Log the search request details
     req.log.info("Starting farmer search", {
       searchQuery,
