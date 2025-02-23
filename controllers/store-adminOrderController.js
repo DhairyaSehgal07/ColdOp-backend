@@ -76,7 +76,7 @@ const searchFarmers = async (req, reply) => {
       storeAdminId: id,
     });
 
-    // MongoDB aggregation pipeline
+    // MongoDB aggregation pipeline (Fix: `$search` is now the first stage)
     req.log.info("Running aggregation pipeline for farmer search");
     const result = await Farmer.aggregate([
       {
@@ -94,7 +94,7 @@ const searchFarmers = async (req, reply) => {
       },
       {
         $match: {
-          registeredStoreAdmins: new mongoose.Types.ObjectId(`${id}`),
+          registeredStoreAdmins: new mongoose.Types.ObjectId(id),
         },
       },
       {
