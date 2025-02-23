@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 
 const dayBookOrders = async (req, reply) => {
   try {
+    const coldStorageId = req.storeAdmin._id;
     const { type } = req.query;
     const { sortBy } = req.query;
     const { page } = req.query || 1;
@@ -32,7 +33,7 @@ const dayBookOrders = async (req, reply) => {
     switch (type) {
       case "all": {
         const [incomingOrders, outgoingOrders] = await Promise.all([
-          Order.find({})
+          Order.find({ coldStorageId })
             .skip(skip)
             .limit(limit)
             .sort({ createdAt: sortOrder })
@@ -44,7 +45,7 @@ const dayBookOrders = async (req, reply) => {
             .select(
               "_id coldStorageId farmerId voucher dateOfSubmission orderDetails"
             ),
-          OutgoingOrder.find({})
+          OutgoingOrder.find({ coldStorageId })
             .skip(skip)
             .limit(limit)
             .sort({ createdAt: sortOrder })
@@ -64,10 +65,10 @@ const dayBookOrders = async (req, reply) => {
         const allOrders = [...sortedIncoming, ...sortedOutgoing];
 
         if (!allOrders || allOrders.length === 0) {
-          console.log("No orders found for the given farmer.");
+          console.log("No orders found for the given cold storage.");
           return reply.code(200).send({
             status: "Fail",
-            message: "Farmer doesn't have any orders",
+            message: "Cold storage doesn't have any orders",
           });
         }
 
@@ -80,7 +81,7 @@ const dayBookOrders = async (req, reply) => {
         break;
       }
       case "incoming": {
-        const incomingOrders = await Order.find({})
+        const incomingOrders = await Order.find({ coldStorageId })
           .skip(skip)
           .limit(limit)
           .sort({ createdAt: sortOrder })
@@ -108,7 +109,7 @@ const dayBookOrders = async (req, reply) => {
         break;
       }
       case "outgoing": {
-        const outgoingOrders = await OutgoingOrder.find({})
+        const outgoingOrders = await OutgoingOrder.find({ coldStorageId })
           .skip(skip)
           .limit(limit)
           .sort({ createdAt: sortOrder })
