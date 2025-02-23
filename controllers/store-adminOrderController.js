@@ -657,6 +657,8 @@ const createOutgoingOrder = async (req, reply) => {
     const { orders, remarks } = req.body;
     const { id } = req.params;
 
+    console.log("orders is: ", orders);
+
     // Validate orders array
     if (!Array.isArray(orders) || orders.length === 0) {
       req.log.warn("Invalid orders array provided", {
