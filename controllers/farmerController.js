@@ -22,8 +22,15 @@ const registerFarmer = async (req, reply) => {
     req.log.info("Request body validated successfully");
 
     // Extract data from the request body
-    const { name, address, mobileNumber, password, imageUrl, isMobile } =
-      req.body;
+    const {
+      name,
+      address,
+      mobileNumber,
+      password,
+      imageUrl,
+      isMobile,
+      farmerId,
+    } = req.body;
 
     // Check if a farmer with the given mobile number already exists
     req.log.info("Checking if a farmer with the mobile number exists", {
@@ -41,14 +48,6 @@ const registerFarmer = async (req, reply) => {
       });
     }
 
-    let farmerId = (await Farmer.countDocuments()) + 1; // Start with length + 1
-    req.log.info("Starting farmerId generation with length + 1", { farmerId });
-
-    // Check if the generated farmerId is unique, increment until it's unique
-    while (await Farmer.findOne({ farmerId })) {
-      farmerId++;
-      req.log.info("Incrementing farmerId to ensure uniqueness", { farmerId });
-    }
     req.log.info("Unique farmerId generated", { farmerId });
 
     // Hash the password
@@ -63,7 +62,7 @@ const registerFarmer = async (req, reply) => {
       mobileNumber,
       password: hashedPassword,
       imageUrl,
-      farmerId, // Assign the generated farmerId
+      farmerId,
     });
 
     // If the farmer record is created successfully, generate a token and send the response

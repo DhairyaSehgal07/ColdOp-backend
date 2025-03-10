@@ -142,10 +142,51 @@ const searchFarmers = async (req, reply) => {
   }
 };
 
-// @desc Create new Incoming Order
-//@route POST/api/store-admin/orders
-//@access Private
+// First, create a helper function that calculates stock without HTTP response handling
+const getCurrentStock = async (coldStorageId, req) => {
+  try {
+    req.log.info("Calculating current stock for helper function", {
+      coldStorageId,
+      requestId: req.id,
+    });
 
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+      throw new Error("Invalid ID format");
+    }
+
+    // Aggregate incoming orders to sum currentQuantity
+    const result = await Order.aggregate([
+      {
+        $match: {
+          coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+        },
+      },
+      { $unwind: "$orderDetails" },
+      { $unwind: "$orderDetails.bagSizes" },
+      {
+        $group: {
+          _id: null,
+          totalCurrentQuantity: {
+            $sum: "$orderDetails.bagSizes.quantity.currentQuantity",
+          },
+        },
+      },
+    ]);
+
+    return result.length > 0 ? result[0].totalCurrentQuantity : 0;
+  } catch (error) {
+    req.log.error("Error in calculate current stock helper", {
+      error: error.message,
+      stack: error.stack,
+      coldStorageId,
+      requestId: req.id,
+    });
+    throw error;
+  }
+};
+
+// Modify the createNewIncomingOrder function
 const createNewIncomingOrder = async (req, reply) => {
   try {
     orderSchema.parse(req.body);
@@ -223,6 +264,69 @@ const createNewIncomingOrder = async (req, reply) => {
       });
     }
 
+    // Calculate the existing stock
+    let existingStock;
+    try {
+      existingStock = await getCurrentStock(coldStorageId, req);
+
+      req.log.info("Calculated existing stock", {
+        existingStock,
+        coldStorageId,
+        requestId: req.id,
+      });
+    } catch (error) {
+      req.log.error("Error calculating existing stock", {
+        error: error.message,
+        coldStorageId,
+        requestId: req.id,
+      });
+      return reply.code(500).send({
+        status: "Fail",
+        message: "Error calculating current stock",
+        errorMessage: error.message,
+      });
+    }
+
+    // Calculate additional stock from the current order
+    let additionalStock = 0;
+    try {
+      additionalStock = formattedOrderDetails.reduce((sum, order) => {
+        const orderSum = order.bagSizes.reduce(
+          (bagSum, bag) => bagSum + (bag.quantity.currentQuantity || 0),
+          0
+        );
+        return sum + orderSum;
+      }, 0);
+
+      req.log.info("Calculated additional stock from current order", {
+        additionalStock,
+        coldStorageId,
+        requestId: req.id,
+      });
+    } catch (error) {
+      req.log.error("Error calculating additional stock", {
+        error: error.message,
+        coldStorageId,
+        requestId: req.id,
+      });
+      return reply.code(500).send({
+        status: "Fail",
+        message: "Error calculating additional stock from current order",
+        errorMessage: error.message,
+      });
+    }
+
+    // Combine existing stock with the new order's stock
+    const currentStockAtThatTime = existingStock + additionalStock;
+
+    req.log.info("Final current stock calculation", {
+      existingStock,
+      additionalStock,
+      currentStockAtThatTime,
+      coldStorageId,
+      requestId: req.id,
+    });
+
     const newOrder = new Order({
       coldStorageId,
       farmerId,
@@ -230,6 +334,7 @@ const createNewIncomingOrder = async (req, reply) => {
         type: "RECEIPT",
         voucherNumber: receiptNumber,
       },
+      currentStockAtThatTime,
       fulfilled: false,
       dateOfSubmission: formattedDate,
       remarks: remarks,
@@ -244,7 +349,13 @@ const createNewIncomingOrder = async (req, reply) => {
       data: newOrder,
     });
   } catch (err) {
-    console.error("Error creating new order:", err);
+    req.log.error("Error creating new order", {
+      error: err.message,
+      stack: err.stack,
+      coldStorageId: req.body?.coldStorageId,
+      requestId: req.id,
+    });
+
     reply.code(400).send({
       status: "Fail",
       message: "Failed to create new order",
@@ -1353,4 +1464,5 @@ export {
   createOutgoingOrder,
   getReceiptNumber,
   getVarietyAvailableForFarmer,
+  getCurrentStock,
 };

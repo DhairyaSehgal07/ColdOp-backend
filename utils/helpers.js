@@ -106,3 +106,32 @@ export const formatDate = (date) => {
   const year = String(date.getFullYear()).slice(-2); // Take last two digits of year
   return `${day}.${month}.${year}`;
 };
+
+export const varieties = [
+  "K. Pukhraj",
+  "K. Jyoti",
+  "Super Six",
+  "Himalini",
+  "Diamont",
+  "Chipsona 1",
+  "Chipsona 2",
+  "Chipsona 3",
+  "FC - 5",
+  "FC - 11",
+  "FC - 12",
+  "L.R",
+  "Khyati",
+  "K. Chandramukhi",
+  "K. Badshah",
+  "Kuroda",
+  "Cardinal",
+  "Desiree",
+  "Columba",
+  "Atlantic",
+  "Pushkar",
+  "Surya",
+  "Fry Sona",
+  "SU - Khyati",
+  "Lima",
+  "Mohan",
+];

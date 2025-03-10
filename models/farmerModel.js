@@ -62,8 +62,10 @@ const farmerSchema = mongoose.Schema(
     forgotPasswordToken: String,
     forgotPasswordTokenExpiry: Date,
   },
-  { timestamps: true },
+  { timestamps: true }
 );
+
+farmerSchema.index({ farmerId: 1, registeredStoreAdmins: 1 }, { unique: true });
 
 const Farmer = mongoose.model("Farmers", farmerSchema);
 

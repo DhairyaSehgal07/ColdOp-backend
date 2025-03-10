@@ -38,6 +38,7 @@ const storeAdminSchema = mongoose.Schema(
         type: String,
         required: true,
       },
+      capacity: Number,
     },
     registeredFarmers: [
       {
@@ -65,10 +66,11 @@ const storeAdminSchema = mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
     forgotPasswordToken: String,
     forgotPasswordTokenExpiry: Date,
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 const StoreAdmin = mongoose.model("StoreAdmin", storeAdminSchema);

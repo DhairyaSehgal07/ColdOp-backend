@@ -30,6 +30,7 @@ const registerStoreAdmin = async (req, reply) => {
       coldStorageName,
       coldStorageAddress,
       coldStorageContactNumber,
+      capacity,
       isVerified,
       isMobile,
       imageUrl,
@@ -65,6 +66,7 @@ const registerStoreAdmin = async (req, reply) => {
         coldStorageName,
         coldStorageAddress,
         coldStorageContactNumber,
+        capacity,
       },
       storeAdminId: storeAdminId,
     });

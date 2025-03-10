@@ -1,8 +1,7 @@
 import Order from "../models/orderModel.js";
 import OutgoingOrder from "../models/outgoingOrderModel.js";
 import Farmer from "../models/farmerModel.js";
-import mongoose from "mongoose";
-
+import { varieties } from "../utils/helpers.js";
 const dayBookOrders = async (req, reply) => {
   try {
     const coldStorageId = req.storeAdmin._id;
@@ -166,4 +165,21 @@ const testController = async (req, reply) => {
   }
 };
 
-export { dayBookOrders, dayBookOrderController, testController };
+const getVarieties = async (req, reply) => {
+  try {
+    reply.code(200).send({
+      status: "Success",
+      varieties,
+    });
+  } catch (err) {
+    console.error("Error getting varieties:", err);
+
+    reply.code(500).send({
+      status: "Fail",
+      message: "Some error occurred while getting varieties",
+      errorMessage: err.message,
+    });
+  }
+};
+
+export { dayBookOrders, dayBookOrderController, testController, getVarieties };

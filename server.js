@@ -12,6 +12,7 @@ import cors from "@fastify/cors";
 
 import ejs from "ejs";
 import fastifyView from "@fastify/view";
+import superAdminRoutes from "./routes/superAdminRoutes.js";
 
 dotenv.config();
 
@@ -79,7 +80,7 @@ const start = async () => {
   app.register(formBody);
   app.register(farmerRoutes, { prefix: "/api/farmers" });
   app.register(storeAdminRoutes, { prefix: "/api/store-admin" });
-
+  app.register(superAdminRoutes, { prefix: "/api/super-admin" });
   app.get("/", (req, res) => {
     res.send("Fastify server started server");
   });

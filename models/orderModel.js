@@ -66,6 +66,10 @@ const orderSchema = new mongoose.Schema(
     remarks: {
       type: String, // Added the remarks field
     },
+    currentStockAtThatTime: {
+      type: Number,
+      required: true,
+    },
     orderDetails: [orderDetailsSchema],
   },
   { timestamps: true }
