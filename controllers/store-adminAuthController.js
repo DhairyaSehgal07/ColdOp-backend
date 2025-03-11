@@ -792,6 +792,23 @@ const quickRegisterFarmer = async (req, reply) => {
   }
 };
 
+const getFarmersIdsForCheck = async (req, reply) => {
+  try {
+    const { registeredFarmers } = req.storeAdmin;
+    reply.code(200).send({
+      status: "Success",
+      data: {
+        registeredFarmers,
+      },
+    });
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: err.message,
+    });
+  }
+};
+
 export {
   registerStoreAdmin,
   loginStoreAdmin,
@@ -805,4 +822,5 @@ export {
   updateFarmer,
   deleteFarmer,
   quickRegisterFarmer,
+  getFarmersIdsForCheck,
 };

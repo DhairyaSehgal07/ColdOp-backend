@@ -364,6 +364,90 @@ const createNewIncomingOrder = async (req, reply) => {
   }
 };
 
+const editIncomingOrder = async (req, reply) => {
+  try {
+    const { orderId } = req.params;
+    console.log("orderId is: ", orderId);
+    const { voucherNumber, orderDetails } = req.body;
+    console.log(req.body);
+
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      req.log.warn("Invalid orderId provided", { orderId });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid orderId format",
+        errorMessage: "Please provide a valid MongoDB ObjectId",
+      });
+    }
+
+    // Find the order by ID
+    const order = await Order.findById(orderId);
+    if (!order) {
+      req.log.warn("Order not found", { orderId });
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Order not found",
+      });
+    }
+
+    // Update the voucher number if provided
+    if (voucherNumber !== undefined) {
+      order.voucher.voucherNumber = voucherNumber;
+    }
+
+    // Update the order details if provided
+    if (orderDetails && Array.isArray(orderDetails)) {
+      orderDetails.forEach((newDetail) => {
+        const existingDetail = order.orderDetails.find(
+          (detail) => detail.variety === newDetail.variety
+        );
+
+        if (existingDetail) {
+          newDetail.bagSizes.forEach((newBag) => {
+            const existingBag = existingDetail.bagSizes.find(
+              (bag) => bag.size === newBag.size
+            );
+
+            if (existingBag) {
+              existingBag.quantity.initialQuantity =
+                newBag.quantity.initialQuantity;
+              existingBag.quantity.currentQuantity =
+                newBag.quantity.currentQuantity;
+            } else {
+              existingDetail.bagSizes.push(newBag);
+            }
+          });
+        } else {
+          order.orderDetails.push(newDetail);
+        }
+      });
+    }
+
+    // Save the updated order
+    await order.save();
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Order updated successfully",
+      data: order,
+    });
+  } catch (err) {
+    req.log.error("Error updating order", {
+      error: err.message,
+      stack: err.stack,
+      orderId: req.params.orderId,
+      requestId: req.id,
+    });
+
+    reply.code(500).send({
+      status: "Fail",
+      message: "Failed to update order",
+      errorMessage: err.message,
+    });
+  }
+};
+
 const getFarmerIncomingOrders = async (req, reply) => {
   try {
     const storeAdminId = req.storeAdmin._id;
@@ -1465,4 +1549,5 @@ export {
   getReceiptNumber,
   getVarietyAvailableForFarmer,
   getCurrentStock,
+  editIncomingOrder,
 };

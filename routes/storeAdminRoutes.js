@@ -2,6 +2,7 @@ import {
   deleteFarmer,
   getFarmerById,
   getFarmers,
+  getFarmersIdsForCheck,
   getNumberOfStoreAdmins,
   getStoreAdminProfile,
   loginStoreAdmin,
@@ -16,13 +17,13 @@ import {
 import {
   coldStorageSummary,
   createNewIncomingOrder,
+  editIncomingOrder,
   createOutgoingOrder,
   filterOrdersByVariety,
   getAllFarmerOrders,
   getFarmerIncomingOrders,
   getFarmerStockSummary,
   getReceiptNumber,
-  getCurrentStock,
   getVarietyAvailableForFarmer,
   searchFarmers,
 } from "../controllers/store-adminOrderController.js";
@@ -170,7 +171,17 @@ function storeAdminRoutes(fastify, options, done) {
 
   fastify.get("/varities", getVarieties);
 
-  fastify.get("/test", { preHandler: [storeAdminProtect] }, getCurrentStock);
+  fastify.get(
+    "/farmerid/check",
+    { preHandler: [storeAdminProtect] },
+    getFarmersIdsForCheck
+  );
+
+  fastify.put(
+    "/test/:orderId",
+    { preHandler: [storeAdminProtect] },
+    editIncomingOrder
+  );
 
   done();
 }

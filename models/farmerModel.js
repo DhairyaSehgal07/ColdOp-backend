@@ -44,9 +44,8 @@ const farmerSchema = mongoose.Schema(
     },
     registeredStoreAdmins: [
       {
-        // type: Schema.Types.ObjectId,
         type: mongoose.Schema.Types.ObjectId,
-        ref: "StoreAdmin", // Reference to the StoreAdmin model
+        ref: "StoreAdmin",
       },
     ],
     farmerId: {
