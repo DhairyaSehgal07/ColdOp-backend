@@ -26,6 +26,7 @@ import {
   getReceiptNumber,
   getVarietyAvailableForFarmer,
   searchFarmers,
+  editOutgoingOrder,
 } from "../controllers/store-adminOrderController.js";
 
 import { storeAdminProtect } from "../middleware/authMiddleware.js";
@@ -167,6 +168,12 @@ function storeAdminRoutes(fastify, options, done) {
     "/farmers/:id/outgoing",
     { preHandler: [storeAdminProtect] },
     createOutgoingOrder
+  );
+
+  fastify.put(
+    "/outgoing/:id",
+    { preHandler: [storeAdminProtect] },
+    editOutgoingOrder
   );
 
   fastify.get("/varities", getVarieties);

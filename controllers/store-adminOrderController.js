@@ -104,6 +104,7 @@ const searchFarmers = async (req, reply) => {
           _id: 1,
           name: 1,
           mobileNumber: 1,
+          address: 1,
         },
       },
     ]);
@@ -1169,6 +1170,254 @@ const createOutgoingOrder = async (req, reply) => {
   }
 };
 
+const deleteOutgoingOrder = async (req, reply) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const storeAdminId = req.storeAdmin._id;
+
+    req.log.info("Starting deleteOutgoingOrder process", {
+      outgoingOrderId: id,
+      storeAdminId,
+    });
+
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      req.log.warn("Invalid outgoingOrderId provided", { outgoingOrderId: id });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid outgoingOrderId format",
+        errorMessage: "Please provide a valid MongoDB ObjectId",
+      });
+    }
+
+    // Find the outgoing order by ID
+    const outgoingOrder = await OutgoingOrder.findById(id).session(session);
+    if (!outgoingOrder) {
+      req.log.warn("Outgoing order not found", { outgoingOrderId: id });
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Outgoing order not found",
+      });
+    }
+
+    // Validate storeAdminId
+    if (!outgoingOrder.coldStorageId.equals(storeAdminId)) {
+      req.log.warn("Unauthorized attempt to delete outgoing order", {
+        outgoingOrderId: id,
+        storeAdminId,
+      });
+      return reply.code(403).send({
+        status: "Fail",
+        message: "Unauthorized to delete this outgoing order",
+      });
+    }
+
+    // Prepare bulk operations to revert inventory updates
+    const bulkOps = outgoingOrder.orderDetails.flatMap((detail) =>
+      detail.bagSizes.map((bag) => ({
+        updateOne: {
+          filter: {
+            coldStorageId: storeAdminId,
+            "orderDetails.variety": detail.variety,
+            "orderDetails.bagSizes.size": bag.size,
+          },
+          update: {
+            $inc: {
+              "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
+                bag.quantityRemoved,
+            },
+          },
+          arrayFilters: [
+            { "i.variety": detail.variety },
+            { "j.size": bag.size },
+          ],
+        },
+      }))
+    );
+
+    // Execute bulk write to revert inventory updates
+    await Order.bulkWrite(bulkOps, { session });
+
+    // Delete the outgoing order
+    await outgoingOrder.deleteOne({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    req.log.info("Outgoing order deleted successfully", {
+      outgoingOrderId: id,
+    });
+
+    return reply.code(200).send({
+      status: "Success",
+      message: "Outgoing order deleted successfully",
+    });
+  } catch (err) {
+    req.log.error("Error deleting outgoing order", {
+      errorMessage: err.message,
+      stack: err.stack,
+      outgoingOrderId: req.params.id,
+      storeAdminId: req.storeAdmin._id,
+    });
+
+    await session.abortTransaction();
+    session.endSession();
+
+    return reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while deleting outgoing order",
+      errorMessage: err.message,
+    });
+  }
+};
+
+const editOutgoingOrder = async (req, reply) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const storeAdminId = req.storeAdmin._id;
+    const { orderDetails, remarks } = req.body;
+
+    req.log.info("Starting editOutgoingOrder process", {
+      outgoingOrderId: id,
+      storeAdminId,
+      body: req.body,
+    });
+
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      req.log.warn("Invalid outgoingOrderId provided", { outgoingOrderId: id });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid outgoingOrderId format",
+        errorMessage: "Please provide a valid MongoDB ObjectId",
+      });
+    }
+
+    // Find the outgoing order by ID
+    const outgoingOrder = await OutgoingOrder.findById(id).session(session);
+    if (!outgoingOrder) {
+      req.log.warn("Outgoing order not found", { outgoingOrderId: id });
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Outgoing order not found",
+      });
+    }
+
+    // Validate storeAdminId
+    if (!outgoingOrder.coldStorageId.equals(storeAdminId)) {
+      req.log.warn("Unauthorized attempt to edit outgoing order", {
+        outgoingOrderId: id,
+        storeAdminId,
+      });
+      return reply.code(403).send({
+        status: "Fail",
+        message: "Unauthorized to edit this outgoing order",
+      });
+    }
+
+    // Validate orderDetails array
+    if (!Array.isArray(orderDetails) || orderDetails.length === 0) {
+      req.log.warn("Invalid orderDetails array provided", {
+        isArray: Array.isArray(orderDetails),
+        length: orderDetails?.length,
+      });
+      throw new Error("orderDetails array is required and cannot be empty");
+    }
+
+    // Prepare bulk operations to revert previous inventory updates
+    const revertBulkOps = outgoingOrder.orderDetails.flatMap((detail) =>
+      detail.bagSizes.map((bag) => ({
+        updateOne: {
+          filter: {
+            coldStorageId: storeAdminId,
+            "orderDetails.variety": detail.variety,
+            "orderDetails.bagSizes.size": bag.size,
+          },
+          update: {
+            $inc: {
+              "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
+                bag.quantityRemoved,
+            },
+          },
+          arrayFilters: [
+            { "i.variety": detail.variety },
+            { "j.size": bag.size },
+          ],
+        },
+      }))
+    );
+
+    // Execute bulk write to revert previous inventory updates
+    await Order.bulkWrite(revertBulkOps, { session });
+
+    // Prepare bulk operations to apply new inventory updates
+    const applyBulkOps = orderDetails.flatMap((detail) =>
+      detail.bagSizes.map((bag) => ({
+        updateOne: {
+          filter: {
+            coldStorageId: storeAdminId,
+            "orderDetails.variety": detail.variety,
+            "orderDetails.bagSizes.size": bag.size,
+          },
+          update: {
+            $inc: {
+              "orderDetails.$[i].bagSizes.$[j].quantity.currentQuantity":
+                -bag.quantityRemoved,
+            },
+          },
+          arrayFilters: [
+            { "i.variety": detail.variety },
+            { "j.size": bag.size },
+          ],
+        },
+      }))
+    );
+
+    // Execute bulk write to apply new inventory updates
+    await Order.bulkWrite(applyBulkOps, { session });
+
+    // Update the outgoing order details
+    outgoingOrder.orderDetails = orderDetails;
+    outgoingOrder.remarks = remarks;
+
+    await outgoingOrder.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    req.log.info("Outgoing order edited successfully", {
+      outgoingOrderId: id,
+    });
+
+    return reply.code(200).send({
+      status: "Success",
+      message: "Outgoing order edited successfully",
+    });
+  } catch (err) {
+    req.log.error("Error editing outgoing order", {
+      errorMessage: err.message,
+      stack: err.stack,
+      outgoingOrderId: req.params.id,
+      storeAdminId: req.storeAdmin._id,
+    });
+
+    await session.abortTransaction();
+    session.endSession();
+
+    return reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while editing outgoing order",
+      errorMessage: err.message,
+    });
+  }
+};
+
 const getFarmerStockSummary = async (req, reply) => {
   try {
     const coldStorageId = req.storeAdmin._id;
@@ -1550,4 +1799,6 @@ export {
   getVarietyAvailableForFarmer,
   getCurrentStock,
   editIncomingOrder,
+  editOutgoingOrder,
+  deleteOutgoingOrder,
 };

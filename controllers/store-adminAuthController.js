@@ -794,7 +794,18 @@ const quickRegisterFarmer = async (req, reply) => {
 
 const getFarmersIdsForCheck = async (req, reply) => {
   try {
-    const { registeredFarmers } = req.storeAdmin;
+    // Populate the registeredFarmers with farmerId from Farmer model
+    await req.storeAdmin.populate({
+      path: "registeredFarmers",
+      model: "Farmers", // Changed from "Farmer" to "Farmers" to match your model registration
+      select: "farmerId",
+    });
+
+    // Extract the populated registeredFarmers
+    const registeredFarmers = req.storeAdmin.registeredFarmers
+      .filter((farmer) => farmer && farmer.farmerId)
+      .map((farmer) => farmer.farmerId);
+
     reply.code(200).send({
       status: "Success",
       data: {
