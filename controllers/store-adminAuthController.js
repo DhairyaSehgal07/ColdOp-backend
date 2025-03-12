@@ -681,6 +681,9 @@ const deleteFarmer = async (req, res) => {
 //@desc Quick add farmer
 //@route POST/api/store-admin/quick-register
 //@access Private
+//@desc Quick add farmer
+//@route POST/api/store-admin/quick-register
+//@access Private
 const quickRegisterFarmer = async (req, reply) => {
   try {
     // Validate the request body
@@ -688,7 +691,8 @@ const quickRegisterFarmer = async (req, reply) => {
     quickRegisterSchema.parse(req.body);
 
     // Extract data from the request body
-    const { name, address, mobileNumber, password, imageUrl } = req.body;
+    const { name, address, mobileNumber, password, imageUrl, farmerId } =
+      req.body;
     const formattedName = formatName(name);
 
     // Log farmer existence check
@@ -704,19 +708,16 @@ const quickRegisterFarmer = async (req, reply) => {
       });
     }
 
-    let farmerId;
-    let isIdTaken = true;
-
-    // Log farmerId generation
-    req.log.info("Generating unique farmerId");
-
-    // Keep generating a unique farmerId until it's not already taken
-    while (isIdTaken) {
-      farmerId = generateUniqueAlphaNumeric(); // Generate a unique alphanumeric code
-      isIdTaken = await Farmer.findOne({ farmerId });
+    // Ensure the provided farmerId is unique
+    req.log.info("Checking if farmerId is unique", { farmerId });
+    const farmerIdExists = await Farmer.findOne({ farmerId });
+    if (farmerIdExists) {
+      req.log.warn("FarmerId already exists", { farmerId });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "FarmerId already exists. Please use a different ID.",
+      });
     }
-
-    req.log.info("Unique farmerId generated", { farmerId });
 
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -731,7 +732,6 @@ const quickRegisterFarmer = async (req, reply) => {
       password: hashedPassword,
       imageUrl,
       farmerId,
-      imageUrl: "",
       isVerified: false,
     });
 
@@ -753,12 +753,10 @@ const quickRegisterFarmer = async (req, reply) => {
 
         // Add the farmer to the store admin's registeredFarmers array
         storeAdmin.registeredFarmers.push(farmer._id);
-
-        // Save the updated store admin
         await storeAdmin.save();
         req.log.info("Store admin updated successfully");
 
-        await farmer.registeredStoreAdmins.push(req.storeAdmin._id);
+        farmer.registeredStoreAdmins.push(req.storeAdmin._id);
         await farmer.save();
         req.log.info("Farmer registered successfully");
 
@@ -771,7 +769,6 @@ const quickRegisterFarmer = async (req, reply) => {
         req.log.error(
           "Store admin or registeredFarmers array is not properly initialized"
         );
-        // If store admin or registeredFarmers array is not properly initialized
         return reply.code(500).send({
           status: "Fail",
           message:
