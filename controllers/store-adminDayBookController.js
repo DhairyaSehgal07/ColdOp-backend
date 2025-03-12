@@ -42,7 +42,7 @@ const dayBookOrders = async (req, reply) => {
               select: "_id name", // Select only the _id and name
             })
             .select(
-              "_id coldStorageId farmerId voucher dateOfSubmission orderDetails"
+              "_id coldStorageId currentStockAtThatTime remarks farmerId voucher dateOfSubmission orderDetails"
             ),
           OutgoingOrder.find({ coldStorageId })
             .skip(skip)
@@ -54,7 +54,7 @@ const dayBookOrders = async (req, reply) => {
               select: "_id name", // Select only the _id and name
             })
             .select(
-              "_id coldStorageId  farmerId voucher dateOfExtraction orderDetails"
+              "_id coldStorageId remarks  farmerId voucher dateOfExtraction orderDetails"
             ),
         ]);
 
@@ -90,7 +90,7 @@ const dayBookOrders = async (req, reply) => {
             select: "_id name", // Select only the _id and name
           })
           .select(
-            "_id coldStorageId farmerId voucher dateOfSubmission orderDetails"
+            "_id coldStorageId remarks  currentStockAtThatTime farmerId voucher dateOfSubmission orderDetails"
           );
 
         const sortedOrders = sortOrderDetails(incomingOrders);
@@ -118,7 +118,7 @@ const dayBookOrders = async (req, reply) => {
             select: "_id name", // Select only the _id and name
           })
           .select(
-            "_id coldStorageId  farmerId voucher dateOfExtraction orderDetails"
+            "_id coldStorageId remarks   farmerId voucher dateOfExtraction orderDetails"
           );
 
         const sortedOrders = sortOrderDetails(outgoingOrders);
