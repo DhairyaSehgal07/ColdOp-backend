@@ -681,14 +681,20 @@ const deleteFarmer = async (req, res) => {
 //@desc Quick add farmer
 //@route POST/api/store-admin/quick-register
 //@access Private
-//@desc Quick add farmer
-//@route POST/api/store-admin/quick-register
-//@access Private
 const quickRegisterFarmer = async (req, reply) => {
   try {
     // Validate the request body
     req.log.info("Validating request body for quick farmer registration");
     quickRegisterSchema.parse(req.body);
+
+    // Check if farmerId is present
+    if (!req.body.farmerId) {
+      req.log.warn("FarmerId is missing in the request body");
+      return reply.code(400).send({
+        status: "Fail",
+        message: "FarmerId is required",
+      });
+    }
 
     // Extract data from the request body
     const { name, address, mobileNumber, password, imageUrl, farmerId } =
