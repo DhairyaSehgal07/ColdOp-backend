@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import generateToken from "../utils/generateToken.js";
 import SuperAdmin from "../models/superAdminModel.js";
 import StoreAdmin from "../models/storeAdminModel.js";
+import Farmer from "../models/farmerModel.js";
 import mongoose from "mongoose";
 import Order from "../models/orderModel.js";
 import OutgoingOrder from "../models/outgoingOrderModel.js";
@@ -28,7 +29,7 @@ const loginSuperAdmin = async (req, reply) => {
       });
     }
 
-    const token = await generateToken(reply, superAdmin._id, false);
+    const token = await generateToken(reply, superAdmin._id, true);
 
     return reply.code(200).send({
       status: "Success",
@@ -213,9 +214,394 @@ const coldStorageSummary = async (req, reply) => {
   }
 };
 
+const getIncomingOrdersOfAColdStorage = async (req, reply) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Cold storage ID is required",
+      });
+    }
+
+    // Find orders by coldStorageId
+    const orders = await Order.find({ coldStorageId: id });
+
+    if (!orders.length) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "No orders found for this cold storage",
+      });
+    }
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Cold storage orders retrieved successfully",
+      data: orders,
+    });
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while retrieving cold storage orders",
+      errorMessage: err.message,
+    });
+  }
+};
+
+const editIncomingOrder = async (req, reply) => {
+  try {
+    const { orderId } = req.params;
+    const updates = req.body;
+
+    // Validate orderId
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid order ID format",
+      });
+    }
+
+    // Find the existing order
+    const existingOrder = await Order.findById(orderId);
+    if (!existingOrder) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Order not found",
+      });
+    }
+
+    req.log.info("Processing order update", {
+      orderId,
+      updates,
+      requestId: req.id,
+    });
+
+    // ✅ Step 1: Handle direct field updates
+    const allowedDirectUpdates = ["remarks", "dateOfSubmission", "fulfilled"];
+    allowedDirectUpdates.forEach((field) => {
+      if (updates[field] !== undefined) {
+        existingOrder[field] = updates[field];
+      }
+    });
+
+    // ✅ Step 2: Handle orderDetails updates
+    if (updates.orderDetails && Array.isArray(updates.orderDetails) && updates.orderDetails.length > 0) {
+      // Since each order should have only one variety entry, we always use the first item in the array
+      const updateDetail = updates.orderDetails[0];
+      
+      if (!updateDetail.variety) {
+        throw new Error("Variety is required for order details");
+      }
+
+      if (
+        !updateDetail.bagSizes ||
+        !Array.isArray(updateDetail.bagSizes) ||
+        updateDetail.bagSizes.length === 0
+      ) {
+        throw new Error(
+          `At least one bag size is required for variety ${updateDetail.variety}`
+        );
+      }
+
+      // Validate bag sizes
+      updateDetail.bagSizes.forEach((bag) => {
+        if (!bag.size) {
+          throw new Error(
+            `Size is required for bag sizes in variety ${updateDetail.variety}`
+          );
+        }
+        if (
+          !bag.quantity ||
+          bag.quantity.initialQuantity === undefined ||
+          bag.quantity.currentQuantity === undefined
+        ) {
+          throw new Error(
+            `Both initialQuantity and currentQuantity are required for bag size ${bag.size} in variety ${updateDetail.variety}`
+          );
+        }
+        if (bag.quantity.initialQuantity < 0 || bag.quantity.currentQuantity < 0) {
+          throw new Error(
+            `Negative quantities are not allowed for ${updateDetail.variety} - ${bag.size}`
+          );
+        }
+      });
+
+      // Update the location if provided
+      if (updateDetail.location !== undefined) {
+        // If the order already has an orderDetails array with at least one item
+        if (existingOrder.orderDetails && existingOrder.orderDetails.length > 0) {
+          // Update the location of the existing variety
+          existingOrder.orderDetails[0].location = updateDetail.location;
+        } else {
+          // If there's no orderDetails array yet, create one with the location
+          existingOrder.orderDetails = [{
+            variety: updateDetail.variety,
+            bagSizes: updateDetail.bagSizes,
+            location: updateDetail.location
+          }];
+        }
+      }
+
+      // Always maintain a single variety entry
+      if (existingOrder.orderDetails && existingOrder.orderDetails.length > 0) {
+        // Update the variety name and bag sizes
+        existingOrder.orderDetails[0].variety = updateDetail.variety;
+        existingOrder.orderDetails[0].bagSizes = updateDetail.bagSizes;
+      } else {
+        // Create a new orderDetails array with single entry if it doesn't exist
+        existingOrder.orderDetails = [updateDetail];
+      }
+    }
+
+    // ✅ Step 3: Recalculate `currentStockAtThatTime`
+    let newCurrentStock = 0;
+    try {
+      const coldStorageId = existingOrder.coldStorageId;
+      const originalOrderId = existingOrder._id;
+
+      const result = await Order.aggregate([
+        {
+          $match: {
+            coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+            _id: { $ne: new mongoose.Types.ObjectId(originalOrderId) },
+          },
+        },
+        { $unwind: "$orderDetails" },
+        { $unwind: "$orderDetails.bagSizes" },
+        {
+          $group: {
+            _id: null,
+            totalCurrentQuantity: {
+              $sum: "$orderDetails.bagSizes.quantity.currentQuantity",
+            },
+          },
+        },
+      ]);
+
+      const baseStock = result.length > 0 ? result[0].totalCurrentQuantity : 0;
+
+      const orderStock = existingOrder.orderDetails.reduce(
+        (totalStock, detail) =>
+          totalStock +
+          detail.bagSizes.reduce(
+            (sum, bag) => sum + (bag.quantity.currentQuantity || 0),
+            0
+          ),
+        0
+      );
+
+      newCurrentStock = baseStock + orderStock;
+
+      req.log.info("Recalculated current stock", {
+        baseStock,
+        orderStock,
+        newCurrentStock,
+        orderId,
+        requestId: req.id,
+      });
+    } catch (error) {
+      req.log.error("Error recalculating stock", {
+        error: error.message,
+        stack: error.stack,
+        orderId,
+        requestId: req.id,
+      });
+
+      return reply.code(500).send({
+        status: "Fail",
+        message: "Error recalculating stock",
+        errorMessage: error.message,
+      });
+    }
+
+    existingOrder.currentStockAtThatTime = newCurrentStock;
+
+    // ✅ Step 4: Save the updated order
+    const updatedOrder = await existingOrder.save();
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Order updated successfully",
+      data: updatedOrder,
+    });
+  } catch (err) {
+    req.log.error("Error updating order", {
+      error: err.message,
+      stack: err.stack,
+      orderId: req.params?.orderId,
+      requestId: req.id,
+    });
+
+    reply.code(400).send({
+      status: "Fail",
+      message: "Failed to update order",
+      errorMessage: err.message,
+    });
+  }
+};
+
+
+const getFarmerInfo = async (req, reply) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Farmer ID is required",
+      });
+    }
+    
+    // Find farmer by id
+    const farmer = await Farmer.findById(id);
+    if (!farmer) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Farmer not found with the provided ID",
+      });
+    }
+    
+    reply.code(200).send({
+      status: "Success",
+      message: "Farmer information retrieved successfully",
+      data: farmer,
+    });
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while retrieving farmer information",
+      errorMessage: err.message,
+    });
+  }
+};
+
+const getFarmersOfAColdStorage = async (req, reply) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Cold storage ID is required",
+      });
+    }
+    
+    // Assuming "registeredFarmers" is the field that contains references to Farmer documents
+    const storeAdmin = await StoreAdmin.findById(id)
+      .populate({
+        path: 'registeredFarmers',  // Change this to your actual field name that contains farmer references
+        select: '-password -__v'    // Optional: exclude sensitive or unnecessary fields
+      });
+      
+    if (!storeAdmin) { 
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Cold storage not found",
+      });
+    }
+    
+    reply.code(200).send({
+      status: "Success",
+      message: "Cold storage orders retrieved successfully",
+      data: storeAdmin.registeredFarmers
+    });
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while retrieving cold storage orders",
+      errorMessage: err.message,
+    });
+  }
+};
+
+const deleteOrder = async (req, reply) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Order ID is required"
+      });
+    }
+
+    // Validate if the ID is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid order ID format"
+      });
+    }
+
+    // Find and delete the order
+    const deletedOrder = await Order.findByIdAndDelete(id);
+
+    if (!deletedOrder) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Order not found"
+      });
+    }
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Order deleted successfully",
+      data: deletedOrder
+    });
+
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while deleting the order",
+      errorMessage: err.message
+    });
+  }
+};
+
+const getOutgoingOrdersOfAColdStorage = async (req, reply) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Cold storage ID is required",
+      });
+    }
+
+    // Find orders by coldStorageId
+    const orders = await OutgoingOrder.find({ coldStorageId: id });
+
+    if (!orders.length) {
+      return reply.code(200).send({
+        status: "Fail",
+        message: "No orders found for this cold storage",
+      });
+    }
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Cold storage orders retrieved successfully",
+      data: orders,
+    });
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while retrieving cold storage orders",
+      errorMessage: err.message,
+    });
+  }
+};
+
 export {
   loginSuperAdmin,
   getAllColdStorages,
   logoutSuperAdmin,
   coldStorageSummary,
+  getIncomingOrdersOfAColdStorage,
+  editIncomingOrder,
+  getFarmersOfAColdStorage,
+  getFarmerInfo,
+  deleteOrder,
+  getOutgoingOrdersOfAColdStorage
+
 };

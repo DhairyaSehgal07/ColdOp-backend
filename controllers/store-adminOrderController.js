@@ -26,8 +26,7 @@ const getReceiptNumber = async (req, reply) => {
     const result = await Order.aggregate([
       {
         $match: {
-          coldStorageId: storeAdminId, // Match orders belonging to the specific store admin
-          "voucher.type": "RECEIPT", // Match orders where voucher type is "RECEIT"
+          coldStorageId: new mongoose.Types.ObjectId(storeAdminId), 
         },
       },
       {
@@ -206,10 +205,8 @@ const createNewIncomingOrder = async (req, reply) => {
 
     // Format and validate orderDetails
     const formattedOrderDetails = orderDetails.map((order) => {
-      // Format variety
+      // Format variety - just capitalize first letter, no replacing spaces
       const formattedVariety = order.variety
-        .toLowerCase()
-        .replace(/\s+/g, "-")
         .replace(/^./, (char) => char.toUpperCase());
 
       // Format and validate bagSizes, filtering out zero quantities
@@ -256,7 +253,7 @@ const createNewIncomingOrder = async (req, reply) => {
       };
     });
 
-    const receiptNumber = await getReceiptNumberHelper(req.storeAdmin._id);
+    const receiptNumber = await getReceiptNumberHelper(coldStorageId);
 
     if (!receiptNumber) {
       return reply.code(500).send({
@@ -367,24 +364,21 @@ const createNewIncomingOrder = async (req, reply) => {
 
 const editIncomingOrder = async (req, reply) => {
   try {
-    const { orderId } = req.params;
-    console.log("orderId is: ", orderId);
-    const { voucherNumber, orderDetails } = req.body;
-    console.log(req.body);
+    const orderId = req.params.id;
+    const updates = req.body;
 
-    // Validate MongoDB ObjectId
+    // Validate orderId
     if (!mongoose.Types.ObjectId.isValid(orderId)) {
       req.log.warn("Invalid orderId provided", { orderId });
       return reply.code(400).send({
         status: "Fail",
-        message: "Invalid orderId format",
-        errorMessage: "Please provide a valid MongoDB ObjectId",
+        message: "Invalid order ID format",
       });
     }
 
-    // Find the order by ID
-    const order = await Order.findById(orderId);
-    if (!order) {
+    // Find the existing order
+    const existingOrder = await Order.findById(orderId);
+    if (!existingOrder) {
       req.log.warn("Order not found", { orderId });
       return reply.code(404).send({
         status: "Fail",
@@ -392,56 +386,169 @@ const editIncomingOrder = async (req, reply) => {
       });
     }
 
-    // Update the voucher number if provided
-    if (voucherNumber !== undefined) {
-      order.voucher.voucherNumber = voucherNumber;
+    req.log.info("Processing order update", {
+      orderId,
+      updates,
+      requestId: req.id,
+    });
+
+    // Step 1: Handle direct field updates
+    const allowedDirectUpdates = ["remarks", "dateOfSubmission", "fulfilled"];
+    allowedDirectUpdates.forEach((field) => {
+      if (updates[field] !== undefined) {
+        existingOrder[field] = updates[field];
+      }
+    });
+
+    // Step 2: Handle orderDetails updates
+    if (updates.orderDetails && Array.isArray(updates.orderDetails) && updates.orderDetails.length > 0) {
+      // Since each order should have only one variety entry, we always use the first item in the array
+      const updateDetail = updates.orderDetails[0];
+      
+      if (!updateDetail.variety) {
+        throw new Error("Variety is required for order details");
+      }
+
+      if (
+        !updateDetail.bagSizes ||
+        !Array.isArray(updateDetail.bagSizes) ||
+        updateDetail.bagSizes.length === 0
+      ) {
+        throw new Error(
+          `At least one bag size is required for variety ${updateDetail.variety}`
+        );
+      }
+
+      // Validate bag sizes
+      updateDetail.bagSizes.forEach((bag) => {
+        if (!bag.size) {
+          throw new Error(
+            `Size is required for bag sizes in variety ${updateDetail.variety}`
+          );
+        }
+        if (
+          !bag.quantity ||
+          bag.quantity.initialQuantity === undefined ||
+          bag.quantity.currentQuantity === undefined
+        ) {
+          throw new Error(
+            `Both initialQuantity and currentQuantity are required for bag size ${bag.size} in variety ${updateDetail.variety}`
+          );
+        }
+        if (bag.quantity.initialQuantity < 0 || bag.quantity.currentQuantity < 0) {
+          throw new Error(
+            `Negative quantities are not allowed for ${updateDetail.variety} - ${bag.size}`
+          );
+        }
+      });
+
+      // Update the location if provided
+      if (updateDetail.location !== undefined) {
+        // If the order already has an orderDetails array with at least one item
+        if (existingOrder.orderDetails && existingOrder.orderDetails.length > 0) {
+          // Update the location of the existing variety
+          existingOrder.orderDetails[0].location = updateDetail.location;
+        } else {
+          // If there's no orderDetails array yet, create one with the location
+          existingOrder.orderDetails = [{
+            variety: updateDetail.variety,
+            bagSizes: updateDetail.bagSizes,
+            location: updateDetail.location
+          }];
+        }
+      }
+
+      // Always maintain a single variety entry
+      if (existingOrder.orderDetails && existingOrder.orderDetails.length > 0) {
+        // Update the variety name and bag sizes
+        existingOrder.orderDetails[0].variety = updateDetail.variety;
+        existingOrder.orderDetails[0].bagSizes = updateDetail.bagSizes;
+      } else {
+        // Create a new orderDetails array with single entry if it doesn't exist
+        existingOrder.orderDetails = [updateDetail];
+      }
     }
 
-    // Update the order details if provided
-    if (orderDetails && Array.isArray(orderDetails)) {
-      orderDetails.forEach((newDetail) => {
-        const existingDetail = order.orderDetails.find(
-          (detail) => detail.variety === newDetail.variety
-        );
+    // Step 3: Recalculate `currentStockAtThatTime`
+    let newCurrentStock = 0;
+    try {
+      const coldStorageId = existingOrder.coldStorageId;
+      const originalOrderId = existingOrder._id;
 
-        if (existingDetail) {
-          newDetail.bagSizes.forEach((newBag) => {
-            const existingBag = existingDetail.bagSizes.find(
-              (bag) => bag.size === newBag.size
-            );
+      const result = await Order.aggregate([
+        {
+          $match: {
+            coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+            _id: { $ne: new mongoose.Types.ObjectId(originalOrderId) },
+          },
+        },
+        { $unwind: "$orderDetails" },
+        { $unwind: "$orderDetails.bagSizes" },
+        {
+          $group: {
+            _id: null,
+            totalCurrentQuantity: {
+              $sum: "$orderDetails.bagSizes.quantity.currentQuantity",
+            },
+          },
+        },
+      ]);
 
-            if (existingBag) {
-              existingBag.quantity.initialQuantity =
-                newBag.quantity.initialQuantity;
-              existingBag.quantity.currentQuantity =
-                newBag.quantity.currentQuantity;
-            } else {
-              existingDetail.bagSizes.push(newBag);
-            }
-          });
-        } else {
-          order.orderDetails.push(newDetail);
-        }
+      const baseStock = result.length > 0 ? result[0].totalCurrentQuantity : 0;
+
+      const orderStock = existingOrder.orderDetails.reduce(
+        (totalStock, detail) =>
+          totalStock +
+          detail.bagSizes.reduce(
+            (sum, bag) => sum + (bag.quantity.currentQuantity || 0),
+            0
+          ),
+        0
+      );
+
+      newCurrentStock = baseStock + orderStock;
+
+      req.log.info("Recalculated current stock", {
+        baseStock,
+        orderStock,
+        newCurrentStock,
+        orderId,
+        requestId: req.id,
+      });
+    } catch (error) {
+      req.log.error("Error recalculating stock", {
+        error: error.message,
+        stack: error.stack,
+        orderId,
+        requestId: req.id,
+      });
+
+      return reply.code(500).send({
+        status: "Fail",
+        message: "Error recalculating stock",
+        errorMessage: error.message,
       });
     }
 
-    // Save the updated order
-    await order.save();
+    existingOrder.currentStockAtThatTime = newCurrentStock;
+
+    // Step 4: Save the updated order
+    const updatedOrder = await existingOrder.save();
 
     reply.code(200).send({
       status: "Success",
       message: "Order updated successfully",
-      data: order,
+      data: updatedOrder,
     });
   } catch (err) {
     req.log.error("Error updating order", {
       error: err.message,
       stack: err.stack,
-      orderId: req.params.orderId,
+      orderId: req.params?.orderId,
       requestId: req.id,
     });
 
-    reply.code(500).send({
+    reply.code(400).send({
       status: "Fail",
       message: "Failed to update order",
       errorMessage: err.message,
@@ -482,17 +589,9 @@ const getFarmerIncomingOrders = async (req, reply) => {
       farmerId: id,
     });
 
-    // Sort bagSizes in each order
-    const sortedOrders = orders.map((order) => {
-      const orderObj = order.toObject();
-      orderObj.orderDetails = orderObj.orderDetails.map((detail) => ({
-        ...detail,
-        bagSizes: detail.bagSizes.sort((a, b) => a.size.localeCompare(b.size)),
-      }));
-      return orderObj;
-    });
+    const orderObjs = orders.map(order => order.toObject());
 
-    if (!sortedOrders || sortedOrders.length === 0) {
+    if (!orderObjs || orderObjs.length === 0) {
       req.log.info("No orders found for farmer", {
         farmerId: id,
         storeAdminId,
@@ -507,13 +606,13 @@ const getFarmerIncomingOrders = async (req, reply) => {
     // Log the successful response
     req.log.info("Successfully retrieved farmer orders", {
       farmerId: id,
-      orderCount: sortedOrders.length,
+      orderCount: orderObjs.length,
     });
 
-    // Sending a success response with the sorted orders
+    // Sending a success response with the orders (no sorting)
     reply.code(200).send({
       status: "Success",
-      data: sortedOrders,
+      data: orderObjs,
     });
   } catch (err) {
     // Log the error with context
@@ -840,8 +939,12 @@ const getVarietyAvailableForFarmer = async (req, reply) => {
 };
 
 const createOutgoingOrder = async (req, reply) => {
+
+ 
   const session = await mongoose.startSession();
   session.startTransaction();
+
+  
 
   try {
     req.log.info("Starting createOutgoingOrder process", {
@@ -1150,6 +1253,7 @@ const createOutgoingOrder = async (req, reply) => {
     req.log.info("Transaction committed successfully");
 
     return reply.code(200).send({
+      status:"Success", 
       message: "Outgoing order processed successfully.",
       outgoingOrder,
     });

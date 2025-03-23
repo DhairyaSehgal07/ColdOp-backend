@@ -125,6 +125,12 @@ function storeAdminRoutes(fastify, options, done) {
     createNewIncomingOrder
   );
 
+  fastify.put(
+    "/orders/:id",
+    { preHandler: [storeAdminProtect] },
+    editIncomingOrder
+  );
+
   // get all farmer orders
   fastify.get(
     "/farmers/:id/orders",
@@ -184,11 +190,7 @@ function storeAdminRoutes(fastify, options, done) {
     getFarmersIdsForCheck
   );
 
-  // fastify.put(
-  //   "/test/:orderId",
-  //   { preHandler: [storeAdminProtect] },
-  //   editIncomingOrder
-  // );
+
 
   done();
 }

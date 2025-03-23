@@ -1,5 +1,6 @@
 import Order from "../models/orderModel.js";
 import OutgoingOrder from "../models/outgoingOrderModel.js";
+import mongoose from "mongoose";
 // export const formatDate = (date) => {
 //   const day = date.getDate();
 //   const monthIndex = date.getMonth();
@@ -47,23 +48,22 @@ export const getReceiptNumberHelper = async (storeAdminId) => {
     const result = await Order.aggregate([
       {
         $match: {
-          coldStorageId: storeAdminId, // Match orders belonging to the specific store admin
-          "voucher.type": "RECEIPT", // Match orders where voucher type is "RECEIPT"
+          coldStorageId: new mongoose.Types.ObjectId(storeAdminId), 
         },
       },
       {
         $group: {
-          _id: null, // We don't care about grouping by any field, just counting
-          count: { $sum: 1 }, // Sum the number of documents that match
+          _id: null,
+          count: { $sum: 1 },
         },
       },
     ]);
-
-    // If no matching documents are found, result will be an empty array, so handle that case
+    console.log("RESULT IS: ", result);
     const ReceiptVoucherNumber = result.length > 0 ? result[0].count : 0;
     return ReceiptVoucherNumber + 1;
   } catch (err) {
-    throw new Error("Some error occurred while getting receipt Number");
+    console.error("Error fetching receipt number:", err);
+    throw new Error("Some error occurred while getting receipt number");
   }
 };
 
@@ -72,7 +72,7 @@ export const getDeliveryVoucherNumberHelper = async (storeAdminId) => {
     const result = await OutgoingOrder.aggregate([
       {
         $match: {
-          coldStorageId: storeAdminId,
+          coldStorageId:  new mongoose.Types.ObjectId(storeAdminId), 
         },
       },
       {
@@ -108,30 +108,70 @@ export const formatDate = (date) => {
 };
 
 export const varieties = [
-  "K. Pukhraj",
-  "K. Jyoti",
-  "Super Six",
-  "Himalini",
-  "Diamont",
+  "Atlantic",
+  "Cardinal",
   "Chipsona 1",
   "Chipsona 2",
   "Chipsona 3",
-  "FC - 5",
+  "Columba",
+  "Desiree",
+  "Diamont",
   "FC - 11",
   "FC - 12",
-  "L.R",
-  "Khyati",
-  "K. Chandramukhi",
-  "K. Badshah",
-  "Kuroda",
-  "Cardinal",
-  "Desiree",
-  "Columba",
-  "Atlantic",
-  "Pushkar",
-  "Surya",
+  "FC - 5",
   "Fry Sona",
-  "SU - Khyati",
+  "Himalini",
+  "K. Badshah",
+  "K. Chandramukhi",
+  "K. Jyoti",
+  "K. Pukhraj",
+  "Kuroda",
+  "Khyati",
+  "L.R",
   "Lima",
   "Mohan",
+  "Pushkar",
+  "SU - Khyati",
+  "Super Six",
+  "Surya",
 ];
+
+
+const cleanRegisteredFarmers = async (storeAdminId) => {
+  try {
+    // Fetch the store admin document
+    const storeAdmin = await StoreAdmin.findById(storeAdminId);
+    if (!storeAdmin) {
+      console.log("Store Admin not found");
+      return;
+    }
+
+    let registeredFarmers = storeAdmin.registeredFarmers; // Array of farmer IDs
+
+    // Find farmers that exist in the database
+    const existingFarmers = await Farmer.find({
+      _id: { $in: registeredFarmers },
+    }).select("_id");
+
+    // Extract valid IDs from found farmer documents
+    const validFarmerIds = new Set(
+      existingFarmers.map((farmer) => farmer._id.toString())
+    );
+
+    // Filter out IDs that are not in the database
+    const filteredFarmers = registeredFarmers.filter((id) =>
+      validFarmerIds.has(id.toString())
+    );
+
+    // Update the store admin document only if changes are needed
+    if (filteredFarmers.length !== registeredFarmers.length) {
+      storeAdmin.registeredFarmers = filteredFarmers;
+      await storeAdmin.save();
+      console.log("Updated store admin document with valid farmers.");
+    } else {
+      console.log("No changes needed. All farmers exist.");
+    }
+  } catch (error) {
+    console.error("Error cleaning registered farmers:", error);
+  }
+};

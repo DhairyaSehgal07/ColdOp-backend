@@ -42,3 +42,4 @@ coverage/
 *.tgz
 
 server.log
+.qodo

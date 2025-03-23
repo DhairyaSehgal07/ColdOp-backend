@@ -44,21 +44,10 @@ const start = async () => {
     routePrefix: "/docs",
   });
 
-  // app.register(acceptsSerializer, {
-  //   serializers: [
-  //     {
-  //       regex: /^application\/json/,
-  //       serializer: (payload) => JSON.parse(payload),
-  //     },
-  //     {
-  //       regex: /^application\/x-www-form-urlencoded/,
-  //       serializer: (payload) => require("querystring").parse(payload),
-  //     },
-  //   ],
-  // });
 
-  await app.register(cors, {
-    origin: ["*", "http://localhost:3000"],
+
+   await app.register(cors, {
+    origin: ["*"],
     methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,

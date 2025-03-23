@@ -684,7 +684,7 @@ const deleteFarmer = async (req, res) => {
 const quickRegisterFarmer = async (req, reply) => {
   try {
     // Validate the request body
-    req.log.info("Validating request body for quick farmer registration");
+    const storeAdminId = req.storeAdmin._id;
     quickRegisterSchema.parse(req.body);
 
     // Check if farmerId is present
@@ -697,8 +697,7 @@ const quickRegisterFarmer = async (req, reply) => {
     }
 
     // Extract data from the request body
-    const { name, address, mobileNumber, password, imageUrl, farmerId } =
-      req.body;
+    const { name, address, mobileNumber, password, imageUrl, farmerId } = req.body;
     const formattedName = formatName(name);
 
     // Log farmer existence check
@@ -707,21 +706,27 @@ const quickRegisterFarmer = async (req, reply) => {
     // Check if a farmer with the given mobile number already exists
     const farmerExists = await Farmer.findOne({ mobileNumber });
     if (farmerExists) {
-      req.log.warn("Farmer already exists", { mobileNumber });
+      req.log.warn("Farmer already exists with this mobile number", { mobileNumber });
       return reply.code(400).send({
         status: "Fail",
-        message: "Farmer already exists",
+        message: "Farmer already exists with this mobile number",
       });
     }
 
-    // Ensure the provided farmerId is unique
-    req.log.info("Checking if farmerId is unique", { farmerId });
-    const farmerIdExists = await Farmer.findOne({ farmerId });
-    if (farmerIdExists) {
-      req.log.warn("FarmerId already exists", { farmerId });
+    // Check for unique combination of farmerId and first registeredStoreAdmin
+    const existingFarmer = await Farmer.findOne({
+      farmerId: farmerId,
+      registeredStoreAdmins: { $elemMatch: { $eq: storeAdminId } }
+    });
+
+    if (existingFarmer) {
+      req.log.warn("Farmer ID already registered with this cold storage", { 
+        farmerId,
+        storeAdminId 
+      });
       return reply.code(400).send({
         status: "Fail",
-        message: "FarmerId already exists. Please use a different ID.",
+        message: "This Farmer ID is already registered under this cold storage. Please either change the Farmer ID or register with a different cold storage."
       });
     }
 
@@ -730,7 +735,13 @@ const quickRegisterFarmer = async (req, reply) => {
     req.log.info("Password hashed successfully");
 
     // Create the new farmer record
-    req.log.info("Creating new farmer record", { name, mobileNumber });
+    req.log.info("Creating new farmer record", { 
+      name, 
+      mobileNumber,
+      farmerId,
+      storeAdminId 
+    });
+
     const farmer = await Farmer.create({
       name: formattedName,
       address,
@@ -739,51 +750,33 @@ const quickRegisterFarmer = async (req, reply) => {
       imageUrl,
       farmerId,
       isVerified: false,
+      registeredStoreAdmins: [storeAdminId]
     });
 
     if (farmer) {
-      // Log store admin lookup
-      req.log.info("Fetching store admin", {
-        storeAdminId: req.storeAdmin._id,
+      // Update store admin's registeredFarmers array
+      await StoreAdmin.findByIdAndUpdate(
+        storeAdminId,
+        { $addToSet: { registeredFarmers: farmer._id } },
+        { new: true }
+      );
+
+      req.log.info("Farmer registered successfully", {
+        farmerId: farmer.farmerId,
+        storeAdminId
       });
 
-      // Find the store admin
-      const storeAdmin = await StoreAdmin.findById(req.storeAdmin._id);
-
-      // Check if store admin exists and registeredFarmers array is initialized
-      if (storeAdmin && storeAdmin.registeredFarmers) {
-        // Log store admin and farmer association
-        req.log.info("Associating farmer with store admin", {
-          farmerId: farmer._id,
-        });
-
-        // Add the farmer to the store admin's registeredFarmers array
-        storeAdmin.registeredFarmers.push(farmer._id);
-        await storeAdmin.save();
-        req.log.info("Store admin updated successfully");
-
-        farmer.registeredStoreAdmins.push(req.storeAdmin._id);
-        await farmer.save();
-        req.log.info("Farmer registered successfully");
-
-        // Send the response
-        return reply.code(200).send({
-          status: "Success",
-          message: "Farmer registered",
-        });
-      } else {
-        req.log.error(
-          "Store admin or registeredFarmers array is not properly initialized"
-        );
-        return reply.code(500).send({
-          status: "Fail",
-          message:
-            "Error: Store admin or registeredFarmers array is not properly initialized",
-        });
-      }
+      return reply.code(201).send({
+        status: "Success",
+        message: "Farmer registered successfully",
+        data: {
+          farmerId: farmer.farmerId,
+          name: farmer.name,
+          mobileNumber: farmer.mobileNumber
+        }
+      });
     }
   } catch (err) {
-    // Handle errors with logging
     req.log.error("Error occurred during farmer registration", {
       error: err.message,
     });

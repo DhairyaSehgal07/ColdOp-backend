@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import Farmer from "../models/farmerModel.js";
 import StoreAdmin from "../models/storeAdminModel.js";
+import SuperAdmin from "../models/superAdminModel.js";
 
 const protect = async (request, reply) => {
   try {

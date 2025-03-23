@@ -51,7 +51,6 @@ const farmerSchema = mongoose.Schema(
     farmerId: {
       type: String,
       required: true,
-      unique: true,
     },
     farmerOrders: [farmerOrderSchema],
     isVerified: {
@@ -64,7 +63,10 @@ const farmerSchema = mongoose.Schema(
   { timestamps: true }
 );
 
-farmerSchema.index({ farmerId: 1, registeredStoreAdmins: 1 }, { unique: true });
+farmerSchema.index({ 
+  farmerId: 1, 
+  "registeredStoreAdmins.0": 1 
+}, { unique: true });
 
 const Farmer = mongoose.model("Farmers", farmerSchema);
 
