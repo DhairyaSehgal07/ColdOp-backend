@@ -66,18 +66,13 @@ const getReceiptNumber = async (req, reply) => {
 //@access Private
 const searchFarmers = async (req, reply) => {
   try {
+    const coldStorageId = req.storeAdmin._id; 
     const searchQuery = req.query.query;
-    const { id } = req.params;
 
     console.log("SEARCH QUERY IS: ", searchQuery);
-    console.log("id is : ", id);
-    // Log the search request details
-    req.log.info("Starting farmer search", {
-      searchQuery,
-      storeAdminId: id,
-    });
+    console.log("COLD STORAGE ID IS: ", coldStorageId);
 
-    // MongoDB aggregation pipeline (Fix: `$search` is now the first stage)
+    // MongoDB aggregation pipeline
     req.log.info("Running aggregation pipeline for farmer search");
     const result = await Farmer.aggregate([
       {
@@ -95,7 +90,7 @@ const searchFarmers = async (req, reply) => {
       },
       {
         $match: {
-          registeredStoreAdmins: new mongoose.Types.ObjectId(id),
+          "registeredStoreAdmins.0": new mongoose.Types.ObjectId(coldStorageId) 
         },
       },
       {
@@ -131,7 +126,7 @@ const searchFarmers = async (req, reply) => {
     req.log.error("Error occurred while searching farmers", {
       errorMessage: err.message,
       searchQuery: req.query.query,
-      storeAdminId: req.params.id,
+      coldStorageId: req.storeAdmin._id,
     });
 
     reply.code(500).send({

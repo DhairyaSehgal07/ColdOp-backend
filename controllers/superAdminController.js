@@ -485,7 +485,6 @@ const getFarmersOfAColdStorage = async (req, reply) => {
       });
     }
     
-    // Assuming "registeredFarmers" is the field that contains references to Farmer documents
     const storeAdmin = await StoreAdmin.findById(id)
       .populate({
         path: 'registeredFarmers',  // Change this to your actual field name that contains farmer references
