@@ -115,7 +115,7 @@ export const varieties = [
   "Chipsona 3",
   "Columba",
   "Desiree",
-  "Diamont",
+  "Diamant",
   "FC - 11",
   "FC - 12",
   "FC - 5",

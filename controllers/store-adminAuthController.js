@@ -790,22 +790,36 @@ const quickRegisterFarmer = async (req, reply) => {
 
 const getFarmersIdsForCheck = async (req, reply) => {
   try {
-    // Populate the registeredFarmers with farmerId from Farmer model
-    await req.storeAdmin.populate({
-      path: "registeredFarmers",
-      model: "Farmers", // Changed from "Farmer" to "Farmers" to match your model registration
-      select: "farmerId",
-    });
+    // Get the store admin document with populated registeredFarmers
+    const storeAdmin = await StoreAdmin.findById(req.storeAdmin._id);
+    
+    // Filter out any non-existent farmers and get their IDs
+    const validFarmerIds = [];
+    const invalidFarmerIds = [];
+    
+    for (const farmerId of storeAdmin.registeredFarmers) {
+      const farmerExists = await Farmer.findById(farmerId);
+      if (farmerExists) {
+        validFarmerIds.push(farmerExists.farmerId);
+      } else {
+        invalidFarmerIds.push(farmerId);
+      }
+    }
 
-    // Extract the populated registeredFarmers
-    const registeredFarmers = req.storeAdmin.registeredFarmers
-      .filter((farmer) => farmer && farmer.farmerId)
-      .map((farmer) => farmer.farmerId);
+    // If there were any invalid IDs, remove them from the store admin's registeredFarmers
+    if (invalidFarmerIds.length > 0) {
+      await StoreAdmin.findByIdAndUpdate(
+        req.storeAdmin._id,
+        {
+          $pull: { registeredFarmers: { $in: invalidFarmerIds } }
+        }
+      );
+    }
 
     reply.code(200).send({
       status: "Success",
       data: {
-        registeredFarmers,
+        registeredFarmers: validFarmerIds,
       },
     });
   } catch (err) {
