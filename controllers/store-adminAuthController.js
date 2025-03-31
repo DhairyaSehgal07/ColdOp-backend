@@ -11,7 +11,7 @@ import {
 import Farmer from "../models/farmerModel.js";
 import Request from "../models/requestModel.js";
 import generateUniqueAlphaNumeric from "../utils/farmers/generateUniqueAlphaNumeric.js";
-import { formatName } from "../utils/helpers.js";
+import { formatFarmerName, formatName } from "../utils/helpers.js";
 
 // @desc register a store-admin
 // @route POST/api/store-admin/register
@@ -698,7 +698,7 @@ const quickRegisterFarmer = async (req, reply) => {
 
     // Extract data from the request body
     const { name, address, mobileNumber, password, imageUrl, farmerId } = req.body;
-    const formattedName = formatName(name);
+    const formattedName = formatFarmerName(name);
 
     // Log farmer existence check
     req.log.info("Checking if farmer already exists", { mobileNumber });
@@ -720,9 +720,9 @@ const quickRegisterFarmer = async (req, reply) => {
     });
 
     if (existingFarmer) {
-      req.log.warn("Farmer ID already registered with this cold storage", { 
+      req.log.warn("Farmer ID already registered with this cold storage", {
         farmerId,
-        storeAdminId 
+        storeAdminId
       });
       return reply.code(400).send({
         status: "Fail",
@@ -735,11 +735,11 @@ const quickRegisterFarmer = async (req, reply) => {
     req.log.info("Password hashed successfully");
 
     // Create the new farmer record
-    req.log.info("Creating new farmer record", { 
-      name, 
+    req.log.info("Creating new farmer record", {
+      name,
       mobileNumber,
       farmerId,
-      storeAdminId 
+      storeAdminId
     });
 
     const farmer = await Farmer.create({
@@ -792,11 +792,11 @@ const getFarmersIdsForCheck = async (req, reply) => {
   try {
     // Get the store admin document with populated registeredFarmers
     const storeAdmin = await StoreAdmin.findById(req.storeAdmin._id);
-    
+
     // Filter out any non-existent farmers and get their IDs
     const validFarmerIds = [];
     const invalidFarmerIds = [];
-    
+
     for (const farmerId of storeAdmin.registeredFarmers) {
       const farmerExists = await Farmer.findById(farmerId);
       if (farmerExists) {

@@ -48,7 +48,7 @@ export const getReceiptNumberHelper = async (storeAdminId) => {
     const result = await Order.aggregate([
       {
         $match: {
-          coldStorageId: new mongoose.Types.ObjectId(storeAdminId), 
+          coldStorageId: new mongoose.Types.ObjectId(storeAdminId),
         },
       },
       {
@@ -72,7 +72,7 @@ export const getDeliveryVoucherNumberHelper = async (storeAdminId) => {
     const result = await OutgoingOrder.aggregate([
       {
         $match: {
-          coldStorageId:  new mongoose.Types.ObjectId(storeAdminId), 
+          coldStorageId:  new mongoose.Types.ObjectId(storeAdminId),
         },
       },
       {
@@ -100,6 +100,14 @@ export const formatName = (name) => {
     .join("-"); // Join the words with hyphens
 };
 
+export const formatFarmerName = (name) => {
+  return name
+    .split(" ")
+    .map(
+      (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    )
+};
+
 export const formatDate = (date) => {
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0"); // Months are 0-indexed
@@ -113,7 +121,7 @@ export const varieties = [
   "Chipsona 1",
   "Chipsona 2",
   "Chipsona 3",
-  "Columba",
+  "Colomba",
   "Desiree",
   "Diamant",
   "FC - 11",
