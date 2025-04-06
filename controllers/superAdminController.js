@@ -907,6 +907,9 @@ const getFarmerOrderFrequency = async (req, reply) => {
   try {
     const { coldStorageId, farmerId } = req.params;
 
+    // Add today's date for comparison
+    const currentDate = new Date();
+
     // Validate IDs
     if (
       !mongoose.Types.ObjectId.isValid(coldStorageId) ||
@@ -922,17 +925,45 @@ const getFarmerOrderFrequency = async (req, reply) => {
     // Get all orders for this farmer at this cold storage
     const orders = await Order.find({
       coldStorageId,
-      farmerId
-    }).sort({ dateOfSubmission: 1 });
+      farmerId,
+    });
 
-    if (!orders.length) {
+    // Parse dates and filter out future orders
+    const parsedOrders = orders.filter(order => {
+      try {
+        // Parse date in format DD.MM.YY
+        const [day, month, yearShort] = order.dateOfSubmission.split('.');
+        const year = 2000 + parseInt(yearShort, 10); // Assuming 20xx for the year
+        const orderDate = new Date(year, month - 1, day); // month is 0-indexed in JS Date
+
+        // Only include orders up to current date
+        return orderDate <= currentDate;
+      } catch (err) {
+        return false;
+      }
+    }).sort((a, b) => {
+      // Sort by parsed dates
+      const [dayA, monthA, yearShortA] = a.dateOfSubmission.split('.');
+      const [dayB, monthB, yearShortB] = b.dateOfSubmission.split('.');
+
+      const yearA = 2000 + parseInt(yearShortA, 10);
+      const yearB = 2000 + parseInt(yearShortB, 10);
+
+      const dateA = new Date(yearA, monthA - 1, dayA);
+      const dateB = new Date(yearB, monthB - 1, dayB);
+
+      return dateA - dateB;
+    });
+
+    if (!parsedOrders.length) {
       return reply.code(200).send({
         status: "Success",
         message: "No orders found for this farmer at this cold storage",
         data: {
           orderCount: 0,
           monthlyFrequency: [],
-          quarterlyFrequency: []
+          quarterlyFrequency: [],
+          avgOrderInterval: 0
         }
       });
     }
@@ -943,15 +974,18 @@ const getFarmerOrderFrequency = async (req, reply) => {
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
     // Process each order
-    orders.forEach(order => {
-      const orderDate = new Date(order.dateOfSubmission);
-      const year = orderDate.getFullYear();
-      const month = orderDate.getMonth(); // 0-11
-      const quarter = Math.floor(month / 3) + 1; // 1-4
+    parsedOrders.forEach(order => {
+      // Parse date again for calculations
+      const [day, month, yearShort] = order.dateOfSubmission.split('.');
+      const year = 2000 + parseInt(yearShort, 10);
+      const orderDate = new Date(year, month - 1, day);
+
+      const monthIndex = parseInt(month, 10) - 1; // Convert to 0-indexed
+      const quarter = Math.floor(monthIndex / 3) + 1; // 1-4
 
       // Monthly frequency
-      const monthKey = `${year}-${month+1}`;
-      const monthLabel = `${monthNames[month]} ${year}`;
+      const monthKey = `${year}-${monthIndex+1}`;
+      const monthLabel = `${monthNames[monthIndex]} ${year}`;
       if (!monthlyData[monthKey]) {
         monthlyData[monthKey] = {
           period: monthLabel,
@@ -962,10 +996,13 @@ const getFarmerOrderFrequency = async (req, reply) => {
       monthlyData[monthKey].count += 1;
 
       // Add quantities from order details
+      let orderTotalQuantity = 0;
       if (order.orderDetails && order.orderDetails.length > 0) {
         order.orderDetails.forEach(detail => {
           detail.bagSizes.forEach(bag => {
-            monthlyData[monthKey].totalQuantity += bag.quantity.initialQuantity;
+            const quantity = bag.quantity.initialQuantity || 0;
+            orderTotalQuantity += quantity;
+            monthlyData[monthKey].totalQuantity += quantity;
           });
         });
       }
@@ -986,7 +1023,8 @@ const getFarmerOrderFrequency = async (req, reply) => {
       if (order.orderDetails && order.orderDetails.length > 0) {
         order.orderDetails.forEach(detail => {
           detail.bagSizes.forEach(bag => {
-            quarterlyData[quarterKey].totalQuantity += bag.quantity.initialQuantity;
+            const quantity = bag.quantity.initialQuantity || 0;
+            quarterlyData[quarterKey].totalQuantity += quantity;
           });
         });
       }
@@ -995,35 +1033,49 @@ const getFarmerOrderFrequency = async (req, reply) => {
     // Convert data objects to arrays
     const monthlyFrequency = Object.values(monthlyData).sort((a, b) => {
       // Extract year and month for comparison
-      const [aYear, aMonth] = a.period.split(' ')[1] + '-' +
-                            monthNames.indexOf(a.period.split(' ')[0]);
-      const [bYear, bMonth] = b.period.split(' ')[1] + '-' +
-                            monthNames.indexOf(b.period.split(' ')[0]);
-      return aYear.localeCompare(bYear) || aMonth - bMonth;
+      const [aMonth, aYear] = a.period.split(' ');
+      const [bMonth, bYear] = b.period.split(' ');
+
+      // Compare by year first, then by month index
+      if (aYear !== bYear) return parseInt(aYear) - parseInt(bYear);
+      return monthNames.indexOf(aMonth) - monthNames.indexOf(bMonth);
     });
 
     const quarterlyFrequency = Object.values(quarterlyData).sort((a, b) => {
-      return a.period.localeCompare(b.period);
+      // Sort by year and quarter
+      const [aQuarter, aYear] = a.period.replace('Q', '').split(' ');
+      const [bQuarter, bYear] = b.period.replace('Q', '').split(' ');
+
+      if (aYear !== bYear) return parseInt(aYear) - parseInt(bYear);
+      return parseInt(aQuarter) - parseInt(bQuarter);
     });
 
     // Calculate average order interval in days
     let totalIntervalDays = 0;
-    for (let i = 1; i < orders.length; i++) {
-      const prevDate = new Date(orders[i-1].dateOfSubmission);
-      const currDate = new Date(orders[i].dateOfSubmission);
+    for (let i = 1; i < parsedOrders.length; i++) {
+      // Parse dates for interval calculation
+      const [prevDay, prevMonth, prevYearShort] = parsedOrders[i-1].dateOfSubmission.split('.');
+      const [currDay, currMonth, currYearShort] = parsedOrders[i].dateOfSubmission.split('.');
+
+      const prevYear = 2000 + parseInt(prevYearShort, 10);
+      const currYear = 2000 + parseInt(currYearShort, 10);
+
+      const prevDate = new Date(prevYear, parseInt(prevMonth, 10) - 1, parseInt(prevDay, 10));
+      const currDate = new Date(currYear, parseInt(currMonth, 10) - 1, parseInt(currDay, 10));
+
       const intervalDays = Math.floor((currDate - prevDate) / (1000 * 60 * 60 * 24));
       totalIntervalDays += intervalDays;
     }
 
-    const avgOrderInterval = orders.length > 1
-      ? Math.round(totalIntervalDays / (orders.length - 1))
+    const avgOrderInterval = parsedOrders.length > 1
+      ? Math.round(totalIntervalDays / (parsedOrders.length - 1))
       : 0;
 
     return reply.code(200).send({
       status: "Success",
       message: "Farmer order frequency metrics retrieved successfully",
       data: {
-        orderCount: orders.length,
+        orderCount: parsedOrders.length,
         monthlyFrequency,
         quarterlyFrequency,
         avgOrderInterval
