@@ -6,9 +6,13 @@ import {
   getIncomingOrdersOfAColdStorage,
   editIncomingOrder,
   getFarmerInfo,
-  getFarmersOfAColdStorage, 
+  getFarmersOfAColdStorage,
   deleteOrder,
-  getOutgoingOrdersOfAColdStorage
+  getOutgoingOrdersOfAColdStorage,
+  editFarmerInfo,
+  getSingleFarmerOrders,
+  getTopFarmers,
+  getFarmerOrderFrequency
 } from "../controllers/superAdminController.js";
 import { superAdminProtect } from "../middleware/authMiddleware.js";
 function superAdminRoutes(fastify, options, done) {
@@ -40,7 +44,7 @@ function superAdminRoutes(fastify, options, done) {
     editIncomingOrder
 
     );
-  
+
   fastify.delete("/orders/:id", { preHandler: [superAdminProtect] },deleteOrder)
 
   fastify.get("/cold-storages/:id/farmers", { preHandler: [superAdminProtect] },
@@ -53,9 +57,19 @@ function superAdminRoutes(fastify, options, done) {
     getFarmerInfo
   );
 
+    fastify.put(
+    "/farmers/:id",
+    { preHandler: [superAdminProtect] },
+    editFarmerInfo
+  );
+
+  fastify.get("/cold-storages/:coldStorageId/farmers/:farmerId/order-frequency" ,  { preHandler: [superAdminProtect] },getFarmerOrderFrequency)
+
+  fastify.get("/cold-storages/:id/top-farmers", { preHandler: [superAdminProtect] },getTopFarmers)
+
+  fastify.get("/cold-storages/:coldStorageId/farmers/:farmerId/orders", { preHandler: [superAdminProtect] },getSingleFarmerOrders)
+
   fastify.get("/cold-storages/:id/outgoing-orders", { preHandler: [superAdminProtect] }, getOutgoingOrdersOfAColdStorage)
-
-
 
   done();
 }

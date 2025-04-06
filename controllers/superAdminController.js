@@ -289,7 +289,7 @@ const editIncomingOrder = async (req, reply) => {
     if (updates.orderDetails && Array.isArray(updates.orderDetails) && updates.orderDetails.length > 0) {
       // Since each order should have only one variety entry, we always use the first item in the array
       const updateDetail = updates.orderDetails[0];
-      
+
       if (!updateDetail.variety) {
         throw new Error("Variety is required for order details");
       }
@@ -441,7 +441,6 @@ const editIncomingOrder = async (req, reply) => {
   }
 };
 
-
 const getFarmerInfo = async (req, reply) => {
   try {
     const { id } = req.params;
@@ -451,7 +450,7 @@ const getFarmerInfo = async (req, reply) => {
         message: "Farmer ID is required",
       });
     }
-    
+
     // Find farmer by id
     const farmer = await Farmer.findById(id);
     if (!farmer) {
@@ -460,7 +459,7 @@ const getFarmerInfo = async (req, reply) => {
         message: "Farmer not found with the provided ID",
       });
     }
-    
+
     reply.code(200).send({
       status: "Success",
       message: "Farmer information retrieved successfully",
@@ -484,20 +483,20 @@ const getFarmersOfAColdStorage = async (req, reply) => {
         message: "Cold storage ID is required",
       });
     }
-    
+
     const storeAdmin = await StoreAdmin.findById(id)
       .populate({
         path: 'registeredFarmers',  // Change this to your actual field name that contains farmer references
         select: '-password -__v'    // Optional: exclude sensitive or unnecessary fields
       });
-      
-    if (!storeAdmin) { 
+
+    if (!storeAdmin) {
       return reply.code(404).send({
         status: "Fail",
         message: "Cold storage not found",
       });
     }
-    
+
     reply.code(200).send({
       status: "Success",
       message: "Cold storage orders retrieved successfully",
@@ -591,6 +590,454 @@ const getOutgoingOrdersOfAColdStorage = async (req, reply) => {
   }
 };
 
+const editFarmerInfo = async (req, reply) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    if (!id) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Farmer ID is required",
+      });
+    }
+
+    // Validate if the ID is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid farmer ID format",
+      });
+    }
+
+    // Define which fields can be updated
+    const allowedUpdates = [
+      "name",
+      "address",
+      "mobileNumber",
+      "imageUrl",
+      "isVerified"
+    ];
+
+    // Filter out any fields that are not allowed to be updated
+    const filteredUpdates = Object.keys(updates)
+      .filter(key => allowedUpdates.includes(key))
+      .reduce((obj, key) => {
+        obj[key] = updates[key];
+        return obj;
+      }, {});
+
+    if (Object.keys(filteredUpdates).length === 0) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "No valid fields to update",
+      });
+    }
+
+    // Update the farmer with the filtered updates
+    const updatedFarmer = await Farmer.findByIdAndUpdate(
+      id,
+      filteredUpdates,
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedFarmer) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Farmer not found",
+      });
+    }
+
+    // Return the updated farmer
+    reply.code(200).send({
+      status: "Success",
+      message: "Farmer information updated successfully",
+      data: updatedFarmer,
+    });
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while updating farmer information",
+      errorMessage: err.message,
+    });
+  }
+};
+
+const getSingleFarmerOrders = async (req, reply) => {
+  try {
+    const { coldStorageId, farmerId } = req.params;
+
+    // Validate IDs
+    if (
+      !mongoose.Types.ObjectId.isValid(coldStorageId) ||
+      !mongoose.Types.ObjectId.isValid(farmerId)
+    ) {
+      req.log.warn("Invalid farmerId or coldStorageId provided", {
+        farmerId,
+        coldStorageId,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid ID format",
+        errorMessage: "Please provide valid MongoDB ObjectIds",
+      });
+    }
+
+    req.log.info("Starting to fetch farmer orders", {
+      farmerId,
+      coldStorageId,
+    });
+
+    const [incomingOrders, outgoingOrders] = await Promise.all([
+      Order.find({ coldStorageId, farmerId })
+        .sort({ dateOfSubmission: -1 })
+        .populate({
+          path: "farmerId",
+          model: Farmer,
+          select: "_id name",
+        })
+        .select(
+          "_id coldStorageId farmerId remarks voucher dateOfSubmission orderDetails"
+        ),
+      OutgoingOrder.find({ coldStorageId, farmerId })
+        .sort({ dateOfExtraction: -1 })
+        .populate({
+          path: "farmerId",
+          model: Farmer,
+          select: "_id name",
+        })
+        .select(
+          "_id coldStorageId farmerId remarks voucher dateOfExtraction orderDetails"
+        ),
+    ]);
+
+    req.log.info("Retrieved orders from database", {
+      farmerId,
+      incomingOrdersCount: incomingOrders.length,
+      outgoingOrdersCount: outgoingOrders.length,
+    });
+
+    // Helper function to sort bag sizes within orders
+    const sortOrderDetails = (orders) => {
+      return orders.map((order) => {
+        const orderObj = order.toObject();
+        orderObj.orderDetails = orderObj.orderDetails.map((detail) => ({
+          ...detail,
+          bagSizes: detail.bagSizes.sort((a, b) =>
+            a.size.localeCompare(b.size)
+          ),
+        }));
+        return orderObj;
+      });
+    };
+
+    // Sort bag sizes in both incoming and outgoing orders
+    const sortedIncoming = sortOrderDetails(incomingOrders);
+    const sortedOutgoing = sortOrderDetails(outgoingOrders);
+    const allOrders = [...sortedIncoming, ...sortedOutgoing];
+
+    if (allOrders.length === 0) {
+      req.log.info("No orders found for farmer", {
+        farmerId,
+        coldStorageId,
+      });
+      return reply.code(200).send({
+        status: "Success",
+        message: "Farmer doesn't have any orders",
+        data: [],
+      });
+    }
+
+    req.log.info("Successfully retrieved all farmer orders", {
+      farmerId,
+      totalOrders: allOrders.length,
+      incomingOrders: incomingOrders.length,
+      outgoingOrders: outgoingOrders.length,
+    });
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Orders retrieved successfully",
+      data: allOrders,
+    });
+  } catch (err) {
+    req.log.error("Error occurred while getting farmer orders", {
+      farmerId: req.params.farmerId,
+      coldStorageId: req.params.coldStorageId,
+      errorMessage: err.message,
+      stack: err.stack,
+    });
+
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while getting farmer orders",
+      errorMessage: err.message,
+    });
+  }
+};
+
+const getTopFarmers = async (req, reply) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Valid cold storage ID is required",
+      });
+    }
+    const topFarmers = await Order.aggregate([
+      // Match orders for the specific cold storage
+      {
+        $match: {
+          coldStorageId: new mongoose.Types.ObjectId(id)
+        }
+      },
+      // Unwind the arrays to get individual entries
+      { $unwind: "$orderDetails" },
+      { $unwind: "$orderDetails.bagSizes" },
+      // Group by farmer and calculate totals
+      {
+        $group: {
+          _id: "$farmerId",
+          totalBags: {
+            $sum: "$orderDetails.bagSizes.quantity.initialQuantity"
+          },
+          bagSizeDetails: {
+            $push: {
+              size: "$orderDetails.bagSizes.size",
+              quantity: "$orderDetails.bagSizes.quantity.initialQuantity"
+            }
+          }
+        }
+      },
+      // Properly group the bag sizes
+      {
+        $project: {
+          _id: 1,
+          totalBags: 1,
+          bagSummary: {
+            $arrayToObject: {
+              $map: {
+                input: {
+                  $setUnion: "$bagSizeDetails.size"
+                },
+                as: "size",
+                in: {
+                  k: "$$size",
+                  v: {
+                    $sum: {
+                      $map: {
+                        input: {
+                          $filter: {
+                            input: "$bagSizeDetails",
+                            as: "sizeDetail",
+                            cond: { $eq: ["$$sizeDetail.size", "$$size"] }
+                          }
+                        },
+                        as: "filteredSize",
+                        in: "$$filteredSize.quantity"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      // Lookup farmer details - use the correct collection name "farmers"
+      {
+        $lookup: {
+          from: "farmers", // Collection name is lowercase in MongoDB
+          localField: "_id",
+          foreignField: "_id",
+          as: "farmerInfo"
+        }
+      },
+      // Unwind the farmer info array
+      {
+        $unwind: {
+          path: "$farmerInfo",
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      // Project final format
+      {
+        $project: {
+          farmerId: "$_id",
+          farmerName: { $ifNull: ["$farmerInfo.name", "Unknown Farmer"] },
+          totalBags: 1,
+          bagSummary: 1
+        }
+      },
+      // Sort by total bags in descending order
+      {
+        $sort: { totalBags: -1 }
+      },
+      // Limit to top 5 farmers
+      {
+        $limit: 5
+      }
+    ]);
+
+    if (!topFarmers.length) {
+      return reply.code(200).send({
+        status: "Success",
+        message: "No farmers found for this cold storage",
+        data: []
+      });
+    }
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Top farmers retrieved successfully",
+      data: topFarmers
+    });
+  } catch (err) {
+    console.error("Error in getTopFarmers:", err);
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while retrieving top farmers",
+      errorMessage: err.message
+    });
+  }
+};
+
+const getFarmerOrderFrequency = async (req, reply) => {
+  try {
+    const { coldStorageId, farmerId } = req.params;
+
+    // Validate IDs
+    if (
+      !mongoose.Types.ObjectId.isValid(coldStorageId) ||
+      !mongoose.Types.ObjectId.isValid(farmerId)
+    ) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid ID format",
+        errorMessage: "Please provide valid MongoDB ObjectIds",
+      });
+    }
+
+    // Get all orders for this farmer at this cold storage
+    const orders = await Order.find({
+      coldStorageId,
+      farmerId
+    }).sort({ dateOfSubmission: 1 });
+
+    if (!orders.length) {
+      return reply.code(200).send({
+        status: "Success",
+        message: "No orders found for this farmer at this cold storage",
+        data: {
+          orderCount: 0,
+          monthlyFrequency: [],
+          quarterlyFrequency: []
+        }
+      });
+    }
+
+    // Prepare data structures for metrics
+    const monthlyData = {};
+    const quarterlyData = {};
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    // Process each order
+    orders.forEach(order => {
+      const orderDate = new Date(order.dateOfSubmission);
+      const year = orderDate.getFullYear();
+      const month = orderDate.getMonth(); // 0-11
+      const quarter = Math.floor(month / 3) + 1; // 1-4
+
+      // Monthly frequency
+      const monthKey = `${year}-${month+1}`;
+      const monthLabel = `${monthNames[month]} ${year}`;
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = {
+          period: monthLabel,
+          count: 0,
+          totalQuantity: 0
+        };
+      }
+      monthlyData[monthKey].count += 1;
+
+      // Add quantities from order details
+      if (order.orderDetails && order.orderDetails.length > 0) {
+        order.orderDetails.forEach(detail => {
+          detail.bagSizes.forEach(bag => {
+            monthlyData[monthKey].totalQuantity += bag.quantity.initialQuantity;
+          });
+        });
+      }
+
+      // Quarterly frequency
+      const quarterKey = `${year}-Q${quarter}`;
+      const quarterLabel = `Q${quarter} ${year}`;
+      if (!quarterlyData[quarterKey]) {
+        quarterlyData[quarterKey] = {
+          period: quarterLabel,
+          count: 0,
+          totalQuantity: 0
+        };
+      }
+      quarterlyData[quarterKey].count += 1;
+
+      // Add quantities to quarterly data too
+      if (order.orderDetails && order.orderDetails.length > 0) {
+        order.orderDetails.forEach(detail => {
+          detail.bagSizes.forEach(bag => {
+            quarterlyData[quarterKey].totalQuantity += bag.quantity.initialQuantity;
+          });
+        });
+      }
+    });
+
+    // Convert data objects to arrays
+    const monthlyFrequency = Object.values(monthlyData).sort((a, b) => {
+      // Extract year and month for comparison
+      const [aYear, aMonth] = a.period.split(' ')[1] + '-' +
+                            monthNames.indexOf(a.period.split(' ')[0]);
+      const [bYear, bMonth] = b.period.split(' ')[1] + '-' +
+                            monthNames.indexOf(b.period.split(' ')[0]);
+      return aYear.localeCompare(bYear) || aMonth - bMonth;
+    });
+
+    const quarterlyFrequency = Object.values(quarterlyData).sort((a, b) => {
+      return a.period.localeCompare(b.period);
+    });
+
+    // Calculate average order interval in days
+    let totalIntervalDays = 0;
+    for (let i = 1; i < orders.length; i++) {
+      const prevDate = new Date(orders[i-1].dateOfSubmission);
+      const currDate = new Date(orders[i].dateOfSubmission);
+      const intervalDays = Math.floor((currDate - prevDate) / (1000 * 60 * 60 * 24));
+      totalIntervalDays += intervalDays;
+    }
+
+    const avgOrderInterval = orders.length > 1
+      ? Math.round(totalIntervalDays / (orders.length - 1))
+      : 0;
+
+    return reply.code(200).send({
+      status: "Success",
+      message: "Farmer order frequency metrics retrieved successfully",
+      data: {
+        orderCount: orders.length,
+        monthlyFrequency,
+        quarterlyFrequency,
+        avgOrderInterval
+      }
+    });
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while retrieving farmer order frequency metrics",
+      errorMessage: err.message
+    });
+  }
+};
+
 export {
   loginSuperAdmin,
   getAllColdStorages,
@@ -601,6 +1048,9 @@ export {
   getFarmersOfAColdStorage,
   getFarmerInfo,
   deleteOrder,
-  getOutgoingOrdersOfAColdStorage
-
+  getOutgoingOrdersOfAColdStorage,
+  editFarmerInfo,
+  getSingleFarmerOrders,
+  getTopFarmers,
+  getFarmerOrderFrequency,
 };

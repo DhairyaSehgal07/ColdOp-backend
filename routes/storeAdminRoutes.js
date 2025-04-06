@@ -17,6 +17,7 @@ import {
 import {
   coldStorageSummary,
   createNewIncomingOrder,
+  getSingleOrder,
   editIncomingOrder,
   createOutgoingOrder,
   filterOrdersByVariety,
@@ -126,10 +127,12 @@ function storeAdminRoutes(fastify, options, done) {
   );
 
   fastify.put(
-    "/orders/:id",
+    "/incoming-orders/:id",
     { preHandler: [storeAdminProtect] },
     editIncomingOrder
   );
+
+  fastify.get("/orders/:id/:type", { preHandler: [storeAdminProtect] },getSingleOrder )
 
   // get all farmer orders
   fastify.get(

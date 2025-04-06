@@ -357,6 +357,88 @@ const createNewIncomingOrder = async (req, reply) => {
   }
 };
 
+const getSingleOrder = async (req, reply) => {
+  try {
+    const { id, type } = req.params;
+    const storeAdminId = req.storeAdmin._id;
+    req.log.info("Starting getSingleOrder process", {
+      orderId: id,
+      orderType: type,
+      storeAdminId,
+      requestId: req.id
+    });
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      req.log.warn("Invalid orderId provided", { orderId: id });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid order ID format",
+        errorMessage: "Please provide a valid MongoDB ObjectId"
+      });
+    }
+    // Validate order type
+    if (!['incoming', 'outgoing'].includes(type.toLowerCase())) {
+      req.log.warn("Invalid order type provided", { type });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid order type",
+        errorMessage: "Order type must be either 'incoming' or 'outgoing'"
+      });
+    }
+    // Determine which model to use based on type
+    const Model = type.toLowerCase() === 'incoming' ? Order : OutgoingOrder;
+    
+    req.log.info("Querying database for order", {
+      model: Model.modelName,
+      orderId: id
+    });
+    // Find the order and populate farmer details
+    const order = await Model.findOne({
+      _id: id,
+      coldStorageId: storeAdminId
+    }).populate({
+      path: 'farmerId',
+      model: Farmer,
+      select: '_id name mobileNumber address'
+    });
+    if (!order) {
+      req.log.warn("Order not found", {
+        orderId: id,
+        type,
+        storeAdminId
+      });
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Order not found"
+      });
+    }
+    req.log.info("Successfully retrieved order", {
+      orderId: id,
+      type,
+      storeAdminId
+    });
+    
+    reply.code(200).send({
+      status: "Success",
+      data: order
+    });
+  } catch (err) {
+    req.log.error("Error retrieving order", {
+      error: err.message,
+      stack: err.stack,
+      orderId: req.params?.id,
+      type: req.params?.type,
+      storeAdminId: req.storeAdmin._id,
+      requestId: req.id
+    });
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while retrieving order",
+      errorMessage: err.message
+    });
+  }
+};
+
 const editIncomingOrder = async (req, reply) => {
   try {
     const orderId = req.params.id;
@@ -1885,6 +1967,7 @@ const coldStorageSummary = async (req, reply) => {
   }
 };
 
+
 export {
   searchFarmers,
   createNewIncomingOrder,
@@ -1900,4 +1983,5 @@ export {
   editIncomingOrder,
   editOutgoingOrder,
   deleteOutgoingOrder,
+  getSingleOrder,
 };
