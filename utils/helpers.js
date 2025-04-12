@@ -123,7 +123,7 @@ export const varieties = [
   "Chipsona 3",
   "Colomba",
   "Desiree",
-  "Diamant",
+  "Diamond",
   "FC - 11",
   "FC - 12",
   "FC - 5",
