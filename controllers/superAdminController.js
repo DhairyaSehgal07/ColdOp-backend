@@ -277,6 +277,17 @@ const editIncomingOrder = async (req, reply) => {
       requestId: req.id,
     });
 
+    // Store the original current quantity for later comparison
+    const originalOrderStock = existingOrder.orderDetails.reduce(
+      (totalStock, detail) =>
+        totalStock +
+        detail.bagSizes.reduce(
+          (sum, bag) => sum + (bag.quantity.currentQuantity || 0),
+          0
+        ),
+      0
+    );
+
     // ✅ Step 1: Handle direct field updates
     const allowedDirectUpdates = ["remarks", "dateOfSubmission", "fulfilled"];
     allowedDirectUpdates.forEach((field) => {
@@ -419,6 +430,79 @@ const editIncomingOrder = async (req, reply) => {
 
     // ✅ Step 4: Save the updated order
     const updatedOrder = await existingOrder.save();
+
+    // ✅ Step 5: Update all subsequent orders' currentStockAtThatTime
+    try {
+      // Calculate the stock difference after the update
+      const newOrderStock = updatedOrder.orderDetails.reduce(
+        (totalStock, detail) =>
+          totalStock +
+          detail.bagSizes.reduce(
+            (sum, bag) => sum + (bag.quantity.currentQuantity || 0),
+            0
+          ),
+        0
+      );
+
+      const stockDifference = newOrderStock - originalOrderStock;
+
+      // If there's a change in stock, update all subsequent orders
+      if (stockDifference !== 0) {
+        req.log.info("Stock difference detected, updating subsequent orders", {
+          originalOrderStock,
+          newOrderStock,
+          stockDifference,
+          orderId,
+          requestId: req.id,
+        });
+
+        // Find all subsequent orders from the same cold storage
+        // Sort by voucher number to ensure we process them in chronological order
+        const subsequentOrders = await Order.find({
+          coldStorageId: updatedOrder.coldStorageId,
+          "voucher.type": "RECEIPT",
+          $or: [
+            { "voucher.voucherNumber": { $gt: updatedOrder.voucher.voucherNumber } },
+            {
+              "voucher.voucherNumber": updatedOrder.voucher.voucherNumber,
+              _id: { $gt: updatedOrder._id }
+            }
+          ]
+        }).sort({ "voucher.voucherNumber": 1, _id: 1 });
+
+        req.log.info(`Found ${subsequentOrders.length} subsequent orders to update`, {
+          orderId,
+          requestId: req.id,
+        });
+
+        // Update each subsequent order
+        for (const order of subsequentOrders) {
+          order.currentStockAtThatTime += stockDifference;
+          await order.save();
+        }
+
+        req.log.info(`Successfully updated ${subsequentOrders.length} subsequent orders`, {
+          orderId,
+          stockDifference,
+          requestId: req.id,
+        });
+      } else {
+        req.log.info("No stock difference detected, no need to update subsequent orders", {
+          orderId,
+          requestId: req.id,
+        });
+      }
+    } catch (error) {
+      req.log.error("Error updating subsequent orders", {
+        error: error.message,
+        stack: error.stack,
+        orderId,
+        requestId: req.id,
+      });
+
+      // We don't fail the request if subsequent updates fail
+      // The primary order update was successful
+    }
 
     reply.code(200).send({
       status: "Success",
