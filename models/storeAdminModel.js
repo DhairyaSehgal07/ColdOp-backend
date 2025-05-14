@@ -1,6 +1,12 @@
+import mongoose from "mongoose";
+
 const storeAdminSchema = mongoose.Schema(
   {
     name: {
+      type: String,
+      required: true,
+    },
+    personalAddress: {
       type: String,
       required: true,
     },
@@ -13,10 +19,12 @@ const storeAdminSchema = mongoose.Schema(
       type: String,
       default: "",
     },
+
     password: {
       type: String,
       required: true,
     },
+
     coldStorageDetails: {
       coldStorageName: {
         type: String,
@@ -58,18 +66,18 @@ const storeAdminSchema = mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    forgotPasswordToken: String,
-    forgotPasswordTokenExpiry: Date,
-    preferences: {
+      preferences: {
       bagSizes: {
         type: [String],
         default: ["ration", "seed", "number-12", "goli", "cut-tok"],
       },
-      costPerBag: {
-        type: Number,
-        default: 0,
-      },
     },
+    forgotPasswordToken: String,
+    forgotPasswordTokenExpiry: Date,
   },
   { timestamps: true }
 );
+
+const StoreAdmin = mongoose.model("StoreAdmin", storeAdminSchema);
+
+export default StoreAdmin;
