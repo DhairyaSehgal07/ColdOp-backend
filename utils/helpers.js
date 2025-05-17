@@ -106,6 +106,7 @@ export const formatFarmerName = (name) => {
     .map(
       (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
     )
+    .join(" "); // Join with space instead of returning array
 };
 
 export const formatDate = (date) => {
