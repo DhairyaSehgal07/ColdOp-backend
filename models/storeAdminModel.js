@@ -66,10 +66,10 @@ const storeAdminSchema = mongoose.Schema(
       type: Boolean,
       default: false,
     },
-      preferences: {
+    preferences: {
       bagSizes: {
         type: [String],
-        default: ["ration", "seed", "number-12", "goli", "cut-tok"],
+        default: ["Ration", "Seed", "Number-12", "Goli", "Cut-tok"],
       },
     },
     forgotPasswordToken: String,

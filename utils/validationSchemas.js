@@ -5,6 +5,9 @@ const registerSchema = z.object({
   address: z.string().min(2).max(100),
   mobileNumber: z.string().length(10),
   password: z.string().min(6),
+  preferences: z.object({
+    bagSizes: z.array(z.string()),
+  }).optional(),
   imageUrl: z.string(),
   isMobile: z.boolean(),
 });

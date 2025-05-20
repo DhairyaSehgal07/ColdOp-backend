@@ -19,9 +19,7 @@ import { formatFarmerName, formatName } from "../utils/helpers.js";
 const registerStoreAdmin = async (req, reply) => {
   try {
     req.log.info("Starting store admin registration process");
-
     storeAdminRegisterSchema.parse(req.body);
-
     const {
       name,
       personalAddress,
@@ -31,13 +29,12 @@ const registerStoreAdmin = async (req, reply) => {
       coldStorageAddress,
       coldStorageContactNumber,
       capacity,
+      preferences,
       isVerified,
       isMobile,
       imageUrl,
     } = req.body;
-
     req.log.info("Parsed request body", { mobileNumber, name });
-
     const storeAdminExists = await StoreAdmin.findOne({ mobileNumber });
     if (storeAdminExists) {
       req.log.warn("Attempt to register existing store admin", {
@@ -48,13 +45,10 @@ const registerStoreAdmin = async (req, reply) => {
         message: "Store-admin already exists",
       });
     }
-
     const hashedPassword = await bcrypt.hash(password, 10);
     const count = await StoreAdmin.countDocuments();
-
     // Increment the count to get the next available storeAdminId
     const storeAdminId = count + 1;
-
     const storeAdmin = await StoreAdmin.create({
       name,
       personalAddress,
@@ -68,9 +62,9 @@ const registerStoreAdmin = async (req, reply) => {
         coldStorageContactNumber,
         capacity,
       },
+      preferences,
       storeAdminId: storeAdminId,
     });
-
     if (storeAdmin) {
       req.log.info("Store admin registered successfully", {
         storeAdminId,
@@ -91,6 +85,7 @@ const registerStoreAdmin = async (req, reply) => {
           storeAdminId: storeAdminId,
           token: token,
           imageUrl: req.body.imageUrl,
+          preferences: storeAdmin.preferences,
           _id: storeAdmin._id,
         },
       });
@@ -158,6 +153,7 @@ const loginStoreAdmin = async (req, reply) => {
             token: token,
             storeAdminId: storeAdmin.storeAdminId,
             imageUrl: storeAdmin.imageUrl,
+            preferences: storeAdmin.preferences,
             _id: storeAdmin._id,
           },
         });
@@ -361,19 +357,18 @@ const updateStoreAdminProfile = async (req, reply) => {
     reply.code(200).send({
       status: "Success",
       data: {
-        _id: updatedStoreAdmin._id,
         name: updatedStoreAdmin.name,
         personalAddress: updatedStoreAdmin.personalAddress,
         mobileNumber: updatedStoreAdmin.mobileNumber,
-        coldStorageDetails: {
-          coldStorageName: updatedStoreAdmin.coldStorageDetails.coldStorageName,
-          coldStorageAddress:
-            updatedStoreAdmin.coldStorageDetails.coldStorageAddress,
-          coldStorageContactNumber:
-            updatedStoreAdmin.coldStorageDetails.coldStorageContactNumber,
-          coldStorageGSTNumber:
-            updatedStoreAdmin.coldStorageDetails.coldStorageGSTNumber,
-        },
+        coldStorageDetails: updatedStoreAdmin.coldStorageDetails,
+        isVerified: updatedStoreAdmin.isVerified,
+        isActive: updatedStoreAdmin.isActive,
+        isPaid: updatedStoreAdmin.isPaid,
+        role: updatedStoreAdmin.role,
+        storeAdminId: updatedStoreAdmin.storeAdminId,
+        imageUrl: updatedStoreAdmin.imageUrl,
+        preferences: updatedStoreAdmin.preferences,
+        _id: updatedStoreAdmin._id,
       },
     });
   } catch (err) {
