@@ -45,6 +45,7 @@ import {
 import { deleteProfilePhoto } from "../utils/deleteImageFromCloudinary.js";
 import {
   dayBookOrderController,
+  searchOrderByReceiptNumber,
   dayBookOrders,
   getVarieties,
   testController,
@@ -192,6 +193,16 @@ function storeAdminRoutes(fastify, options, done) {
     { preHandler: [storeAdminProtect] },
     getFarmersIdsForCheck
   );
+
+
+fastify.post(
+  '/daybook/search-receipt',
+  { preHandler: [storeAdminProtect] },
+  searchOrderByReceiptNumber
+);
+
+
+  fastify.get("/test", testController);
 
 
 
