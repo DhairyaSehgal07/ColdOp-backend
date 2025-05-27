@@ -26,7 +26,7 @@ const getReceiptNumber = async (req, reply) => {
     const result = await Order.aggregate([
       {
         $match: {
-          coldStorageId: new mongoose.Types.ObjectId(storeAdminId), 
+          coldStorageId: new mongoose.Types.ObjectId(storeAdminId),
         },
       },
       {
@@ -66,7 +66,7 @@ const getReceiptNumber = async (req, reply) => {
 //@access Private
 const searchFarmers = async (req, reply) => {
   try {
-    const coldStorageId = req.storeAdmin._id; 
+    const coldStorageId = req.storeAdmin._id;
     const searchQuery = req.query.query;
 
     console.log("SEARCH QUERY IS: ", searchQuery);
@@ -90,7 +90,7 @@ const searchFarmers = async (req, reply) => {
       },
       {
         $match: {
-          "registeredStoreAdmins.0": new mongoose.Types.ObjectId(coldStorageId) 
+          "registeredStoreAdmins.0": new mongoose.Types.ObjectId(coldStorageId)
         },
       },
       {
@@ -387,7 +387,7 @@ const getSingleOrder = async (req, reply) => {
     }
     // Determine which model to use based on type
     const Model = type.toLowerCase() === 'incoming' ? Order : OutgoingOrder;
-    
+
     req.log.info("Querying database for order", {
       model: Model.modelName,
       orderId: id
@@ -417,7 +417,7 @@ const getSingleOrder = async (req, reply) => {
       type,
       storeAdminId
     });
-    
+
     reply.code(200).send({
       status: "Success",
       data: order
@@ -481,7 +481,7 @@ const editIncomingOrder = async (req, reply) => {
     if (updates.orderDetails && Array.isArray(updates.orderDetails) && updates.orderDetails.length > 0) {
       // Since each order should have only one variety entry, we always use the first item in the array
       const updateDetail = updates.orderDetails[0];
-      
+
       if (!updateDetail.variety) {
         throw new Error("Variety is required for order details");
       }
@@ -1016,12 +1016,8 @@ const getVarietyAvailableForFarmer = async (req, reply) => {
 };
 
 const createOutgoingOrder = async (req, reply) => {
-
- 
   const session = await mongoose.startSession();
   session.startTransaction();
-
-  
 
   try {
     req.log.info("Starting createOutgoingOrder process", {
@@ -1236,6 +1232,63 @@ const createOutgoingOrder = async (req, reply) => {
     const bulkOps = [];
     let variety = ""; // Common variety for outgoing order
 
+    // Calculate total current stock from all incoming orders
+    const totalIncomingStock = await Order.aggregate([
+      {
+        $match: {
+          coldStorageId: new mongoose.Types.ObjectId(req.storeAdmin._id),
+        },
+      },
+      { $unwind: "$orderDetails" },
+      { $unwind: "$orderDetails.bagSizes" },
+      {
+        $group: {
+          _id: null,
+          totalCurrentQuantity: {
+            $sum: "$orderDetails.bagSizes.quantity.currentQuantity",
+          },
+        },
+      },
+    ]);
+
+    // Calculate total outgoing stock from existing outgoing orders
+    const totalOutgoingStock = await OutgoingOrder.aggregate([
+      {
+        $match: {
+          coldStorageId: new mongoose.Types.ObjectId(req.storeAdmin._id),
+        },
+      },
+      { $unwind: "$orderDetails" },
+      { $unwind: "$orderDetails.bagSizes" },
+      {
+        $group: {
+          _id: null,
+          totalQuantityRemoved: {
+            $sum: "$orderDetails.bagSizes.quantityRemoved",
+          },
+        },
+      },
+    ]);
+
+    // Calculate current outgoing order total
+    const currentOutgoingTotal = orders.reduce((total, order) => {
+      return total + order.bagUpdates.reduce((bagTotal, update) => {
+        return bagTotal + update.quantityToRemove;
+      }, 0);
+    }, 0);
+
+    // Calculate currentStockAtThatTime
+    const incomingTotal = totalIncomingStock.length > 0 ? totalIncomingStock[0].totalCurrentQuantity : 0;
+    const outgoingTotal = totalOutgoingStock.length > 0 ? totalOutgoingStock[0].totalQuantityRemoved : 0;
+    const currentStockAtThatTime = incomingTotal - outgoingTotal - currentOutgoingTotal;
+
+    req.log.info("Stock calculation completed", {
+      incomingTotal,
+      outgoingTotal,
+      currentOutgoingTotal,
+      currentStockAtThatTime,
+    });
+
     // Prepare outgoing order details in the new format
     const outgoingOrderDetails = orders.map(
       ({ orderId, variety: currentVariety, bagUpdates }) => {
@@ -1281,8 +1334,8 @@ const createOutgoingOrder = async (req, reply) => {
         const incomingBagSizes = incomingOrder.orderDetails.flatMap((detail) =>
           detail.incomingBagSizes.map((bag) => ({
             size: bag.size,
-            currentQuantity: bag.currentQuantity, // Ensure this is mapped correctly
-            initialQuantity: bag.initialQuantity, // Ensure this is mapped correctly
+            currentQuantity: bag.currentQuantity,
+            initialQuantity: bag.initialQuantity,
           }))
         );
 
@@ -1293,7 +1346,7 @@ const createOutgoingOrder = async (req, reply) => {
             _id: incomingOrder._id,
             location: incomingOrder.location,
             voucher: incomingOrder.voucher,
-            incomingBagSizes, // Make sure you're using the correct field names
+            incomingBagSizes,
           },
         };
       }
@@ -1317,6 +1370,7 @@ const createOutgoingOrder = async (req, reply) => {
       dateOfExtraction: formatDate(new Date()),
       orderDetails: outgoingOrderDetails,
       remarks: remarks,
+      currentStockAtThatTime: currentStockAtThatTime,
     });
 
     await outgoingOrder.save();
@@ -1330,7 +1384,7 @@ const createOutgoingOrder = async (req, reply) => {
     req.log.info("Transaction committed successfully");
 
     return reply.code(200).send({
-      status:"Success", 
+      status:"Success",
       message: "Outgoing order processed successfully.",
       outgoingOrder,
     });
