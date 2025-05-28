@@ -93,6 +93,10 @@ const outgoingOrderSchema = new mongoose.Schema(
     remarks: {
       type: String,
     },
+     currentStockAtThatTime: {
+      type: Number,
+      required: true,
+    },
     orderDetails: [orderDetailsSchema],
   },
   { timestamps: true }
