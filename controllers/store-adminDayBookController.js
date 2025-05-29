@@ -85,7 +85,7 @@ const dayBookOrders = async (req, reply) => {
               select: "_id name",
             })
             .select(
-              "_id coldStorageId remarks farmerId voucher dateOfExtraction orderDetails createdAt"
+              "_id coldStorageId remarks farmerId voucher dateOfExtraction orderDetails currentStockAtThatTime createdAt"
             ),
         ]);
 
@@ -168,7 +168,7 @@ const dayBookOrders = async (req, reply) => {
             select: "_id name",
           })
           .select(
-            "_id coldStorageId remarks farmerId voucher dateOfExtraction orderDetails"
+            "_id coldStorageId remarks farmerId voucher dateOfExtraction orderDetails currentStockAtThatTime"
           );
 
         const sortedOrders = sortOrderDetails(outgoingOrders);
@@ -205,7 +205,7 @@ const testController = async (req, reply) => {
     const orders = await Order.find({
       coldStorageId: { $ne: new mongoose.Types.ObjectId("66e1f22d782bbd67d3446805") }
     });
-    console.log("Orders: ", orders);    
+    console.log("Orders: ", orders);
     reply.code(200).send({
       message: "test controller",
       orders: orders,
@@ -273,9 +273,9 @@ const searchOrderByReceiptNumber = async (req, reply) => {
 
     // If no order found
     if (!incomingOrder && !outgoingOrder) {
-      req.log.info("No order found with receipt number", { 
+      req.log.info("No order found with receipt number", {
         receiptNumber,
-        coldStorageId 
+        coldStorageId
       });
       return reply.code(404).send({
         status: "Fail",
@@ -292,7 +292,7 @@ const searchOrderByReceiptNumber = async (req, reply) => {
     if (orderObject.orderDetails) {
       orderObject.orderDetails = orderObject.orderDetails.map(detail => ({
         ...detail,
-        bagSizes: detail.bagSizes.sort((a, b) => 
+        bagSizes: detail.bagSizes.sort((a, b) =>
           a.size.localeCompare(b.size)
         )
       }));
@@ -326,10 +326,10 @@ const searchOrderByReceiptNumber = async (req, reply) => {
   }
 };
 
-export { 
-  dayBookOrders, 
-  dayBookOrderController, 
-  testController, 
+export {
+  dayBookOrders,
+  dayBookOrderController,
+  testController,
   getVarieties,
-  searchOrderByReceiptNumber 
+  searchOrderByReceiptNumber
 };
