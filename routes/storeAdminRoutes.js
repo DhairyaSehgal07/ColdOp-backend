@@ -186,7 +186,7 @@ function storeAdminRoutes(fastify, options, done) {
     editOutgoingOrder
   );
 
-  fastify.get("/varities", getVarieties);
+  fastify.get("/varieties", getVarieties);
 
   fastify.get(
     "/farmerid/check",
