@@ -72,7 +72,7 @@ const dayBookOrders = async (req, reply) => {
             .populate({
               path: "farmerId",
               model: Farmer,
-              select: "_id name",
+              select: "farmerId name", // Changed _id to farmerId
             })
             .select(
               "_id coldStorageId currentStockAtThatTime remarks farmerId voucher dateOfSubmission orderDetails createdAt"
@@ -82,7 +82,7 @@ const dayBookOrders = async (req, reply) => {
             .populate({
               path: "farmerId",
               model: Farmer,
-              select: "_id name",
+              select: "farmerId name", // Changed _id to farmerId
             })
             .select(
               "_id coldStorageId remarks farmerId voucher dateOfExtraction orderDetails currentStockAtThatTime createdAt"
@@ -131,7 +131,7 @@ const dayBookOrders = async (req, reply) => {
           .populate({
             path: "farmerId",
             model: Farmer,
-            select: "_id name",
+            select: "farmerId name", // Changed _id to farmerId
           })
           .select(
             "_id coldStorageId remarks currentStockAtThatTime farmerId voucher dateOfSubmission orderDetails"
@@ -165,7 +165,7 @@ const dayBookOrders = async (req, reply) => {
           .populate({
             path: "farmerId",
             model: Farmer,
-            select: "_id name",
+            select: "farmerId name", // Changed _id to farmerId
           })
           .select(
             "_id coldStorageId remarks farmerId voucher dateOfExtraction orderDetails currentStockAtThatTime"
@@ -252,66 +252,72 @@ const searchOrderByReceiptNumber = async (req, reply) => {
     });
 
     // Search in both Order and OutgoingOrder collections
-    const [incomingOrder, outgoingOrder] = await Promise.all([
-      Order.findOne({
+    const [incomingOrders, outgoingOrders] = await Promise.all([
+      Order.find({
         coldStorageId,
         'voucher.voucherNumber': receiptNumber
       }).populate({
         path: 'farmerId',
         model: Farmer,
-        select: '_id name mobileNumber address'
+        select: 'farmerId name mobileNumber address' // Changed _id to farmerId
       }),
-      OutgoingOrder.findOne({
+      OutgoingOrder.find({
         coldStorageId,
         'voucher.voucherNumber': receiptNumber
       }).populate({
         path: 'farmerId',
         model: Farmer,
-        select: '_id name mobileNumber address'
+        select: 'farmerId name mobileNumber address' // Changed _id to farmerId
       })
     ]);
 
-    // If no order found
-    if (!incomingOrder && !outgoingOrder) {
-      req.log.info("No order found with receipt number", {
+    // If no orders found
+    if (!incomingOrders.length && !outgoingOrders.length) {
+      req.log.info("No orders found with receipt number", {
         receiptNumber,
         coldStorageId
       });
       return reply.code(404).send({
         status: "Fail",
-        message: "No order found with this receipt number"
+        message: "No orders found with this receipt number"
       });
     }
 
-    // Get the found order (either incoming or outgoing)
-    const foundOrder = incomingOrder || outgoingOrder;
-    const orderType = incomingOrder ? 'incoming' : 'outgoing';
+    // Convert to plain objects and sort bag sizes for both types
+    const processOrders = (orders) => {
+      return orders.map(order => {
+        const orderObject = order.toObject();
+        if (orderObject.orderDetails) {
+          orderObject.orderDetails = orderObject.orderDetails.map(detail => ({
+            ...detail,
+            bagSizes: detail.bagSizes.sort((a, b) =>
+              a.size.localeCompare(b.size)
+            )
+          }));
+        }
+        return orderObject;
+      });
+    };
 
-    // Convert to plain object and sort bag sizes
-    const orderObject = foundOrder.toObject();
-    if (orderObject.orderDetails) {
-      orderObject.orderDetails = orderObject.orderDetails.map(detail => ({
-        ...detail,
-        bagSizes: detail.bagSizes.sort((a, b) =>
-          a.size.localeCompare(b.size)
-        )
-      }));
-    }
+    const processedIncomingOrders = processOrders(incomingOrders);
+    const processedOutgoingOrders = processOrders(outgoingOrders);
 
-    req.log.info("Successfully found order", {
+    req.log.info("Successfully found orders", {
       receiptNumber,
-      orderType,
-      orderId: foundOrder._id
+      incomingCount: incomingOrders.length,
+      outgoingCount: outgoingOrders.length
     });
 
     reply.code(200).send({
       status: "Success",
-      orderType,
-      data: orderObject
+      data: {
+        incoming: processedIncomingOrders,
+        outgoing: processedOutgoingOrders
+      }
     });
 
   } catch (err) {
-    req.log.error("Error searching for order", {
+    req.log.error("Error searching for orders", {
       error: err.message,
       stack: err.stack,
       receiptNumber: req.body?.receiptNumber,
@@ -320,7 +326,7 @@ const searchOrderByReceiptNumber = async (req, reply) => {
 
     reply.code(500).send({
       status: "Fail",
-      message: "Error occurred while searching for order",
+      message: "Error occurred while searching for orders",
       errorMessage: err.message
     });
   }
