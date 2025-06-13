@@ -681,7 +681,6 @@ const quickRegisterFarmer = async (req, reply) => {
     // Validate the request body
     const storeAdminId = req.storeAdmin._id;
     quickRegisterSchema.parse(req.body);
-
     // Check if farmerId is present
     if (!req.body.farmerId) {
       req.log.warn("FarmerId is missing in the request body");
@@ -690,14 +689,11 @@ const quickRegisterFarmer = async (req, reply) => {
         message: "FarmerId is required",
       });
     }
-
     // Extract data from the request body
     const { name, address, mobileNumber, password, imageUrl, farmerId } = req.body;
     const formattedName = formatFarmerName(name);
-
     // Log farmer existence check
     req.log.info("Checking if farmer already exists", { mobileNumber });
-
     // Check if a farmer with the given mobile number already exists
     const farmerExists = await Farmer.findOne({ mobileNumber });
     if (farmerExists) {
@@ -707,13 +703,11 @@ const quickRegisterFarmer = async (req, reply) => {
         message: "Farmer already exists with this mobile number",
       });
     }
-
     // Check for unique combination of farmerId and first registeredStoreAdmin
     const existingFarmer = await Farmer.findOne({
       farmerId: farmerId,
       registeredStoreAdmins: { $elemMatch: { $eq: storeAdminId } }
     });
-
     if (existingFarmer) {
       req.log.warn("Farmer ID already registered with this cold storage", {
         farmerId,
@@ -724,11 +718,9 @@ const quickRegisterFarmer = async (req, reply) => {
         message: "This Farmer ID is already registered under this cold storage. Please either change the Farmer ID or register with a different cold storage."
       });
     }
-
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
     req.log.info("Password hashed successfully");
-
     // Create the new farmer record
     req.log.info("Creating new farmer record", {
       name,
@@ -736,7 +728,6 @@ const quickRegisterFarmer = async (req, reply) => {
       farmerId,
       storeAdminId
     });
-
     const farmer = await Farmer.create({
       name: formattedName,
       address,
@@ -747,7 +738,6 @@ const quickRegisterFarmer = async (req, reply) => {
       isVerified: false,
       registeredStoreAdmins: [storeAdminId]
     });
-
     if (farmer) {
       // Update store admin's registeredFarmers array
       await StoreAdmin.findByIdAndUpdate(
@@ -755,16 +745,15 @@ const quickRegisterFarmer = async (req, reply) => {
         { $addToSet: { registeredFarmers: farmer._id } },
         { new: true }
       );
-
       req.log.info("Farmer registered successfully", {
         farmerId: farmer.farmerId,
         storeAdminId
       });
-
       return reply.code(201).send({
         status: "Success",
         message: "Farmer registered successfully",
         data: {
+          _id: farmer._id, // Added mongoose object id
           farmerId: farmer.farmerId,
           name: farmer.name,
           mobileNumber: farmer.mobileNumber
