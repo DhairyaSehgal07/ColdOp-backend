@@ -440,6 +440,9 @@ const getSingleOrder = async (req, reply) => {
 };
 
 const editIncomingOrder = async (req, reply) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const orderId = req.params.id;
     const updates = req.body;
@@ -454,7 +457,7 @@ const editIncomingOrder = async (req, reply) => {
     }
 
     // Find the existing order
-    const existingOrder = await Order.findById(orderId);
+    const existingOrder = await Order.findById(orderId).session(session);
     if (!existingOrder) {
       req.log.warn("Order not found", { orderId });
       return reply.code(404).send({
@@ -494,6 +497,15 @@ const editIncomingOrder = async (req, reply) => {
         throw new Error(
           `At least one bag size is required for variety ${updateDetail.variety}`
         );
+      }
+
+      // Filter out zero-quantity bagSizes
+      updateDetail.bagSizes = updateDetail.bagSizes.filter(bag =>
+        bag.quantity.initialQuantity > 0 || bag.quantity.currentQuantity > 0
+      );
+
+      if (updateDetail.bagSizes.length === 0) {
+        throw new Error("At least one bag size must have non-zero quantities");
       }
 
       // Validate bag sizes
@@ -546,71 +558,70 @@ const editIncomingOrder = async (req, reply) => {
       }
     }
 
-    // Step 3: Recalculate `currentStockAtThatTime`
-    let newCurrentStock = 0;
-    try {
-      const coldStorageId = existingOrder.coldStorageId;
-      const originalOrderId = existingOrder._id;
+    // Get all receipts (including current) sorted by createdAt
+    const allReceipts = await Order.find({
+      coldStorageId: existingOrder.coldStorageId,
+      createdAt: { $lte: existingOrder.createdAt }
+    })
+    .sort({ createdAt: 1 })
+    .session(session);
 
-      const result = await Order.aggregate([
-        {
-          $match: {
-            coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
-            _id: { $ne: new mongoose.Types.ObjectId(originalOrderId) },
-          },
-        },
-        { $unwind: "$orderDetails" },
-        { $unwind: "$orderDetails.bagSizes" },
-        {
-          $group: {
-            _id: null,
-            totalCurrentQuantity: {
-              $sum: "$orderDetails.bagSizes.quantity.currentQuantity",
-            },
-          },
-        },
-      ]);
+    // Calculate cumulative stock up to current receipt
+    let cumulativeStock = 0;
+    for (const receipt of allReceipts) {
+      if (receipt._id.equals(existingOrder._id)) {
+        // For the current receipt, use the updated quantities
+        cumulativeStock += existingOrder.orderDetails.reduce((total, detail) =>
+          total + detail.bagSizes.reduce((sum, bag) =>
+            sum + bag.quantity.currentQuantity, 0
+          ), 0
+        );
+      } else {
+        // For other receipts, use their existing quantities
+        cumulativeStock += receipt.orderDetails.reduce((total, detail) =>
+          total + detail.bagSizes.reduce((sum, bag) =>
+            sum + bag.quantity.currentQuantity, 0
+          ), 0
+        );
+      }
 
-      const baseStock = result.length > 0 ? result[0].totalCurrentQuantity : 0;
-
-      const orderStock = existingOrder.orderDetails.reduce(
-        (totalStock, detail) =>
-          totalStock +
-          detail.bagSizes.reduce(
-            (sum, bag) => sum + (bag.quantity.currentQuantity || 0),
-            0
-          ),
-        0
-      );
-
-      newCurrentStock = baseStock + orderStock;
-
-      req.log.info("Recalculated current stock", {
-        baseStock,
-        orderStock,
-        newCurrentStock,
-        orderId,
-        requestId: req.id,
-      });
-    } catch (error) {
-      req.log.error("Error recalculating stock", {
-        error: error.message,
-        stack: error.stack,
-        orderId,
-        requestId: req.id,
-      });
-
-      return reply.code(500).send({
-        status: "Fail",
-        message: "Error recalculating stock",
-        errorMessage: error.message,
-      });
+      if (receipt._id.equals(existingOrder._id)) {
+        existingOrder.currentStockAtThatTime = cumulativeStock;
+      } else {
+        await Order.updateOne(
+          { _id: receipt._id },
+          { $set: { currentStockAtThatTime: cumulativeStock } }
+        ).session(session);
+      }
     }
 
-    existingOrder.currentStockAtThatTime = newCurrentStock;
+    // Get all future receipts and update their stock
+    const futureReceipts = await Order.find({
+      coldStorageId: existingOrder.coldStorageId,
+      createdAt: { $gt: existingOrder.createdAt }
+    })
+    .sort({ createdAt: 1 })
+    .session(session);
 
-    // Step 4: Save the updated order
-    const updatedOrder = await existingOrder.save();
+    // Update stock for future receipts
+    for (const receipt of futureReceipts) {
+      cumulativeStock += receipt.orderDetails.reduce((total, detail) =>
+        total + detail.bagSizes.reduce((sum, bag) =>
+          sum + bag.quantity.currentQuantity, 0
+        ), 0
+      );
+
+      await Order.updateOne(
+        { _id: receipt._id },
+        { $set: { currentStockAtThatTime: cumulativeStock } }
+      ).session(session);
+    }
+
+    // Save the updated order
+    const updatedOrder = await existingOrder.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
 
     reply.code(200).send({
       status: "Success",
@@ -624,6 +635,9 @@ const editIncomingOrder = async (req, reply) => {
       orderId: req.params?.orderId,
       requestId: req.id,
     });
+
+    await session.abortTransaction();
+    session.endSession();
 
     reply.code(400).send({
       status: "Fail",
@@ -1565,6 +1579,21 @@ const editOutgoingOrder = async (req, reply) => {
       throw new Error("orderDetails array is required and cannot be empty");
     }
 
+    // Filter out zero-quantity bagSizes and empty varieties
+    const filteredOrderDetails = orderDetails
+      .map(detail => ({
+        ...detail,
+        bagSizes: detail.bagSizes.filter(bag =>
+          bag.quantityRemoved > 0
+        )
+      }))
+      .filter(detail => detail.bagSizes.length > 0);
+
+    if (filteredOrderDetails.length === 0) {
+      req.log.warn("All order details were filtered out due to zero quantities");
+      throw new Error("At least one variety must have non-zero quantities");
+    }
+
     // Prepare bulk operations to revert previous inventory updates
     const revertBulkOps = outgoingOrder.orderDetails.flatMap((detail) =>
       detail.bagSizes.map((bag) => ({
@@ -1592,7 +1621,7 @@ const editOutgoingOrder = async (req, reply) => {
     await Order.bulkWrite(revertBulkOps, { session });
 
     // Prepare bulk operations to apply new inventory updates
-    const applyBulkOps = orderDetails.flatMap((detail) =>
+    const applyBulkOps = filteredOrderDetails.flatMap((detail) =>
       detail.bagSizes.map((bag) => ({
         updateOne: {
           filter: {
@@ -1617,8 +1646,84 @@ const editOutgoingOrder = async (req, reply) => {
     // Execute bulk write to apply new inventory updates
     await Order.bulkWrite(applyBulkOps, { session });
 
+    // Get all future orders (including current) sorted by createdAt
+    const futureOrders = await OutgoingOrder.find({
+      coldStorageId: storeAdminId,
+      createdAt: { $gte: outgoingOrder.createdAt }
+    })
+    .sort({ createdAt: 1 })
+    .session(session);
+
+    // Calculate cumulative stock for each order
+    let cumulativeStock = 0;
+    const stockUpdateOps = [];
+
+    for (const order of futureOrders) {
+      // Calculate total stock up to this order's creation time
+      const stockResult = await Order.aggregate([
+        {
+          $match: {
+            coldStorageId: new mongoose.Types.ObjectId(storeAdminId),
+            createdAt: { $lte: order.createdAt }
+          }
+        },
+        { $unwind: "$orderDetails" },
+        { $unwind: "$orderDetails.bagSizes" },
+        {
+          $group: {
+            _id: null,
+            totalStock: {
+              $sum: "$orderDetails.bagSizes.quantity.currentQuantity"
+            }
+          }
+        }
+      ]).session(session);
+
+      // Calculate total outgoing stock up to this order
+      const outgoingResult = await OutgoingOrder.aggregate([
+        {
+          $match: {
+            coldStorageId: new mongoose.Types.ObjectId(storeAdminId),
+            createdAt: { $lt: order.createdAt }
+          }
+        },
+        { $unwind: "$orderDetails" },
+        { $unwind: "$orderDetails.bagSizes" },
+        {
+          $group: {
+            _id: null,
+            totalOutgoing: {
+              $sum: "$orderDetails.bagSizes.quantityRemoved"
+            }
+          }
+        }
+      ]).session(session);
+
+      const totalStock = stockResult[0]?.totalStock || 0;
+      const totalOutgoing = outgoingResult[0]?.totalOutgoing || 0;
+
+      // Calculate current order's outgoing total
+      const currentOrderOutgoing = order.orderDetails.reduce((total, detail) =>
+        total + detail.bagSizes.reduce((sum, bag) => sum + bag.quantityRemoved, 0)
+      , 0);
+
+      const newCurrentStockAtThatTime = totalStock - totalOutgoing - currentOrderOutgoing;
+
+      stockUpdateOps.push({
+        updateOne: {
+          filter: { _id: order._id },
+          update: { $set: { currentStockAtThatTime: newCurrentStockAtThatTime } }
+        }
+      });
+    }
+
+    // Execute all stock updates in bulk
+    if (stockUpdateOps.length > 0) {
+      await OutgoingOrder.bulkWrite(stockUpdateOps, { session });
+    }
+
     // Update the outgoing order details
-    outgoingOrder.orderDetails = orderDetails;
+    outgoingOrder.orderDetails = filteredOrderDetails;
     outgoingOrder.remarks = remarks;
 
     await outgoingOrder.save({ session });
