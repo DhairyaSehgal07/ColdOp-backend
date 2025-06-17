@@ -31,6 +31,7 @@ import {
 } from "../controllers/store-adminOrderController.js";
 
 import { storeAdminProtect } from "../middleware/authMiddleware.js";
+import { uploadMiddleware } from "../middleware/uploadMiddleware.js";
 import {
   mobileOtpHandler,
   resendOtpHandler,
@@ -42,7 +43,7 @@ import {
   resetPasswordForm,
   updatePassword,
 } from "../utils/store-admin/store-adminForgotPassword.js";
-import { deleteProfilePhoto } from "../utils/deleteImageFromCloudinary.js";
+import { deleteProfilePhoto, uploadProfilePhoto } from "../utils/cloudinary.js";
 import {
   dayBookOrderController,
   searchOrderByReceiptNumber,
@@ -56,11 +57,18 @@ function storeAdminRoutes(fastify, options, done) {
   fastify.post("/login", loginStoreAdmin);
   fastify.post("/logout", logoutStoreAdmin);
 
-  // proifle routes
+  // profile routes
   fastify.get(
     "/profile",
     { preHandler: [storeAdminProtect] },
     getStoreAdminProfile
+  );
+
+    // profile routes
+  fastify.put(
+    "/profile",
+    { preHandler: [storeAdminProtect] },
+    updateStoreAdminProfile
   );
 
   // mobile-verification routes
@@ -68,7 +76,8 @@ function storeAdminRoutes(fastify, options, done) {
   fastify.post("/verify-mobile", verifyStoreAdminMobile);
   fastify.post("/resend-otp", resendOtpHandler);
 
-  //delete profile photo from cloudinary
+  // profile photo routes
+  fastify.post("/upload-profile-photo", { preHandler: [uploadMiddleware] }, uploadProfilePhoto);
   fastify.delete("/delete-profile-photo", deleteProfilePhoto);
 
   // forgot-password routes
@@ -194,17 +203,13 @@ function storeAdminRoutes(fastify, options, done) {
     getFarmersIdsForCheck
   );
 
-
-fastify.post(
-  '/daybook/search-receipt',
-  { preHandler: [storeAdminProtect] },
-  searchOrderByReceiptNumber
-);
-
+  fastify.post(
+    '/daybook/search-receipt',
+    { preHandler: [storeAdminProtect] },
+    searchOrderByReceiptNumber
+  );
 
   fastify.get("/test", testController);
-
-
 
   done();
 }

@@ -308,17 +308,17 @@ const updateStoreAdminProfile = async (req, reply) => {
     if (req.body.mobileNumber)
       updatedFields.mobileNumber = req.body.mobileNumber;
     if (req.body.coldStorageName)
-      updatedFields.coldStorageDetails.coldStorageName =
-        req.body.coldStorageName;
+      updatedFields["coldStorageDetails.coldStorageName"] = req.body.coldStorageName;
     if (req.body.coldStorageContactNumber)
-      updatedFields.coldStorageDetails.coldStorageContactNumber =
-        req.body.coldStorageContactNumber;
+      updatedFields["coldStorageDetails.coldStorageContactNumber"] = req.body.coldStorageContactNumber;
     if (req.body.coldStorageAddress)
-      updatedFields.coldStorageDetails.coldStorageAddress =
-        req.body.coldStorageAddress;
+      updatedFields["coldStorageDetails.coldStorageAddress"] = req.body.coldStorageAddress;
     if (req.body.coldStorageGSTNumber)
-      updatedFields.coldStorageDetails.coldStorageGSTNumber =
-        req.body.coldStorageGSTNumber;
+      updatedFields["coldStorageDetails.coldStorageGSTNumber"] = req.body.coldStorageGSTNumber;
+    if (req.body.imageUrl)
+      updatedFields.imageUrl = req.body.imageUrl;
+    if (req.body.preferences?.bagSizes)
+      updatedFields["preferences.bagSizes"] = req.body.preferences.bagSizes;
 
     // Log which fields are being updated
     req.log.info("Updating store admin profile fields", { updatedFields });

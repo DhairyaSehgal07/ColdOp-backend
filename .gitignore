@@ -43,3 +43,6 @@ coverage/
 
 server.log
 .qodo
+
+# Uploads directory
+uploads/

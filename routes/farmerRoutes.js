@@ -12,7 +12,8 @@ import {
 } from "../controllers/farmerController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
-import { deleteProfilePhoto } from "../utils/deleteImageFromCloudinary.js";
+import { deleteProfilePhoto, uploadProfilePhoto } from "../utils/cloudinary.js";
+import { uploadMiddleware } from "../middleware/uploadMiddleware.js";
 import {
   forgotPasswordGetMobile,
   handleResetPasswordSuccess,
@@ -43,7 +44,8 @@ function userRoutes(fastify, options, done) {
   fastify.post("/verify-mobile", verifyFarmerMobile);
   fastify.post("/resend-otp", resendMobileOtpHandler);
 
-  //delete profile photo from cloudinary
+  //profile photo routes
+  fastify.post("/upload-profile-photo", { preHandler: [uploadMiddleware] }, uploadProfilePhoto);
   fastify.delete("/delete-profile-photo", deleteProfilePhoto);
 
   // get store-admin details pre registration

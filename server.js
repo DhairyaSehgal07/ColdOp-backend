@@ -9,6 +9,7 @@ import formBody from "@fastify/formbody";
 import fastifyCookie from "@fastify/cookie";
 import storeAdminRoutes from "./routes/storeAdminRoutes.js";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 
 import ejs from "ejs";
 import fastifyView from "@fastify/view";
@@ -20,33 +21,61 @@ const PORT = process.env.PORT || 5000;
 
 connectDB();
 const start = async () => {
-  const app = fastify({ logger: true });
+  const app = fastify({
+    logger: true,
+    ajv: {
+      customOptions: {
+        removeAdditional: false,
+        useDefaults: true,
+        coerceTypes: true,
+        allErrors: true
+      }
+    }
+  });
 
   // fastify-swagger setup with ui
-  app.register(swagger, {
-    swagger: {
+  await app.register(swagger, {
+    openapi: {
       info: {
         title: "ColdOp Api",
-        description: "A sample API using Fastify and Swagger",
+        description: "A sample API using OpenAPI and Swagger",
         version: "1.0.0",
       },
-      // externalDocs: {
-      //   url: "https://swagger.io",
-      //   description: "Find more info here",
-      // },
-      consumes: ["application/json"],
-      produces: ["application/json"],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT'
+          }
+        }
+      }
     },
+    hideUntagged: true,
     exposeRoute: true,
   });
 
-  app.register(swaggerUi, {
+  await app.register(swaggerUi, {
     routePrefix: "/docs",
+    uiConfig: {
+      docExpansion: 'list',
+      deepLinking: false
+    },
+    staticCSP: true
   });
 
+  // Register multipart plugin
+  await app.register(multipart, {
+    limits: {
+      fieldNameSize: 100, // Max field name size in bytes
+      fieldSize: 100000, // Max field value size in bytes
+      fields: 10,        // Max number of non-file fields
+      fileSize: 5000000, // Max file size in bytes (5MB)
+      files: 1,          // Max number of file fields
+    }
+  });
 
-
-   await app.register(cors, {
+  await app.register(cors, {
     origin: ["*"],
     methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -54,24 +83,26 @@ const start = async () => {
     hook: "preHandler",
   });
 
-  app.register(fastifyCookie, {
+  await app.register(fastifyCookie, {
     secret: process.env.JWT_SECRET,
-    parseOptions: {},
+    hook: 'onRequest',
   });
 
-  app.register(fastifyView, {
+  await app.register(fastifyView, {
     engine: {
       ejs: ejs,
     },
-    template: "views",
+    root: 'views',
+    propertyName: 'view'
   });
 
-  app.register(formBody);
-  app.register(farmerRoutes, { prefix: "/api/farmers" });
-  app.register(storeAdminRoutes, { prefix: "/api/store-admin" });
-  app.register(superAdminRoutes, { prefix: "/api/super-admin" });
-  app.get("/", (req, res) => {
-    res.send("Fastify server started server");
+  await app.register(formBody);
+  await app.register(farmerRoutes, { prefix: "/api/farmers" });
+  await app.register(storeAdminRoutes, { prefix: "/api/store-admin" });
+  await app.register(superAdminRoutes, { prefix: "/api/super-admin" });
+
+  app.get("/", async (request, reply) => {
+    return { message: "Fastify server started" };
   });
 
   try {
@@ -79,9 +110,6 @@ const start = async () => {
     app.log.info(
       `Server started in ${process.env.NODE_ENV} mode on port ${PORT}`
     );
-    // console.log(
-    //   `Server started in ${process.env.NODE_ENV} mode on port ${PORT}`
-    // );
   } catch (err) {
     app.log.error(err);
     process.exit(1);

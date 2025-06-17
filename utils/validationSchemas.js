@@ -66,7 +66,10 @@ const storeAdminUpdateSchmea = z.object({
       z.string().length(12),
     ])
     .optional(),
-  coldStorageGSTNumber: z.string().length(15),
+  imageUrl: z.string().optional(),
+  preferences: z.object({
+    bagSizes: z.array(z.string()),
+  }).optional(),
 });
 
 const editOtpMobileNumberSchema = z.object({
