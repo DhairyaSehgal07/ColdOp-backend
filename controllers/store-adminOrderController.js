@@ -1242,10 +1242,6 @@ const createOutgoingOrder = async (req, reply) => {
       return acc;
     }, {});
 
-    // Initialize bulk operations array
-    const bulkOps = [];
-    let variety = ""; // Common variety for outgoing order
-
     // Calculate total current stock from all incoming orders
     const totalIncomingStock = await Order.aggregate([
       {
@@ -1265,57 +1261,53 @@ const createOutgoingOrder = async (req, reply) => {
       },
     ]);
 
-    // Calculate total outgoing stock from existing outgoing orders
-    const totalOutgoingStock = await OutgoingOrder.aggregate([
-      {
-        $match: {
-          coldStorageId: new mongoose.Types.ObjectId(req.storeAdmin._id),
-        },
-      },
-      { $unwind: "$orderDetails" },
-      { $unwind: "$orderDetails.bagSizes" },
-      {
-        $group: {
-          _id: null,
-          totalQuantityRemoved: {
-            $sum: "$orderDetails.bagSizes.quantityRemoved",
-          },
-        },
-      },
-    ]);
+    console.log("Total incoming stock aggregation result:", totalIncomingStock);
+    console.log("Total incoming stock value:", totalIncomingStock.length > 0 ? totalIncomingStock[0].totalCurrentQuantity : 0);
 
     // Calculate current outgoing order total
     const currentOutgoingTotal = orders.reduce((total, order) => {
-      return total + order.bagUpdates.reduce((bagTotal, update) => {
+      console.log("Processing order for total calculation:", order);
+      const orderTotal = order.bagUpdates.reduce((bagTotal, update) => {
+        console.log("Processing bag update:", update);
+        console.log("Current bag total:", bagTotal);
+        console.log("Adding quantity:", update.quantityToRemove);
         return bagTotal + update.quantityToRemove;
       }, 0);
+      console.log("Order total:", orderTotal);
+      return total + orderTotal;
     }, 0);
 
-    // Calculate currentStockAtThatTime
+    console.log("Current outgoing order total:", currentOutgoingTotal);
+
+    // Calculate currentStockAtThatTime (modified formula)
     const incomingTotal = totalIncomingStock.length > 0 ? totalIncomingStock[0].totalCurrentQuantity : 0;
-    const outgoingTotal = totalOutgoingStock.length > 0 ? totalOutgoingStock[0].totalQuantityRemoved : 0;
-    const currentStockAtThatTime = incomingTotal - outgoingTotal - currentOutgoingTotal;
+    const currentStockAtThatTime = incomingTotal - currentOutgoingTotal;
+
+    console.log("Final calculation breakdown (Modified):");
+    console.log("- Total Incoming Stock:", incomingTotal);
+    console.log("- Current Order's Outgoing Total:", currentOutgoingTotal);
+    console.log("= Current Stock At That Time:", currentStockAtThatTime);
 
     req.log.info("Stock calculation completed", {
       incomingTotal,
-      outgoingTotal,
       currentOutgoingTotal,
       currentStockAtThatTime,
     });
 
+    // Initialize bulk operations array
+    const bulkOps = [];
+
     // Prepare outgoing order details in the new format
     const outgoingOrderDetails = orders.map(
-      ({ orderId, variety: currentVariety, bagUpdates }) => {
-        variety = currentVariety;
-
-        req.log.info("Processing order", { variety });
+      ({ orderId, variety, bagUpdates }) => {
+        console.log("Processing variety:", variety);
 
         // Process bag updates for bulk operations and outgoing order details
         const bagDetails = bagUpdates
           .filter((update) => update.quantityToRemove > 0) // Filter out zero quantities
           .map((update) => {
             const { size, quantityToRemove } = update;
-            req.log.info("Bag update", { size, quantityToRemove });
+            console.log("Processing bag update:", { size, quantityToRemove, variety });
 
             // Prepare bulk operation for updating quantities in the source order
             bulkOps.push({
