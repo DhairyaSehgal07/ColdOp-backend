@@ -1174,6 +1174,50 @@ const getFarmerOrderFrequency = async (req, reply) => {
   }
 };
 
+const deleteOutgoingOrder = async (req, reply) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Outgoing order ID is required"
+      });
+    }
+
+    // Validate if the ID is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid outgoing order ID format"
+      });
+    }
+
+    // Find and delete the outgoing order
+    const deletedOutgoingOrder = await OutgoingOrder.findByIdAndDelete(id);
+
+    if (!deletedOutgoingOrder) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Outgoing order not found"
+      });
+    }
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Outgoing order deleted successfully",
+      data: deletedOutgoingOrder
+    });
+
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while deleting the outgoing order",
+      errorMessage: err.message
+    });
+  }
+};
+
 export {
   loginSuperAdmin,
   getAllColdStorages,
@@ -1189,4 +1233,5 @@ export {
   getSingleFarmerOrders,
   getTopFarmers,
   getFarmerOrderFrequency,
+  deleteOutgoingOrder,
 };
