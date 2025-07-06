@@ -1974,13 +1974,92 @@ const coldStorageSummary = async (req, reply) => {
       });
     }
 
+    // Get stock trend data (last 12 months)
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+
+    req.log.info("Starting stock trend analysis calculation", {
+      coldStorageId,
+      startDate: twelveMonthsAgo,
+      requestId: req.id,
+    });
+
+    // Get all orders sorted by date to calculate running stock levels
+    const [allIncomingOrders, allOutgoingOrders] = await Promise.all([
+      Order.find({
+        coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+        createdAt: { $gte: twelveMonthsAgo }
+      }).sort({ createdAt: 1 }),
+      OutgoingOrder.find({
+        coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+        createdAt: { $gte: twelveMonthsAgo }
+      }).sort({ createdAt: 1 })
+    ]);
+
+    // Create monthly data points
+    const monthlyData = {};
+    const months = [];
+    const currentDate = new Date();
+
+    // Initialize last 12 months with 0 values
+    for (let i = 11; i >= 0; i--) {
+      const date = new Date();
+      date.setMonth(currentDate.getMonth() - i);
+      const monthKey = date.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+      monthlyData[monthKey] = {
+        totalStock: 0,
+        month: monthKey
+      };
+      months.push(monthKey);
+    }
+
+    // Calculate running stock for each month
+    let runningStock = 0;
+
+    // Process incoming orders
+    allIncomingOrders.forEach(order => {
+      const monthKey = new Date(order.createdAt).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+      if (monthlyData[monthKey]) {
+        const orderStock = order.orderDetails.reduce((total, detail) =>
+          total + detail.bagSizes.reduce((sum, bag) =>
+            sum + bag.quantity.currentQuantity, 0), 0);
+        runningStock += orderStock;
+        monthlyData[monthKey].totalStock = runningStock;
+      }
+    });
+
+    // Process outgoing orders
+    allOutgoingOrders.forEach(order => {
+      const monthKey = new Date(order.createdAt).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+      if (monthlyData[monthKey]) {
+        const orderStock = order.orderDetails.reduce((total, detail) =>
+          total + detail.bagSizes.reduce((sum, bag) =>
+            sum + bag.quantityRemoved, 0), 0);
+        runningStock -= orderStock;
+        monthlyData[monthKey].totalStock = runningStock;
+      }
+    });
+
+    // Convert to array format for the frontend
+    const stockTrend = months.map(month => ({
+      month: month,
+      totalStock: monthlyData[month].totalStock
+    }));
+
+    req.log.info("Completed stock trend analysis", {
+      coldStorageId,
+      monthsAnalyzed: stockTrend.length,
+      requestId: req.id,
+    });
+
+    // Continue with existing aggregations...
     req.log.info("Starting cold storage incoming orders aggregation", {
       coldStorageId,
       requestId: req.id,
     });
 
-    // Aggregate incoming orders
-    const incomingOrders = await Order.aggregate([
+    // Existing aggregation for incoming orders
+    const incomingOrdersAgg = await Order.aggregate([
       {
         $match: {
           coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
@@ -2004,19 +2083,19 @@ const coldStorageSummary = async (req, reply) => {
       },
     ]);
 
-    req.log.info("Completed cold storage incoming orders aggregation", {
-      coldStorageId,
-      incomingOrdersCount: incomingOrders.length,
-      requestId: req.id,
-    });
-
-    req.log.info("Starting cold storage outgoing orders aggregation", {
-      coldStorageId,
-      requestId: req.id,
-    });
+    // Transform incoming orders into a structured object
+    const incomingSummaryAgg = incomingOrdersAgg.reduce((acc, order) => {
+      const { variety, size } = order._id;
+      if (!acc[variety]) acc[variety] = {};
+      acc[variety][size] = {
+        initialQuantity: order.initialQuantity,
+        currentQuantity: order.currentQuantity,
+      };
+      return acc;
+    }, {});
 
     // Aggregate outgoing orders
-    const outgoingOrders = await OutgoingOrder.aggregate([
+    const outgoingOrdersAgg = await OutgoingOrder.aggregate([
       {
         $match: {
           coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
@@ -2037,49 +2116,21 @@ const coldStorageSummary = async (req, reply) => {
       },
     ]);
 
-    req.log.info("Completed cold storage outgoing orders aggregation", {
-      coldStorageId,
-      outgoingOrdersCount: outgoingOrders.length,
-      requestId: req.id,
-    });
-
-    req.log.info("Processing cold storage summary calculations", {
-      coldStorageId,
-      requestId: req.id,
-    });
-
-    // Transform incoming orders into a structured object
-    const incomingSummary = incomingOrders.reduce((acc, order) => {
-      const { variety, size } = order._id;
-      if (!acc[variety]) acc[variety] = {};
-      acc[variety][size] = {
-        initialQuantity: order.initialQuantity,
-        currentQuantity: order.currentQuantity,
-      };
-      return acc;
-    }, {});
-
-    req.log.info("Processed cold storage incoming summary", {
-      coldStorageId,
-      varietiesCount: Object.keys(incomingSummary).length,
-      requestId: req.id,
-    });
-
     // Add outgoing quantities to the structured object
-    outgoingOrders.forEach((order) => {
+    outgoingOrdersAgg.forEach((order) => {
       const { variety, size } = order._id;
-      if (!incomingSummary[variety]) incomingSummary[variety] = {};
-      if (!incomingSummary[variety][size]) {
-        incomingSummary[variety][size] = {
+      if (!incomingSummaryAgg[variety]) incomingSummaryAgg[variety] = {};
+      if (!incomingSummaryAgg[variety][size]) {
+        incomingSummaryAgg[variety][size] = {
           initialQuantity: 0,
           currentQuantity: 0,
         };
       }
-      incomingSummary[variety][size].quantityRemoved = order.quantityRemoved;
+      incomingSummaryAgg[variety][size].quantityRemoved = order.quantityRemoved;
     });
 
     // Convert the stock summary object into an array
-    const stockSummaryArray = Object.entries(incomingSummary).map(
+    const stockSummaryArrayAgg = Object.entries(incomingSummaryAgg).map(
       ([variety, sizes]) => ({
         variety,
         sizes: Object.entries(sizes).map(([size, quantities]) => ({
@@ -2089,19 +2140,21 @@ const coldStorageSummary = async (req, reply) => {
       })
     );
 
-    req.log.info("Successfully generated cold storage summary", {
+    req.log.info("Successfully generated cold storage summary with trend analysis", {
       coldStorageId,
-      varietiesCount: stockSummaryArray.length,
-      totalSizes: stockSummaryArray.reduce(
+      varietiesCount: stockSummaryArrayAgg.length,
+      totalSizes: stockSummaryArrayAgg.reduce(
         (acc, item) => acc + item.sizes.length,
         0
       ),
+      trendDataPoints: stockTrend.length,
       requestId: req.id,
     });
 
     reply.code(200).send({
       status: "Success",
-      stockSummary: stockSummaryArray,
+      stockSummary: stockSummaryArrayAgg,
+      stockTrend: stockTrend
     });
   } catch (err) {
     req.log.error("Error in cold storage summary calculation", {
