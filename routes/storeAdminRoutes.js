@@ -28,6 +28,7 @@ import {
   getVarietyAvailableForFarmer,
   searchFarmers,
   editOutgoingOrder,
+  getTopFarmers,
 } from "../controllers/store-adminOrderController.js";
 
 import { storeAdminProtect } from "../middleware/authMiddleware.js";
@@ -201,6 +202,12 @@ function storeAdminRoutes(fastify, options, done) {
     "/farmerid/check",
     { preHandler: [storeAdminProtect] },
     getFarmersIdsForCheck
+  );
+
+  fastify.get(
+    "/top-farmers",
+    { preHandler: [storeAdminProtect] },
+    getTopFarmers
   );
 
   fastify.post(

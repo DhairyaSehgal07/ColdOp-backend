@@ -2118,6 +2118,136 @@ const coldStorageSummary = async (req, reply) => {
   }
 };
 
+const getTopFarmers = async (req, reply) => {
+  try {
+    const storeAdminId = req.storeAdmin._id;
+    if (!storeAdminId || !mongoose.Types.ObjectId.isValid(storeAdminId)) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Valid store admin ID is required",
+      });
+    }
+    const topFarmers = await Order.aggregate([
+      // Match orders for the specific cold storage
+      {
+        $match: {
+          coldStorageId: new mongoose.Types.ObjectId(storeAdminId)
+        }
+      },
+      // Unwind the arrays to get individual entries
+      { $unwind: "$orderDetails" },
+      { $unwind: "$orderDetails.bagSizes" },
+      // Group by farmer and calculate totals
+      {
+        $group: {
+          _id: "$farmerId",
+          totalBags: {
+            $sum: "$orderDetails.bagSizes.quantity.initialQuantity"
+          },
+          bagSizeDetails: {
+            $push: {
+              size: "$orderDetails.bagSizes.size",
+              quantity: "$orderDetails.bagSizes.quantity.initialQuantity"
+            }
+          }
+        }
+      },
+      // Properly group the bag sizes
+      {
+        $project: {
+          _id: 1,
+          totalBags: 1,
+          bagSummary: {
+            $arrayToObject: {
+              $map: {
+                input: {
+                  $setUnion: "$bagSizeDetails.size"
+                },
+                as: "size",
+                in: {
+                  k: "$$size",
+                  v: {
+                    $sum: {
+                      $map: {
+                        input: {
+                          $filter: {
+                            input: "$bagSizeDetails",
+                            as: "sizeDetail",
+                            cond: { $eq: ["$$sizeDetail.size", "$$size"] }
+                          }
+                        },
+                        as: "filteredSize",
+                        in: "$$filteredSize.quantity"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      // Lookup farmer details
+      {
+        $lookup: {
+          from: "farmers",
+          localField: "_id",
+          foreignField: "_id",
+          as: "farmerInfo"
+        }
+      },
+      // Unwind the farmer info array
+      {
+        $unwind: {
+          path: "$farmerInfo",
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      // Project final format
+      {
+        $project: {
+          farmerId: "$_id",
+          farmerName: { $ifNull: ["$farmerInfo.name", "Unknown Farmer"] },
+          totalBags: 1,
+          bagSummary: 1
+        }
+      },
+      // Sort by total bags in descending order
+      {
+        $sort: { totalBags: -1 }
+      },
+      // Limit to top 5 farmers
+      {
+        $limit: 5
+      }
+    ]);
+
+    if (!topFarmers.length) {
+      return reply.code(200).send({
+        status: "Success",
+        message: "No farmers found for this cold storage",
+        data: []
+      });
+    }
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Top farmers retrieved successfully",
+      data: topFarmers
+    });
+  } catch (err) {
+    req.log.error("Error in getTopFarmers:", {
+      error: err.message,
+      stack: err.stack,
+      storeAdminId: req.storeAdmin._id
+    });
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while retrieving top farmers",
+      errorMessage: err.message
+    });
+  }
+};
 
 export {
   searchFarmers,
@@ -2135,4 +2265,5 @@ export {
   editOutgoingOrder,
   deleteOutgoingOrder,
   getSingleOrder,
+  getTopFarmers,
 };
