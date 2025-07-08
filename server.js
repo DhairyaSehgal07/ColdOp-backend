@@ -10,6 +10,7 @@ import fastifyCookie from "@fastify/cookie";
 import storeAdminRoutes from "./routes/storeAdminRoutes.js";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
+import countRoutes from "./routes/countRoutes.js";
 
 import ejs from "ejs";
 import fastifyView from "@fastify/view";
@@ -100,6 +101,7 @@ const start = async () => {
   await app.register(farmerRoutes, { prefix: "/api/farmers" });
   await app.register(storeAdminRoutes, { prefix: "/api/store-admin" });
   await app.register(superAdminRoutes, { prefix: "/api/super-admin" });
+  await app.register(countRoutes, { prefix: "/api/count" });
 
   app.get("/", async (request, reply) => {
     return { message: "Fastify server started" };
