@@ -1237,6 +1237,14 @@ const deleteFarmer = async (req, reply) => {
       });
     }
 
+    // Delete all incoming orders associated with the farmer
+    const deletedIncomingOrders = await Order.deleteMany({ farmerId: id });
+    req.log.info(`Deleted ${deletedIncomingOrders.deletedCount} incoming orders for farmer ${id}`);
+
+    // Delete all outgoing orders associated with the farmer
+    const deletedOutgoingOrders = await OutgoingOrder.deleteMany({ farmerId: id });
+    req.log.info(`Deleted ${deletedOutgoingOrders.deletedCount} outgoing orders for farmer ${id}`);
+
     // Find and delete the farmer
     const deletedFarmer = await Farmer.findByIdAndDelete(id);
 
@@ -1255,14 +1263,26 @@ const deleteFarmer = async (req, reply) => {
 
     reply.code(200).send({
       status: "Success",
-      message: "Farmer deleted successfully",
-      data: deletedFarmer
+      message: "Farmer and all associated orders deleted successfully",
+      data: {
+        farmer: deletedFarmer,
+        deletedOrdersCount: {
+          incomingOrders: deletedIncomingOrders.deletedCount,
+          outgoingOrders: deletedOutgoingOrders.deletedCount
+        }
+      }
     });
 
   } catch (err) {
+    req.log.error("Error occurred while deleting the farmer and associated orders", {
+      error: err.message,
+      stack: err.stack,
+      farmerId: req.params?.id
+    });
+
     reply.code(500).send({
       status: "Fail",
-      message: "Error occurred while deleting the farmer",
+      message: "Error occurred while deleting the farmer and associated orders",
       errorMessage: err.message
     });
   }
