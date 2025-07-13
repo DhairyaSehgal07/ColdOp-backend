@@ -1218,6 +1218,56 @@ const deleteOutgoingOrder = async (req, reply) => {
   }
 };
 
+const deleteFarmer = async (req, reply) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Farmer ID is required"
+      });
+    }
+
+    // Validate if the ID is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid farmer ID format"
+      });
+    }
+
+    // Find and delete the farmer
+    const deletedFarmer = await Farmer.findByIdAndDelete(id);
+
+    if (!deletedFarmer) {
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Farmer not found"
+      });
+    }
+
+    // Also remove this farmer's reference from any StoreAdmin's registeredFarmers array
+    await StoreAdmin.updateMany(
+      { registeredFarmers: id },
+      { $pull: { registeredFarmers: id } }
+    );
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Farmer deleted successfully",
+      data: deletedFarmer
+    });
+
+  } catch (err) {
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while deleting the farmer",
+      errorMessage: err.message
+    });
+  }
+};
+
 export {
   loginSuperAdmin,
   getAllColdStorages,
@@ -1234,4 +1284,5 @@ export {
   getTopFarmers,
   getFarmerOrderFrequency,
   deleteOutgoingOrder,
+  deleteFarmer,
 };
