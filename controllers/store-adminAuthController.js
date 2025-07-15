@@ -304,7 +304,8 @@ const updateStoreAdminProfile = async (req, reply) => {
 
     // Update store admin fields if provided in request body
     if (req.body.name) updatedFields.name = req.body.name;
-    if (req.body.address) updatedFields.personalAddress = req.body.address;
+    if (req.body.personalAddress)
+      updatedFields.personalAddress = req.body.personalAddress;
     if (req.body.mobileNumber)
       updatedFields.mobileNumber = req.body.mobileNumber;
     if (req.body.coldStorageName)
