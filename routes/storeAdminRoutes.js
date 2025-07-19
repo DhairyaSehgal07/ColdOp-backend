@@ -29,6 +29,7 @@ import {
   searchFarmers,
   editOutgoingOrder,
   getTopFarmers,
+  searchOrdersByVarietyAndBagSize,
 } from "../controllers/store-adminOrderController.js";
 
 import { storeAdminProtect } from "../middleware/authMiddleware.js";
@@ -162,6 +163,12 @@ function storeAdminRoutes(fastify, options, done) {
     "/farmers/outgoing/filter",
     { preHandler: [storeAdminProtect] },
     filterOrdersByVariety
+  );
+
+  fastify.post(
+    "/orders/search-by-variety",
+    { preHandler: [storeAdminProtect] },
+    searchOrdersByVarietyAndBagSize
   );
 
   // OUTGOING ORDER ROUTES

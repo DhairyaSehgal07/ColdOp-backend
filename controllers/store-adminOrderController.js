@@ -2302,6 +2302,124 @@ const getTopFarmers = async (req, reply) => {
   }
 };
 
+const searchOrdersByVarietyAndBagSize = async (req, reply) => {
+  try {
+    const { variety, storeAdminId } = req.body;
+
+    req.log.info("Starting order search by variety", {
+      variety,
+      storeAdminId,
+      requestId: req.id,
+    });
+
+    // Validate required fields
+    if (!variety || !storeAdminId) {
+      req.log.warn("Missing required fields", {
+        variety,
+        storeAdminId,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Missing required fields",
+        errorMessage: "variety and storeAdminId are required",
+      });
+    }
+
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(storeAdminId)) {
+      req.log.warn("Invalid storeAdminId format", {
+        storeAdminId,
+      });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid ID format",
+        errorMessage: "Please provide a valid MongoDB ObjectId",
+      });
+    }
+
+    // Build the match condition - only filter by variety
+    const matchCondition = {
+      coldStorageId: new mongoose.Types.ObjectId(storeAdminId),
+      orderDetails: {
+        $elemMatch: {
+          variety: variety,
+        },
+      },
+    };
+
+    req.log.info("Executing order search query", {
+      variety,
+      storeAdminId,
+      matchCondition,
+      requestId: req.id,
+    });
+
+    // Find orders matching the criteria
+    const orders = await Order.find(matchCondition)
+      .populate({
+        path: "farmerId",
+        model: Farmer,
+        select: "_id name mobileNumber address",
+      })
+      .sort({ createdAt: -1 });
+
+    req.log.info("Order search completed", {
+      variety,
+      ordersFound: orders.length,
+      requestId: req.id,
+    });
+
+    if (!orders || orders.length === 0) {
+      req.log.info("No orders found for specified variety", {
+        variety,
+        storeAdminId,
+      });
+      return reply.code(404).send({
+        status: "Fail",
+        message: "No orders found with the specified variety",
+      });
+    }
+
+    // Convert to plain objects and sort bag sizes
+    const processedOrders = orders.map((order) => {
+      const orderObj = order.toObject();
+      orderObj.orderDetails = orderObj.orderDetails.map((detail) => ({
+        ...detail,
+        bagSizes: detail.bagSizes.sort((a, b) =>
+          a.size.localeCompare(b.size)
+        ),
+      }));
+      return orderObj;
+    });
+
+    req.log.info("Successfully retrieved and processed orders", {
+      variety,
+      orderCount: processedOrders.length,
+      requestId: req.id,
+    });
+
+    reply.code(200).send({
+      status: "Success",
+      message: "Orders retrieved successfully",
+      data: processedOrders,
+    });
+  } catch (err) {
+    req.log.error("Error occurred while searching orders", {
+      variety: req.body?.variety,
+      storeAdminId: req.body?.storeAdminId,
+      errorMessage: err.message,
+      stack: err.stack,
+      requestId: req.id,
+    });
+
+    reply.code(500).send({
+      status: "Fail",
+      message: "Error occurred while searching orders",
+      errorMessage: err.message,
+    });
+  }
+};
+
 export {
   searchFarmers,
   createNewIncomingOrder,
@@ -2319,4 +2437,5 @@ export {
   deleteOutgoingOrder,
   getSingleOrder,
   getTopFarmers,
+  searchOrdersByVarietyAndBagSize,
 };
