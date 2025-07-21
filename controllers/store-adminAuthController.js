@@ -523,7 +523,7 @@ const getFarmers = async (req, reply) => {
       registeredFarmers.map(async (item) => {
         req.log.info("Fetching farmer details", { farmerId: item });
         const farmer = await Farmer.findById(item)
-          .select("name mobileNumber _id address createdAt")
+          .select("name mobileNumber farmerId _id address createdAt")
           .exec();
 
         if (!farmer) {

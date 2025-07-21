@@ -17,13 +17,26 @@ import mongoose from "mongoose";
 const getReceiptNumber = async (req, reply) => {
   try {
     const storeAdminId = req.storeAdmin._id;
+    const { type } = req.query; // use query param ?type=incoming or ?type=outgoing
 
-    // Log the store admin ID
-    req.log.info("Fetching receipt number for store admin", { storeAdminId });
+    req.log.info("Fetching receipt number", { storeAdminId, type });
 
-    // Using aggregation pipeline to count orders where voucher.type is "RECEIT"
-    req.log.info("Running aggregation pipeline to count RECEIT type orders");
-    const result = await Order.aggregate([
+    // Validate type
+    if (!['incoming', 'outgoing'].includes(type?.toLowerCase())) {
+      req.log.warn("Invalid type parameter", { type });
+      return reply.code(400).send({
+        status: "Fail",
+        message: "Invalid type parameter. Must be 'incoming' or 'outgoing'.",
+      });
+    }
+
+    // Pick the right model based on type
+    const Model = type.toLowerCase() === 'incoming' ? Order : OutgoingOrder;
+
+    req.log.info("Using model for receipt number aggregation", { model: Model.modelName });
+
+    // Run aggregation to count documents for this storeAdminId
+    const result = await Model.aggregate([
       {
         $match: {
           coldStorageId: new mongoose.Types.ObjectId(storeAdminId),
@@ -31,25 +44,21 @@ const getReceiptNumber = async (req, reply) => {
       },
       {
         $group: {
-          _id: null, // We don't care about grouping by any field, just counting
-          count: { $sum: 1 }, // Sum the number of documents that match
+          _id: null,
+          count: { $sum: 1 },
         },
       },
     ]);
 
-    // Extracting count from result
     const receiptNumber = result.length > 0 ? result[0].count : 0;
 
-    // Log the receipt number result
     req.log.info("Receipt number calculation complete", { receiptNumber });
 
-    // Sending response with receipt number
     reply.code(200).send({
       status: "Success",
       receiptNumber: receiptNumber + 1,
     });
   } catch (err) {
-    // Log error
     req.log.error("Error occurred while getting receipt number", {
       errorMessage: err.message,
     });
