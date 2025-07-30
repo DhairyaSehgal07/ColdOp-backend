@@ -8,6 +8,7 @@ import {
   formatDate,
 } from "../utils/helpers.js";
 import mongoose from "mongoose";
+import StoreAdmin from "../models/storeAdminModel.js";
 
 // ORDER ROUTES CONTROLLER FUCNTIONS
 
@@ -760,24 +761,22 @@ const getAllFarmerOrders = async (req, reply) => {
 
     const [incomingOrders, outgoingOrders] = await Promise.all([
       Order.find({ coldStorageId: storeAdminId, farmerId: id })
-        .sort({ dateOfSubmission: -1 })
         .populate({
           path: "farmerId",
           model: Farmer,
-          select: "_id name",
+          select: "_id farmerId name",
         })
         .select(
-          "_id coldStorageId farmerId remarks voucher dateOfSubmission orderDetails"
+          "_id coldStorageId farmerId remarks currentStockAtThatTime voucher dateOfSubmission orderDetails createdAt"
         ),
       OutgoingOrder.find({ coldStorageId: storeAdminId, farmerId: id })
-        .sort({ dateOfExtraction: -1 })
         .populate({
           path: "farmerId",
           model: Farmer,
-          select: "_id name",
+          select: "_id farmerId name",
         })
         .select(
-          "_id coldStorageId farmerId remarks voucher dateOfExtraction orderDetails"
+          "_id coldStorageId farmerId remarks currentStockAtThatTime voucher dateOfExtraction orderDetails createdAt"
         ),
     ]);
 
@@ -801,10 +800,22 @@ const getAllFarmerOrders = async (req, reply) => {
       });
     };
 
-    // Sort bag sizes in both incoming and outgoing orders
-    const sortedIncoming = sortOrderDetails(incomingOrders);
-    const sortedOutgoing = sortOrderDetails(outgoingOrders);
-    const allOrders = [...sortedIncoming, ...sortedOutgoing];
+    const addOrderType = (orders, type) =>
+      orders.map((order) => ({ ...order, orderType: type }));
+
+    // Sort bag sizes, add type, and combine
+    const sortedIncoming = addOrderType(
+      sortOrderDetails(incomingOrders),
+      "incoming"
+    );
+    const sortedOutgoing = addOrderType(
+      sortOrderDetails(outgoingOrders),
+      "outgoing"
+    );
+
+    const allOrders = [...sortedIncoming, ...sortedOutgoing].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
 
     if (allOrders.length === 0) {
       req.log.info("No orders found for farmer", {
@@ -845,6 +856,7 @@ const getAllFarmerOrders = async (req, reply) => {
     });
   }
 };
+
 
 const filterOrdersByVariety = async (req, reply) => {
   try {
@@ -1983,43 +1995,53 @@ const coldStorageSummary = async (req, reply) => {
       });
     }
 
-    // Get stock trend data (last 12 months)
-    const twelveMonthsAgo = new Date();
-    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+    // Get store admin creation date
+    const storeAdmin = await StoreAdmin.findById(coldStorageId);
+    if (!storeAdmin) {
+      req.log.warn("Store admin not found", {
+        coldStorageId,
+        requestId: req.id,
+      });
+      return reply.code(404).send({
+        status: "Fail",
+        message: "Store admin not found",
+      });
+    }
 
-    req.log.info("Starting stock trend analysis calculation", {
+    const storeAdminCreationDate = storeAdmin.createdAt;
+    req.log.info("Retrieved store admin creation date", {
       coldStorageId,
-      startDate: twelveMonthsAgo,
+      creationDate: storeAdminCreationDate,
       requestId: req.id,
     });
 
-    // Get all orders sorted by date to calculate running stock levels
+    // Get stock trend data (from store admin creation date)
     const [allIncomingOrders, allOutgoingOrders] = await Promise.all([
       Order.find({
         coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
-        createdAt: { $gte: twelveMonthsAgo }
+        createdAt: { $gte: storeAdminCreationDate }
       }).sort({ createdAt: 1 }),
       OutgoingOrder.find({
         coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
-        createdAt: { $gte: twelveMonthsAgo }
+        createdAt: { $gte: storeAdminCreationDate }
       }).sort({ createdAt: 1 })
     ]);
 
-    // Create monthly data points
+    // Create monthly data points from store admin creation date to current date
     const monthlyData = {};
     const months = [];
     const currentDate = new Date();
+    let iterationDate = new Date(storeAdminCreationDate);
 
-    // Initialize last 12 months with 0 values
-    for (let i = 11; i >= 0; i--) {
-      const date = new Date();
-      date.setMonth(currentDate.getMonth() - i);
-      const monthKey = date.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+    // Initialize months from creation date to current date
+    while (iterationDate <= currentDate) {
+      const monthKey = iterationDate.toLocaleString('en-US', { month: 'short', year: '2-digit' });
       monthlyData[monthKey] = {
         totalStock: 0,
         month: monthKey
       };
       months.push(monthKey);
+      iterationDate.setMonth(iterationDate.getMonth() + 1);
     }
 
     // Calculate running stock for each month
@@ -2058,6 +2080,7 @@ const coldStorageSummary = async (req, reply) => {
     req.log.info("Completed stock trend analysis", {
       coldStorageId,
       monthsAnalyzed: stockTrend.length,
+      startDate: storeAdminCreationDate,
       requestId: req.id,
     });
 

@@ -72,7 +72,7 @@ const dayBookOrders = async (req, reply) => {
             .populate({
               path: "farmerId",
               model: Farmer,
-              select: "farmerId name", // Changed _id to farmerId
+              select: "farmerId name mobileNumber address",
             })
             .select(
               "_id coldStorageId currentStockAtThatTime remarks farmerId voucher dateOfSubmission orderDetails createdAt"
@@ -82,7 +82,7 @@ const dayBookOrders = async (req, reply) => {
             .populate({
               path: "farmerId",
               model: Farmer,
-              select: "farmerId name", // Changed _id to farmerId
+              select: "farmerId name mobileNumber address",
             })
             .select(
               "_id coldStorageId remarks farmerId voucher dateOfExtraction orderDetails currentStockAtThatTime createdAt"
@@ -131,7 +131,7 @@ const dayBookOrders = async (req, reply) => {
           .populate({
             path: "farmerId",
             model: Farmer,
-            select: "farmerId name", // Changed _id to farmerId
+            select: "farmerId name mobileNumber address", // Changed _id to farmerId
           })
           .select(
             "_id coldStorageId remarks currentStockAtThatTime farmerId voucher dateOfSubmission orderDetails"
@@ -165,7 +165,7 @@ const dayBookOrders = async (req, reply) => {
           .populate({
             path: "farmerId",
             model: Farmer,
-            select: "farmerId name", // Changed _id to farmerId
+            select: "farmerId name mobileNumber address", // Changed _id to farmerId
           })
           .select(
             "_id coldStorageId remarks farmerId voucher dateOfExtraction orderDetails currentStockAtThatTime"
