@@ -2033,7 +2033,7 @@ const coldStorageSummary = async (req, reply) => {
     const currentDate = new Date();
     let iterationDate = new Date(storeAdminCreationDate);
 
-    // Initialize months from creation date to current date
+    // Initialize months from creation date to current date (including current month)
     while (iterationDate <= currentDate) {
       const monthKey = iterationDate.toLocaleString('en-US', { month: 'short', year: '2-digit' });
       monthlyData[monthKey] = {
@@ -2042,6 +2042,16 @@ const coldStorageSummary = async (req, reply) => {
       };
       months.push(monthKey);
       iterationDate.setMonth(iterationDate.getMonth() + 1);
+    }
+
+    // Ensure current month is always included
+    const currentMonthKey = currentDate.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+    if (!monthlyData[currentMonthKey]) {
+      monthlyData[currentMonthKey] = {
+        totalStock: 0,
+        month: currentMonthKey
+      };
+      months.push(currentMonthKey);
     }
 
     // Calculate running stock for each month
@@ -2071,11 +2081,77 @@ const coldStorageSummary = async (req, reply) => {
       }
     });
 
+    // Ensure current month shows the most up-to-date stock
+    if (monthlyData[currentMonthKey]) {
+      // Calculate current total stock from all incoming orders minus all outgoing orders
+      const currentTotalStock = await Order.aggregate([
+        {
+          $match: {
+            coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+          },
+        },
+        { $unwind: "$orderDetails" },
+        { $unwind: "$orderDetails.bagSizes" },
+        {
+          $group: {
+            _id: null,
+            totalCurrentQuantity: {
+              $sum: "$orderDetails.bagSizes.quantity.currentQuantity",
+            },
+          },
+        },
+      ]);
+
+      const totalIncomingStock = currentTotalStock.length > 0 ? currentTotalStock[0].totalCurrentQuantity : 0;
+
+      // Calculate total outgoing stock
+      const totalOutgoingStock = await OutgoingOrder.aggregate([
+        {
+          $match: {
+            coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
+          },
+        },
+        { $unwind: "$orderDetails" },
+        { $unwind: "$orderDetails.bagSizes" },
+        {
+          $group: {
+            _id: null,
+            totalQuantityRemoved: {
+              $sum: "$orderDetails.bagSizes.quantityRemoved",
+            },
+          },
+        },
+      ]);
+
+      const totalOutgoing = totalOutgoingStock.length > 0 ? totalOutgoingStock[0].totalQuantityRemoved : 0;
+
+      // Set current month's stock to the actual current stock
+      monthlyData[currentMonthKey].totalStock = totalIncomingStock - totalOutgoing;
+
+      req.log.info("Current month stock calculation", {
+        currentMonthKey,
+        totalIncomingStock,
+        totalOutgoing,
+        calculatedStock: totalIncomingStock - totalOutgoing,
+        requestId: req.id,
+      });
+    }
+
     // Convert to array format for the frontend
     const stockTrend = months.map(month => ({
       month: month,
       totalStock: monthlyData[month].totalStock
     }));
+
+    req.log.info("Stock trend calculation details", {
+      coldStorageId,
+      storeAdminCreationDate,
+      currentDate,
+      monthsGenerated: months,
+      currentMonthKey,
+      stockTrendLength: stockTrend.length,
+      requestId: req.id,
+    });
 
     req.log.info("Completed stock trend analysis", {
       coldStorageId,
