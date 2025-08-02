@@ -124,6 +124,7 @@ export const varieties = [
   "Chipsona 3",
   "Colomba",
   "Desiree",
+  "Lauv Kar",
   "Diamond",
   "FC - 11",
   "FC - 12",
