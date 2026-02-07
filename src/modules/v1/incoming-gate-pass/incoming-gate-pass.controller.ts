@@ -1,0 +1,61 @@
+import { FastifyReply, FastifyRequest } from "fastify";
+import { createIncomingGatePass } from "./incoming-gate-pass.service.js";
+import { CreateIncomingGatePassInput } from "./incoming-gate-pass.schema.js";
+import { AppError } from "../../../utils/errors.js";
+import type { AuthenticatedRequest } from "../../../utils/auth.js";
+
+/** Centralized error reply: AppError → statusCode + code/message; else 500. */
+function sendErrorReply(
+  reply: FastifyReply,
+  error: unknown,
+): ReturnType<FastifyReply["send"]> {
+  if (error instanceof AppError) {
+    return reply.code(error.statusCode).send({
+      success: false,
+      error: { code: error.code, message: error.message },
+    });
+  }
+  const message =
+    error instanceof Error ? error.message : "An unexpected error occurred";
+  return reply.code(500).send({
+    success: false,
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message:
+        process.env.NODE_ENV === "development"
+          ? message
+          : "An unexpected error occurred",
+    },
+  });
+}
+
+/**
+ * Handler for creating a new incoming gate pass
+ */
+export async function createIncomingGatePassHandler(
+  request: FastifyRequest<{ Body: CreateIncomingGatePassInput }>,
+  reply: FastifyReply,
+) {
+  try {
+    const req = request as AuthenticatedRequest;
+    const createdById = req.user?.id;
+
+    const incomingGatePass = await createIncomingGatePass(
+      request.body,
+      createdById,
+      request.log,
+    );
+
+    return reply.code(201).send({
+      success: true,
+      data: incomingGatePass,
+      message: "Incoming gate pass created successfully",
+    });
+  } catch (error) {
+    request.log.error(
+      { error, body: request.body },
+      "Error in createIncomingGatePassHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}

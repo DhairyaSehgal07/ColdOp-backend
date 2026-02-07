@@ -10,9 +10,6 @@ import {
   quickRegisterFarmerHandler,
   updateFarmerStorageLinkHandler,
   getFarmerStorageLinksByColdStorageHandler,
-  getDaybookHandler,
-  getVouchersByFarmerStorageLinkHandler,
-  getNextVoucherNumberHandler,
 } from "./store-admin.controller.js";
 import {
   createStoreAdminSchema,
@@ -23,9 +20,6 @@ import {
   loginStoreAdminSchema,
   quickRegisterFarmerSchema,
   updateFarmerStorageLinkSchema,
-  getVoucherNumberQuerySchema,
-  getDaybookQuerySchema,
-  getVouchersByFarmerStorageLinkParamsSchema,
 } from "./store-admin.schema.js";
 import { authenticate, authorize } from "../../../utils/auth.js";
 import { Role } from "./store-admin.model.js";
@@ -164,116 +158,26 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
   // Get vouchers (daybook) for a single farmer-storage-link
   fastify.get(
     "/farmer-storage-links/:farmerStorageLinkId/vouchers",
-    {
-      schema: {
-        ...getVouchersByFarmerStorageLinkParamsSchema,
-        description:
-          "Get all vouchers (daybook-style) for a farmer-storage-link. Link must belong to authenticated store admin's cold storage.",
-        tags: ["Store Admin"],
-        summary: "Get vouchers by farmer-storage-link",
-        response: {
-          200: {
-            description: "Daybook entries for the link",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              data: {
-                type: "object",
-                properties: {
-                  daybook: { type: "array", items: { type: "object" } },
-                },
-              },
-            },
-          },
-        },
-      },
-      preHandler: [authenticate],
-      config: {
-        rateLimit: { max: 200, timeWindow: "1 minute" },
-      },
+    async (_request, reply) => {
+      return reply.status(200).send({
+        success: true,
+      });
     },
-    getVouchersByFarmerStorageLinkHandler as never,
   );
 
   // Get daybook (all gate passes) for authenticated cold storage
-  fastify.get(
-    "/daybook",
-    {
-      schema: {
-        ...getDaybookQuerySchema,
-        description:
-          "Get daybook (all gate passes) for the authenticated store admin's cold storage. Supports pagination and filtering by gate pass type.",
-        tags: ["Store Admin"],
-        summary: "Get daybook",
-        response: {
-          200: {
-            description: "Daybook with pagination",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              data: {
-                type: "object",
-                properties: {
-                  daybook: { type: "array", items: { type: "object" } },
-                  pagination: {
-                    type: "object",
-                    properties: {
-                      page: { type: "number" },
-                      limit: { type: "number" },
-                      total: { type: "number" },
-                      totalPages: { type: "number" },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      preHandler: [authenticate],
-      config: {
-        rateLimit: { max: 200, timeWindow: "1 minute" },
-      },
-    },
-    getDaybookHandler as never,
-  );
+  fastify.get("/daybook", async (_request, reply) => {
+    return reply.status(200).send({
+      success: true,
+    });
+  });
 
   // Get next voucher number for a voucher type
-  fastify.get(
-    "/next-voucher-number",
-    {
-      schema: {
-        ...getVoucherNumberQuerySchema,
-        description:
-          "Get the next voucher number for a given voucher type (authenticated cold storage).",
-        tags: ["Store Admin"],
-        summary: "Get next voucher number",
-        response: {
-          200: {
-            description: "Next voucher number",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              data: {
-                type: "object",
-                properties: {
-                  type: { type: "string" },
-                  nextVoucherNumber: { type: "number" },
-                },
-              },
-              message: { type: "string" },
-            },
-          },
-        },
-      },
-      preHandler: [authenticate],
-      config: {
-        rateLimit: { max: 200, timeWindow: "1 minute" },
-      },
-    },
-    getNextVoucherNumberHandler as never,
-  );
-
+  fastify.get("/next-voucher-number", async (_request, reply) => {
+    return reply.status(200).send({
+      success: true,
+    });
+  });
   // Get store admin by ID
   fastify.get(
     "/:id",

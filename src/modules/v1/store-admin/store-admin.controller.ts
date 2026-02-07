@@ -6,14 +6,10 @@ import {
   deleteStoreAdmin,
   checkMobileNumber,
   getFarmerStorageLinksByColdStorage,
-  getDaybook,
-  getVouchersByFarmerStorageLink,
   loginStoreAdmin,
   logoutStoreAdmin,
   quickRegisterFarmer,
   updateFarmerStorageLink,
-  getNextVoucherNumber,
-  type VoucherType,
 } from "./store-admin.service.js";
 import {
   CreateStoreAdminInput,
@@ -26,9 +22,8 @@ import {
   QuickRegisterFarmerInput,
   UpdateFarmerStorageLinkInput,
   UpdateFarmerStorageLinkParams,
-  GetVoucherNumberQuery,
 } from "./store-admin.schema.js";
-import { AppError, UnauthorizedError } from "../../../utils/errors.js";
+import { AppError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
 
 /** Centralized error reply: AppError → statusCode + code/message; else 500. */
@@ -151,183 +146,6 @@ export async function getFarmerStorageLinksByColdStorageHandler(
  * Handler for retrieving daybook (all gate passes) for the authenticated user's cold storage.
  * Supports pagination (limit, page), sorting by date (sortOrder), and filtering by gate pass type.
  */
-export async function getDaybookHandler(
-  request: FastifyRequest<{
-    Querystring: {
-      limit?: number;
-      page?: number;
-      sortOrder?: "asc" | "desc";
-      gatePassType?: string | string[];
-    };
-  }>,
-  reply: FastifyReply,
-) {
-  try {
-    const req = request as AuthenticatedRequest;
-    const coldStorageId =
-      typeof req.user.coldStorageId === "object" &&
-      req.user.coldStorageId !== null &&
-      "_id" in req.user.coldStorageId
-        ? req.user.coldStorageId._id
-        : (req.user.coldStorageId as string);
-
-    if (!coldStorageId) {
-      return reply.code(401).send({
-        success: false,
-        error: {
-          code: "MISSING_COLD_STORAGE",
-          message: "Cold storage not found in token",
-        },
-      });
-    }
-
-    const query = request.query;
-    const limit = query.limit ?? 10;
-    const page = query.page ?? 1;
-    const sortOrder = query.sortOrder ?? "desc";
-    const gatePassType = query.gatePassType;
-    const gatePassTypes =
-      gatePassType == null
-        ? undefined
-        : Array.isArray(gatePassType)
-          ? (gatePassType as (
-              | "incoming"
-              | "grading"
-              | "storage"
-              | "nikasi"
-              | "outgoing"
-            )[])
-          : ((gatePassType as string)
-              .split(",")
-              .map((t) => t.trim().toLowerCase())
-              .filter((t) =>
-                [
-                  "incoming",
-                  "grading",
-                  "storage",
-                  "nikasi",
-                  "outgoing",
-                ].includes(t),
-              ) as (
-              | "incoming"
-              | "grading"
-              | "storage"
-              | "nikasi"
-              | "outgoing"
-            )[]);
-
-    const result = await getDaybook(
-      coldStorageId,
-      {
-        limit,
-        page,
-        sortOrder,
-        gatePassTypes: gatePassTypes?.length ? gatePassTypes : undefined,
-      },
-      request.log,
-    );
-
-    return reply.send({
-      success: true,
-      data: result,
-    });
-  } catch (error) {
-    request.log.error({ error }, "Error in getDaybookHandler");
-    return sendErrorReply(reply, error);
-  }
-}
-
-/**
- * Handler for retrieving all vouchers (daybook-style) for a single farmer-storage-link.
- * Returns all orders (no pagination); link must belong to the authenticated store admin's cold storage.
- */
-export async function getVouchersByFarmerStorageLinkHandler(
-  request: FastifyRequest<{
-    Params: { farmerStorageLinkId: string };
-    Querystring: {
-      sortOrder?: "asc" | "desc";
-      gatePassType?: string | string[];
-    };
-  }>,
-  reply: FastifyReply,
-) {
-  try {
-    const req = request as AuthenticatedRequest;
-    const coldStorageId =
-      typeof req.user.coldStorageId === "object" &&
-      req.user.coldStorageId !== null &&
-      "_id" in req.user.coldStorageId
-        ? req.user.coldStorageId._id
-        : (req.user.coldStorageId as string);
-
-    if (!coldStorageId) {
-      return reply.code(401).send({
-        success: false,
-        error: {
-          code: "MISSING_COLD_STORAGE",
-          message: "Cold storage not found in token",
-        },
-      });
-    }
-
-    const { farmerStorageLinkId } = request.params;
-    const query = request.query;
-    const sortOrder = query.sortOrder ?? "desc";
-    const gatePassType = query.gatePassType;
-    const gatePassTypes =
-      gatePassType == null
-        ? undefined
-        : Array.isArray(gatePassType)
-          ? (gatePassType as (
-              | "incoming"
-              | "grading"
-              | "storage"
-              | "nikasi"
-              | "outgoing"
-            )[])
-          : ((gatePassType as string)
-              .split(",")
-              .map((t) => t.trim().toLowerCase())
-              .filter((t) =>
-                [
-                  "incoming",
-                  "grading",
-                  "storage",
-                  "nikasi",
-                  "outgoing",
-                ].includes(t),
-              ) as (
-              | "incoming"
-              | "grading"
-              | "storage"
-              | "nikasi"
-              | "outgoing"
-            )[]);
-
-    const result = await getVouchersByFarmerStorageLink(
-      farmerStorageLinkId,
-      coldStorageId,
-      {
-        unbounded: true,
-        sortOrder,
-        gatePassTypes: gatePassTypes?.length ? gatePassTypes : undefined,
-      },
-      request.log,
-    );
-
-    return reply.send({
-      success: true,
-      data: { daybook: result.daybook },
-    });
-  } catch (error) {
-    request.log.error(
-      { error },
-      "Error in getVouchersByFarmerStorageLinkHandler",
-    );
-    return sendErrorReply(reply, error);
-  }
-}
-
 /**
  * Handler for updating a store admin
  */
@@ -577,53 +395,6 @@ export async function updateFarmerStorageLinkHandler(
     request.log.error(
       { error, params: request.params, body: request.body },
       "Error in updateFarmerStorageLinkHandler",
-    );
-    return sendErrorReply(reply, error);
-  }
-}
-
-/**
- * Handler for getting the next voucher number for a given voucher type.
- * Uses cold storage ID from the authenticated user.
- */
-export async function getNextVoucherNumberHandler(
-  request: FastifyRequest<{ Querystring: GetVoucherNumberQuery }>,
-  reply: FastifyReply,
-) {
-  try {
-    const authenticatedRequest = request as AuthenticatedRequest;
-    const user = authenticatedRequest.user;
-
-    const coldStorageId =
-      typeof user.coldStorageId === "string"
-        ? user.coldStorageId
-        : user.coldStorageId?._id;
-
-    if (!coldStorageId) {
-      throw new UnauthorizedError(
-        "Cold storage context is required for voucher number",
-        "MISSING_COLD_STORAGE",
-      );
-    }
-
-    const nextVoucherNumber = await getNextVoucherNumber(
-      coldStorageId,
-      request.query.type as VoucherType,
-      request.log,
-    );
-
-    return reply.code(200).send({
-      success: true,
-      data: {
-        type: request.query.type,
-        nextVoucherNumber,
-      },
-      message: `Next voucher number for ${request.query.type}`,
-    });
-  } catch (error) {
-    request.log.error(
-      { error, query: request.query },
-      "Error in getNextVoucherNumberHandler",
     );
     return sendErrorReply(reply, error);
   }

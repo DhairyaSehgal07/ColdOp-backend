@@ -19,11 +19,6 @@ import type { ResourcePermission } from "../role-permission/role-permission.mode
 import bcrypt from "bcryptjs";
 import { Farmer } from "../farmer/farmer-model.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
-import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
-import { GradingGatePass } from "../grading-gate-pass/grading-gate-pass.model.js";
-import { StorageGatePass } from "../storage-gate-pass/storage-gate-pass.model.js";
-import { NikasiGatePass } from "../nikasi-gate-pass/nikasi-gate-pass.model.js";
-import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
 
 /**
  * Get all available resources and actions for Admin permissions
@@ -492,651 +487,6 @@ export async function getFarmerStorageLinksByColdStorage(
       "Failed to retrieve farmer-storage-links",
       500,
       "GET_FARMER_STORAGE_LINKS_ERROR",
-    );
-  }
-}
-
-/** Summary of bag counts for one incoming gate pass in the daybook */
-export interface DaybookEntrySummaries {
-  totalBagsIncoming: number;
-  totalBagsGraded: number;
-  totalBagsStored: number;
-  totalBagsNikasi: number;
-  totalBagsOutgoing: number;
-}
-
-/** One daybook entry: an incoming gate pass with attached passes and pre-computed summaries */
-export interface DaybookEntry {
-  incoming: Record<string, unknown>;
-  farmer: Record<string, unknown> | null;
-  gradingPasses: unknown[];
-  storagePasses: unknown[];
-  nikasiPasses: unknown[];
-  outgoingPasses: unknown[];
-  summaries: DaybookEntrySummaries;
-}
-
-/** Gate pass type filter for daybook – filter by stage "up to" (inclusive); flow: Incoming → Grading → Storage → Nikasi → Outgoing */
-export type DaybookGatePassType =
-  | "incoming"
-  | "grading"
-  | "storage"
-  | "nikasi"
-  | "outgoing";
-
-/** Stage order for daybook filter (index = order in flow) */
-const DAYBOOK_STAGE_ORDER: DaybookGatePassType[] = [
-  "incoming",
-  "grading",
-  "storage",
-  "nikasi",
-  "outgoing",
-];
-
-/** Options for daybook retrieval: pagination, sort, and filter by gate pass type */
-export interface GetDaybookOptions {
-  limit?: number;
-  page?: number;
-  /** When true, return all entries (no pagination cap) – used e.g. for vouchers by farmer-storage-link */
-  unbounded?: boolean;
-  sortOrder?: "asc" | "desc";
-  gatePassTypes?: DaybookGatePassType[];
-}
-
-/** Pagination metadata returned with daybook */
-export interface DaybookPagination {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}
-
-/**
- * Retrieves the daybook using a single aggregation pipeline: for each incoming gate pass,
- * attached grading/storage/nikasi/outgoing passes, farmer populated, and pre-computed bag summaries.
- * Each voucher (incoming, grading, storage, nikasi, outgoing) has createdBy populated with store-admin
- * name and mobileNumber. Uses $lookup with pipelines and $setIntersection for efficient joins; allows disk use for large result sets.
- * Supports pagination (limit, page), sorting by date (sortOrder), and filtering by gate pass type.
- *
- * @param coldStorageId - Cold storage ID
- * @param options - Optional pagination (limit default 10, page default 1), sortOrder (default 'desc'), gatePassTypes filter
- * @param logger - Optional logger instance
- * @param overrideFarmerStorageLinkIds - Optional list of link IDs to restrict to (e.g. for vouchers by link)
- * @returns Object with daybook array and pagination metadata
- */
-export async function getDaybook(
-  coldStorageId: string,
-  options: GetDaybookOptions = {},
-  logger?: FastifyBaseLogger,
-  overrideFarmerStorageLinkIds?: mongoose.Types.ObjectId[],
-): Promise<{
-  daybook: DaybookEntry[];
-  pagination: DaybookPagination;
-}> {
-  const unbounded = options.unbounded === true;
-  const limit = unbounded
-    ? 10000
-    : Math.min(Math.max(options.limit ?? 10, 1), 100);
-  const page = unbounded ? 1 : Math.max(options.page ?? 1, 1);
-  const sortOrder = options.sortOrder ?? "desc";
-  const gatePassTypes = options.gatePassTypes?.length
-    ? options.gatePassTypes
-    : undefined;
-  const sortDir = sortOrder === "desc" ? -1 : 1;
-  try {
-    if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
-      throw new ValidationError(
-        "Invalid cold storage ID format",
-        "INVALID_COLD_STORAGE_ID",
-      );
-    }
-
-    const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
-
-    let farmerStorageLinkIds: mongoose.Types.ObjectId[];
-    if (
-      overrideFarmerStorageLinkIds != null &&
-      overrideFarmerStorageLinkIds.length > 0
-    ) {
-      farmerStorageLinkIds = overrideFarmerStorageLinkIds;
-    } else {
-      // Single indexed query: get link IDs for this cold storage (uses coldStorageId index)
-      const ids = await FarmerStorageLink.distinct("_id", {
-        coldStorageId: coldStorageObjectId,
-      });
-      farmerStorageLinkIds = ids as mongoose.Types.ObjectId[];
-
-      if (farmerStorageLinkIds.length === 0) {
-        logger?.info({ coldStorageId }, "Daybook: no farmer-storage links");
-        return {
-          daybook: [],
-          pagination: { page, limit, total: 0, totalPages: 0 },
-        };
-      }
-    }
-
-    // Use model collection names (respects custom collection option in schemas)
-    const col = {
-      farmerStorageLinks: FarmerStorageLink.collection.name,
-      farmers: Farmer.collection.name,
-      storeAdmins: StoreAdmin.collection.name,
-      gradingGatePasses: GradingGatePass.collection.name,
-      storageGatePasses: StorageGatePass.collection.name,
-      nikasiGatePasses: NikasiGatePass.collection.name,
-      outgoingGatePasses: OutgoingGatePass.collection.name,
-    };
-
-    const pipeline: mongoose.PipelineStage[] = [
-      // Use index on farmerStorageLinkId + date (daybook index)
-      {
-        $match: {
-          farmerStorageLinkId: { $in: farmerStorageLinkIds },
-        },
-      },
-      { $sort: { date: sortDir, gatePassNo: sortDir } },
-      // Populate link for farmer (linkedBy not included in response)
-      {
-        $lookup: {
-          from: col.farmerStorageLinks,
-          localField: "farmerStorageLinkId",
-          foreignField: "_id",
-          as: "linkDoc",
-        },
-      },
-      { $unwind: { path: "$linkDoc", preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: col.farmers,
-          localField: "linkDoc.farmerId",
-          foreignField: "_id",
-          as: "farmerArr",
-        },
-      },
-      {
-        $lookup: {
-          from: col.storeAdmins,
-          localField: "createdBy",
-          foreignField: "_id",
-          as: "incomingCreatedByArr",
-          pipeline: [{ $project: { name: 1, mobileNumber: 1 } }],
-        },
-      },
-      // Grading passes for this incoming (uses index on incomingGatePassId), with createdBy populated
-      {
-        $lookup: {
-          from: col.gradingGatePasses,
-          let: { incomingId: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$incomingGatePassId", "$$incomingId"] },
-              },
-            },
-            { $sort: { date: -1, gatePassNo: -1 } },
-            {
-              $lookup: {
-                from: col.storeAdmins,
-                localField: "createdBy",
-                foreignField: "_id",
-                as: "createdByPopulated",
-                pipeline: [{ $project: { name: 1, mobileNumber: 1 } }],
-              },
-            },
-            {
-              $addFields: {
-                createdBy: { $arrayElemAt: ["$createdByPopulated", 0] },
-              },
-            },
-            { $project: { createdByPopulated: 0 } },
-          ],
-          as: "gradingPasses",
-        },
-      },
-      {
-        $addFields: {
-          gradingIds: "$gradingPasses._id",
-        },
-      },
-      // Storage passes that reference any of this incoming's grading passes, with createdBy populated
-      {
-        $lookup: {
-          from: col.storageGatePasses,
-          let: { gradingIds: "$gradingIds" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $gt: [
-                    {
-                      $size: {
-                        $setIntersection: [
-                          { $ifNull: ["$gradingGatePassIds", []] },
-                          "$$gradingIds",
-                        ],
-                      },
-                    },
-                    0,
-                  ],
-                },
-              },
-            },
-            { $sort: { date: -1, gatePassNo: -1 } },
-            {
-              $lookup: {
-                from: col.storeAdmins,
-                localField: "createdBy",
-                foreignField: "_id",
-                as: "createdByPopulated",
-                pipeline: [{ $project: { name: 1, mobileNumber: 1 } }],
-              },
-            },
-            {
-              $addFields: {
-                createdBy: { $arrayElemAt: ["$createdByPopulated", 0] },
-              },
-            },
-            { $project: { createdByPopulated: 0 } },
-          ],
-          as: "storagePasses",
-        },
-      },
-      {
-        $addFields: {
-          storageIds: "$storagePasses._id",
-        },
-      },
-      // Nikasi passes that reference any of this incoming's grading passes, with createdBy populated
-      {
-        $lookup: {
-          from: col.nikasiGatePasses,
-          let: { gradingIds: "$gradingIds" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $gt: [
-                    {
-                      $size: {
-                        $setIntersection: [
-                          { $ifNull: ["$gradingGatePassIds", []] },
-                          "$$gradingIds",
-                        ],
-                      },
-                    },
-                    0,
-                  ],
-                },
-              },
-            },
-            { $sort: { date: -1, gatePassNo: -1 } },
-            {
-              $lookup: {
-                from: col.storeAdmins,
-                localField: "createdBy",
-                foreignField: "_id",
-                as: "createdByPopulated",
-                pipeline: [{ $project: { name: 1, mobileNumber: 1 } }],
-              },
-            },
-            {
-              $addFields: {
-                createdBy: { $arrayElemAt: ["$createdByPopulated", 0] },
-              },
-            },
-            { $project: { createdByPopulated: 0 } },
-          ],
-          as: "nikasiPasses",
-        },
-      },
-      // Outgoing passes that reference any of this incoming's storage passes, with createdBy populated
-      {
-        $lookup: {
-          from: col.outgoingGatePasses,
-          let: { storageIds: "$storageIds" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $gt: [
-                    {
-                      $size: {
-                        $setIntersection: [
-                          { $ifNull: ["$storageGatePassIds", []] },
-                          "$$storageIds",
-                        ],
-                      },
-                    },
-                    0,
-                  ],
-                },
-              },
-            },
-            { $sort: { date: -1, gatePassNo: -1 } },
-            {
-              $lookup: {
-                from: col.storeAdmins,
-                localField: "createdBy",
-                foreignField: "_id",
-                as: "createdByPopulated",
-                pipeline: [{ $project: { name: 1, mobileNumber: 1 } }],
-              },
-            },
-            {
-              $addFields: {
-                createdBy: { $arrayElemAt: ["$createdByPopulated", 0] },
-              },
-            },
-            { $project: { createdByPopulated: 0 } },
-          ],
-          as: "outgoingPasses",
-        },
-      },
-      // Pre-compute summaries in the pipeline (no JS iteration)
-      {
-        $addFields: {
-          summaries: {
-            totalBagsIncoming: { $ifNull: ["$bagsReceived", 0] },
-            totalBagsGraded: {
-              $reduce: {
-                input: { $ifNull: ["$gradingPasses", []] },
-                initialValue: 0,
-                in: {
-                  $add: [
-                    "$$value",
-                    {
-                      $sum: {
-                        $ifNull: ["$$this.orderDetails.initialQuantity", []],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-            totalBagsStored: {
-              $reduce: {
-                input: { $ifNull: ["$storagePasses", []] },
-                initialValue: 0,
-                in: {
-                  $add: [
-                    "$$value",
-                    {
-                      $sum: {
-                        $ifNull: ["$$this.orderDetails.initialQuantity", []],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-            totalBagsNikasi: {
-              $reduce: {
-                input: { $ifNull: ["$nikasiPasses", []] },
-                initialValue: 0,
-                in: {
-                  $add: [
-                    "$$value",
-                    {
-                      $sum: {
-                        $ifNull: ["$$this.orderDetails.initialQuantity", []],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-            totalBagsOutgoing: {
-              $reduce: {
-                input: { $ifNull: ["$outgoingPasses", []] },
-                initialValue: 0,
-                in: {
-                  $add: [
-                    "$$value",
-                    {
-                      $sum: {
-                        $ifNull: ["$$this.orderDetails.initialQuantity", []],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        },
-      },
-      // Project final shape: incoming with createdBy populated, farmer, arrays (each pass has createdBy), summaries
-      {
-        $project: {
-          _id: 0,
-          incoming: {
-            _id: "$_id",
-            farmerStorageLinkId: "$farmerStorageLinkId",
-            createdBy: { $arrayElemAt: ["$incomingCreatedByArr", 0] },
-            gatePassNo: "$gatePassNo",
-            manualGatePassNumber: "$manualGatePassNumber",
-            date: "$date",
-            variety: "$variety",
-            truckNumber: "$truckNumber",
-            bagsReceived: "$bagsReceived",
-            weightSlip: "$weightSlip",
-            status: "$status",
-            gradingSummary: "$gradingSummary",
-            remarks: "$remarks",
-            createdAt: "$createdAt",
-            updatedAt: "$updatedAt",
-          },
-          farmer: {
-            $mergeObjects: [
-              { $ifNull: [{ $arrayElemAt: ["$farmerArr", 0] }, {}] },
-              { accountNumber: "$linkDoc.accountNumber" },
-            ],
-          },
-          gradingPasses: 1,
-          storagePasses: 1,
-          nikasiPasses: 1,
-          outgoingPasses: 1,
-          summaries: 1,
-        },
-      },
-    ];
-
-    // Optional filter: "up to" stage – return vouchers that have reached the selected stage (and all prior) but no later stage.
-    // Flow: Incoming → Grading → Storage → Nikasi → Outgoing.
-    // E.g. "incoming" = only incoming (no grading/storage/nikasi/outgoing); "storage" = has incoming+grading+storage, no nikasi/outgoing.
-    if (gatePassTypes && gatePassTypes.length > 0) {
-      const selectedStage =
-        gatePassTypes.length === 1
-          ? gatePassTypes[0]
-          : (gatePassTypes.reduce((max, t) => {
-              const maxIdx = DAYBOOK_STAGE_ORDER.indexOf(max);
-              const idx = DAYBOOK_STAGE_ORDER.indexOf(t);
-              return idx > maxIdx ? t : max;
-            }) as DaybookGatePassType);
-      const stageIndex = DAYBOOK_STAGE_ORDER.indexOf(selectedStage);
-      const andConditions: mongoose.PipelineStage.Match["$match"][string][] =
-        [];
-
-      // Must have each stage up to and including selected (incoming is always present)
-      if (stageIndex >= 1) {
-        andConditions.push({
-          $gt: [{ $size: { $ifNull: ["$gradingPasses", []] } }, 0],
-        });
-      }
-      if (stageIndex >= 2) {
-        andConditions.push({
-          $gt: [{ $size: { $ifNull: ["$storagePasses", []] } }, 0],
-        });
-      }
-      if (stageIndex >= 3) {
-        andConditions.push({
-          $gt: [{ $size: { $ifNull: ["$nikasiPasses", []] } }, 0],
-        });
-      }
-      if (stageIndex >= 4) {
-        andConditions.push({
-          $gt: [{ $size: { $ifNull: ["$outgoingPasses", []] } }, 0],
-        });
-      }
-
-      // Must NOT have any stage after the selected one
-      if (stageIndex < 1) {
-        andConditions.push({
-          $eq: [{ $size: { $ifNull: ["$gradingPasses", []] } }, 0],
-        });
-      }
-      if (stageIndex < 2) {
-        andConditions.push({
-          $eq: [{ $size: { $ifNull: ["$storagePasses", []] } }, 0],
-        });
-      }
-      if (stageIndex < 3) {
-        andConditions.push({
-          $eq: [{ $size: { $ifNull: ["$nikasiPasses", []] } }, 0],
-        });
-      }
-      if (stageIndex < 4) {
-        andConditions.push({
-          $eq: [{ $size: { $ifNull: ["$outgoingPasses", []] } }, 0],
-        });
-      }
-
-      pipeline.push({
-        $match: {
-          $expr: { $and: andConditions },
-        },
-      });
-
-      // In response, include pass arrays only up to the selected stage; empty the rest
-      const passProject: Record<string, unknown> = {
-        incoming: "$incoming",
-        farmer: "$farmer",
-        summaries: "$summaries",
-      };
-      passProject["gradingPasses"] = stageIndex >= 1 ? "$gradingPasses" : [];
-      passProject["storagePasses"] = stageIndex >= 2 ? "$storagePasses" : [];
-      passProject["nikasiPasses"] = stageIndex >= 3 ? "$nikasiPasses" : [];
-      passProject["outgoingPasses"] = stageIndex >= 4 ? "$outgoingPasses" : [];
-      pipeline.push({ $project: passProject });
-    }
-
-    // Sort by date (and gatePassNo) before pagination
-    pipeline.push({
-      $sort: { "incoming.date": sortDir, "incoming.gatePassNo": sortDir },
-    });
-
-    // Pagination: total count + paginated items in one pass
-    pipeline.push({
-      $facet: {
-        totalCount: [{ $count: "value" }],
-        items: [{ $skip: (page - 1) * limit }, { $limit: limit }],
-      },
-    });
-
-    const result =
-      await IncomingGatePass.aggregate(pipeline).allowDiskUse(true);
-
-    const totalCount =
-      result[0]?.totalCount?.[0]?.value != null
-        ? result[0].totalCount[0].value
-        : 0;
-    const daybook = (result[0]?.items ?? []) as DaybookEntry[];
-
-    const totalPages = Math.ceil(totalCount / limit);
-
-    logger?.info(
-      { coldStorageId, entryCount: daybook.length, totalCount, page, limit },
-      "Daybook retrieved",
-    );
-
-    return {
-      daybook,
-      pagination: { page, limit, total: totalCount, totalPages },
-    };
-  } catch (error) {
-    if (error instanceof ValidationError) {
-      throw error;
-    }
-
-    logger?.error({ error, coldStorageId }, "Error retrieving daybook");
-
-    throw new AppError("Failed to retrieve daybook", 500, "GET_DAYBOOK_ERROR");
-  }
-}
-
-/**
- * Retrieves all vouchers (daybook-style entries) for a single farmer-storage-link.
- * Same response shape and summary calculations as daybook; link must belong to the given cold storage.
- *
- * @param farmerStorageLinkId - Farmer storage link ID (from params)
- * @param coldStorageId - Cold storage ID (for auth: link must belong to this cold storage)
- * @param options - Same as getDaybook: pagination, sortOrder, gatePassTypes
- * @param logger - Optional logger instance
- * @returns Object with daybook array and pagination metadata
- */
-export async function getVouchersByFarmerStorageLink(
-  farmerStorageLinkId: string,
-  coldStorageId: string,
-  options: GetDaybookOptions = {},
-  logger?: FastifyBaseLogger,
-): Promise<{
-  daybook: DaybookEntry[];
-  pagination: DaybookPagination;
-}> {
-  try {
-    if (!mongoose.Types.ObjectId.isValid(farmerStorageLinkId)) {
-      throw new ValidationError(
-        "Invalid farmer storage link ID format",
-        "INVALID_FARMER_STORAGE_LINK_ID",
-      );
-    }
-    if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
-      throw new ValidationError(
-        "Invalid cold storage ID format",
-        "INVALID_COLD_STORAGE_ID",
-      );
-    }
-
-    const linkObjectId = new mongoose.Types.ObjectId(farmerStorageLinkId);
-    const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
-
-    const link = await FarmerStorageLink.findById(linkObjectId)
-      .select("coldStorageId _id")
-      .lean();
-
-    if (!link) {
-      throw new NotFoundError(
-        "Farmer storage link not found",
-        "FARMER_STORAGE_LINK_NOT_FOUND",
-      );
-    }
-
-    const linkColdStorageId =
-      link.coldStorageId instanceof mongoose.Types.ObjectId
-        ? link.coldStorageId
-        : (link.coldStorageId as { _id: mongoose.Types.ObjectId })?._id;
-
-    if (
-      linkColdStorageId == null ||
-      !linkColdStorageId.equals(coldStorageObjectId)
-    ) {
-      throw new NotFoundError(
-        "Farmer storage link not found",
-        "FARMER_STORAGE_LINK_NOT_FOUND",
-      );
-    }
-
-    return getDaybook(coldStorageId, options, logger, [linkObjectId]);
-  } catch (error) {
-    if (error instanceof ValidationError || error instanceof NotFoundError) {
-      throw error;
-    }
-    logger?.error(
-      { error, farmerStorageLinkId, coldStorageId },
-      "Error retrieving vouchers by farmer storage link",
-    );
-    throw new AppError(
-      "Failed to retrieve vouchers for farmer storage link",
-      500,
-      "GET_VOUCHERS_BY_LINK_ERROR",
     );
   }
 }
@@ -1760,83 +1110,97 @@ export async function getNextVoucherNumber(
     .lean();
 
   if (type === "incoming-gate-pass") {
-    const last = await IncomingGatePass.findOne({
+    const IncomingGatePassModel = mongoose.model("IncomingGatePass");
+    const last = await IncomingGatePassModel.findOne({
       farmerStorageLinkId: { $in: farmerStorageLinkIds },
     })
       .sort({ gatePassNo: -1 })
       .select("gatePassNo")
       .lean();
-    const next = (last?.gatePassNo ?? 0) + 1;
+    const next =
+      ((last as { gatePassNo?: number } | null)?.gatePassNo ?? 0) + 1;
     logger?.debug({ coldStorageId, type, next }, "Next voucher number");
     return next;
   }
 
   if (type === "grading-gate-pass") {
-    const incomingIds = await IncomingGatePass.find({
+    const IncomingGatePassModel = mongoose.model("IncomingGatePass");
+    const GradingGatePassModel = mongoose.model("GradingGatePass");
+    const incomingIds = await IncomingGatePassModel.find({
       farmerStorageLinkId: { $in: farmerStorageLinkIds },
     })
       .distinct("_id")
       .lean();
-    const last = await GradingGatePass.findOne({
+    const last = await GradingGatePassModel.findOne({
       incomingGatePassId: { $in: incomingIds },
     })
       .sort({ gatePassNo: -1 })
       .select("gatePassNo")
       .lean();
-    const next = (last?.gatePassNo ?? 0) + 1;
+    const next =
+      ((last as { gatePassNo?: number } | null)?.gatePassNo ?? 0) + 1;
     logger?.debug({ coldStorageId, type, next }, "Next voucher number");
     return next;
   }
 
   // For storage, nikasi, outgoing we need grading gate pass IDs belonging to this cold storage
-  const incomingIdsForGrading = await IncomingGatePass.find({
+  const IncomingGatePassModel = mongoose.model("IncomingGatePass");
+  const GradingGatePassModel = mongoose.model("GradingGatePass");
+  const incomingIdsForGrading = await IncomingGatePassModel.find({
     farmerStorageLinkId: { $in: farmerStorageLinkIds },
   })
     .distinct("_id")
     .lean();
-  const gradingGatePassIds = await GradingGatePass.find({
+  const gradingGatePassIds = await GradingGatePassModel.find({
     incomingGatePassId: { $in: incomingIdsForGrading },
   })
     .distinct("_id")
     .lean();
 
   if (type === "storage-gate-pass") {
-    const last = await StorageGatePass.findOne({
+    const StorageGatePassModel = mongoose.model("StorageGatePass");
+    const last = await StorageGatePassModel.findOne({
       gradingGatePassIds: { $in: gradingGatePassIds },
     })
       .sort({ gatePassNo: -1 })
       .select("gatePassNo")
       .lean();
-    const next = (last?.gatePassNo ?? 0) + 1;
+    const next =
+      ((last as { gatePassNo?: number } | null)?.gatePassNo ?? 0) + 1;
     logger?.debug({ coldStorageId, type, next }, "Next voucher number");
     return next;
   }
 
   if (type === "nikasi-gate-pass") {
-    const last = await NikasiGatePass.findOne({
+    const NikasiGatePassModel = mongoose.model("NikasiGatePass");
+    const last = await NikasiGatePassModel.findOne({
       gradingGatePassIds: { $in: gradingGatePassIds },
     })
       .sort({ gatePassNo: -1 })
       .select("gatePassNo")
       .lean();
-    const next = (last?.gatePassNo ?? 0) + 1;
+    const next =
+      ((last as { gatePassNo?: number } | null)?.gatePassNo ?? 0) + 1;
     logger?.debug({ coldStorageId, type, next }, "Next voucher number");
     return next;
   }
 
   if (type === "outgoing-gate-pass") {
-    const storageGatePassIds = await StorageGatePass.find({
+    const StorageGatePassModel = mongoose.model("StorageGatePass");
+    const OutgoingGatePassModel = mongoose.model("OutgoingGatePass");
+    const storageGatePassIds = await StorageGatePassModel.find({
       gradingGatePassIds: { $in: gradingGatePassIds },
     })
       .distinct("_id")
       .lean();
-    const last = await OutgoingGatePass.findOne({
+    const last = await OutgoingGatePassModel.findOne({
       storageGatePassIds: { $in: storageGatePassIds },
     })
       .sort({ gatePassNo: -1 })
       .select("gatePassNo")
       .lean();
-    const next = (last?.gatePassNo ?? 0) + 1;
+    const next =
+      ((last as { gatePassNo?: number } | null)?.gatePassNo ?? 0) + 1;
     logger?.debug({ coldStorageId, type, next }, "Next voucher number");
     return next;
   }

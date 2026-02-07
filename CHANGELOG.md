@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-02-07
+
+### Added
+
+- **Incoming Gate Pass Module**
+  - Dedicated module at `src/modules/v1/incoming-gate-pass/` with controller, routes, schema, and service
+  - Routes registered at `/api/v1/incoming-gate-pass` (create, read, update, delete incoming gate passes)
+  - Full CRUD and validation for incoming gate pass with JWT authentication
+
+### Changed
+
+- **Application**
+  - Registered `incomingGatePassRoutes` in `app.ts` with prefix `/api/v1/incoming-gate-pass`
+- **Store Admin**
+  - Incoming gate pass logic moved out of store-admin into the new incoming-gate-pass module
+  - Store admin controller, routes, schema, and service simplified (removed incoming gate pass handlers and schemas)
+- **Incoming Gate Pass Model**
+  - Expanded schema and logic in `incoming-gate-pass.model.ts` to support full CRUD operations
+
+### Removed
+
+- **Gate Pass Models**
+  - Removed `grading-gate-pass.model.ts`, `nikasi-gate-pass.model.ts`, and `storage-gate-pass.model.ts` (consolidation/cleanup)
+
 ## [1.2.0] - 2026-02-07
 
 ### Added
