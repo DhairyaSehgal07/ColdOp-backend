@@ -1,6 +1,6 @@
 {
   "name": "coldop-base-backend",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "",
   "main": "dist/server.js",
   "type": "module",
@@ -18,7 +18,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.28.1",
+  "packageManager": "pnpm@10.28.2",
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@types/node": "^25.2.0",
@@ -47,9 +47,11 @@
     "@fastify/helmet": "^13.0.2",
     "@fastify/jwt": "^10.0.0",
     "@fastify/rate-limit": "^10.3.0",
+    "bcryptjs": "^3.0.3",
     "colors": "^1.4.0",
     "dotenv": "^17.2.3",
     "fastify": "^5.7.2",
-    "mongoose": "^9.1.5"
+    "mongoose": "^9.1.5",
+    "zod": "^4.3.6"
   }
 }

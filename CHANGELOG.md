@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-02-07
+
+### Added
+
+- **Store Admin Module**
+  - Store admin CRUD, login/logout, and farmer-storage-link management
+  - Routes: create/read/update/delete store admin, check mobile, login, logout, quick-register farmer, update farmer-storage-link
+  - New routes: `GET /daybook` (paginated daybook for cold storage), `GET /farmer-storage-links/:farmerStorageLinkId/vouchers`, `GET /next-voucher-number` (by type)
+  - Schemas and handlers for daybook, vouchers-by-link, and next voucher number
+
+- **Auth & Authorization**
+  - `src/utils/auth.ts`: JWT authentication (`authenticate`), optional auth, cold-storage scoping
+  - `authorize(...roles)` middleware for role-based access (e.g. Admin-only delete store admin)
+  - `JWTPayload` extended with optional `role` for authorization
+
+- **Error Handling**
+  - `src/utils/errors.ts`: `AppError`, `NotFoundError`, `ConflictError`, `ValidationError`, `UnauthorizedError`, `ForbiddenError`
+  - Centralized `sendErrorReply(reply, error)` in store-admin controller for consistent JSON error responses
+
+- **Models**
+  - Role-permission model for Admin permissions
+  - Gate-pass models: IncomingGatePass, GradingGatePass, StorageGatePass, NikasiGatePass, OutgoingGatePass (minimal schemas for daybook/voucher flows)
+  - Farmer and FarmerStorageLink models referenced with correct filenames (`farmer-model`, `farmer-storage-link-model`)
+
+### Changed
+
+- **Store Admin**
+  - Fixed import paths: utils from `../../../utils` (routes, controller, service)
+  - Farmer/FarmerStorageLink imports use `farmer-model.js` and `farmer-storage-link-model.js`
+  - Controller catch blocks refactored to use `sendErrorReply`; removed duplicate error branches
+  - Daybook link IDs: use `FarmerStorageLink.distinct("_id", filter)` for a single DB call
+  - Typed `distinct` result for farmer-storage link IDs in daybook service
+
+- **Application**
+  - Modular v1 structure under `src/modules/v1/` (cold-storage, store-admin, farmer, farmer-storage-link, preferences, role-permission, gate-pass modules)
+  - Removed `src/config/constants.ts`; config lives in database and app setup
+
+### Fixed
+
+- Store admin routes and controller TypeScript/lint errors (unknown error types, missing modules)
+- Unused handler and schema imports in store-admin routes by registering daybook, vouchers, and next-voucher-number routes
+
 ## [1.1.0] - 2026-02-02
 
 ### Added
