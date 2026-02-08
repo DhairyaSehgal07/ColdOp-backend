@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-02-08
+
+### Added
+
+- **Outgoing Gate Pass Module**
+  - Create outgoing gate pass from incoming gate pass allocations (nikasi-style flow)
+  - Route: `POST /api/v1/outgoing-gate-pass` with JWT authentication
+  - Request: `gatePassNo`, `date`, `variety`, `from`, `to`, `incomingGatePasses` (array of `{ incomingGatePassId, allocations: [{ size, quantityToAllocate }] }`)
+  - Updates IncomingGatePass `currentQuantity` for allocated bags in a transaction
+  - Gate pass number unique per cold storage; optional `manualGatePassNumber`, `truckNumber`, `remarks`, `idempotencyKey`
+  - Response shape: `{ status, message, data }`; errors: `{ status, statusCode, errorCode, message }`
+  - Snapshot uses paltai location as latest bag location when present on incoming gate pass
+
+### Changed
+
+- **Application**
+  - Registered `outgoingGatePassRoutes` in `app.ts` with prefix `/api/v1/outgoing-gate-pass`
+
 ## [1.3.0] - 2026-02-07
 
 ### Added

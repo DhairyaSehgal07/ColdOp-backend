@@ -8,6 +8,7 @@ import { config } from "dotenv";
 import { coldStorageRoutes } from "./modules/v1/cold-storage/cold-storage.routes";
 import { storeAdminRoutes } from "./modules/v1/store-admin/store-admin.routes";
 import { incomingGatePassRoutes } from "./modules/v1/incoming-gate-pass/incoming-gate-pass.routes";
+import { outgoingGatePassRoutes } from "./modules/v1/outgoing-gate-pass/outgoing-gate-pass.routes";
 config();
 
 export const buildApp = async (): Promise<FastifyInstance> => {
@@ -73,6 +74,10 @@ export const buildApp = async (): Promise<FastifyInstance> => {
 
   await fastify.register(incomingGatePassRoutes, {
     prefix: "/api/v1/incoming-gate-pass",
+  });
+
+  await fastify.register(outgoingGatePassRoutes, {
+    prefix: "/api/v1/outgoing-gate-pass",
   });
 
   // Health check endpoint

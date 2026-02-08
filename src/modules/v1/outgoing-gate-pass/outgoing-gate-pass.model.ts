@@ -1,31 +1,265 @@
-import mongoose, { Schema, Document, Types, Model } from "mongoose";
+import mongoose, { Schema, Types, Model } from "mongoose";
 
-export interface IOutgoingGatePass extends Document {
-  storageGatePassIds: Types.ObjectId[];
-  date: Date;
+/* =======================
+   INTERFACES
+======================= */
+
+interface IOutgoingOrderDetail {
+  size: string;
+  quantityAvailable: number;
+  quantityIssued: number;
+}
+
+/** Snapshot of an incoming gate pass at creation time */
+export interface IOutgoingIncomingGatePassSnapshotBagSize {
+  name: string;
+  currentQuantity: number;
+  initialQuantity: number;
+
+  location: {
+    chamber: string;
+    floor: string;
+    row: string;
+  };
+}
+
+export interface IOutgoingIncomingGatePassSnapshot {
+  _id: Types.ObjectId;
   gatePassNo: number;
+  bagSizes: IOutgoingIncomingGatePassSnapshotBagSize[];
+}
+
+export interface IOutgoingGatePass extends mongoose.Document {
+  farmerStorageLinkId: Types.ObjectId;
   createdBy?: Types.ObjectId;
+
+  /** Snapshot of each incoming gate pass state */
+  incomingGatePassSnapshots: IOutgoingIncomingGatePassSnapshot[];
+
+  gatePassNo: number;
+  manualGatePassNumber?: number;
+  date: Date;
+
+  variety: string;
+
+  from: string;
+  to: string;
+
+  truckNumber: string;
+
+  orderDetails: IOutgoingOrderDetail[];
+
+  remarks?: string;
+
+  idempotencyKey?: string;
+
   createdAt: Date;
   updatedAt: Date;
 }
 
-const outgoingGatePassSchema = new Schema<IOutgoingGatePass>(
+/* =======================
+   SUB SCHEMAS
+======================= */
+
+const OutgoingOrderDetailSchema = new Schema<IOutgoingOrderDetail>(
   {
-    storageGatePassIds: [
-      { type: Schema.Types.ObjectId, ref: "StorageGatePass" },
-    ],
-    date: { type: Date, required: true, index: true },
-    gatePassNo: { type: Number, required: true },
-    createdBy: { type: Schema.Types.ObjectId, ref: "StoreAdmin" },
+    size: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    quantityAvailable: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    quantityIssued: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
   },
-  { timestamps: true },
+  { _id: false },
 );
 
-outgoingGatePassSchema.index({ storageGatePassIds: 1, date: 1, gatePassNo: 1 });
+const OutgoingIncomingGatePassSnapshotBagSizeSchema =
+  new Schema<IOutgoingIncomingGatePassSnapshotBagSize>(
+    {
+      name: {
+        type: String,
+        required: true,
+        trim: true,
+      },
+
+      currentQuantity: {
+        type: Number,
+        required: true,
+        min: 0,
+      },
+
+      initialQuantity: {
+        type: Number,
+        required: true,
+        min: 0,
+      },
+
+      location: {
+        chamber: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+        floor: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+        row: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+      },
+    },
+    { _id: false },
+  );
+
+const OutgoingIncomingGatePassSnapshotSchema =
+  new Schema<IOutgoingIncomingGatePassSnapshot>(
+    {
+      _id: {
+        type: Schema.Types.ObjectId,
+        ref: "IncomingGatePass",
+        required: true,
+      },
+
+      gatePassNo: {
+        type: Number,
+        required: true,
+      },
+
+      bagSizes: {
+        type: [OutgoingIncomingGatePassSnapshotBagSizeSchema],
+        required: true,
+      },
+    },
+    { _id: false },
+  );
+
+/* =======================
+   MAIN SCHEMA
+======================= */
+
+const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
+  {
+    farmerStorageLinkId: {
+      type: Schema.Types.ObjectId,
+      ref: "FarmerStorageLink",
+      required: true,
+      index: true,
+    },
+
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "StoreAdmin",
+      index: true,
+    },
+
+    incomingGatePassSnapshots: {
+      type: [OutgoingIncomingGatePassSnapshotSchema],
+      required: true,
+    },
+
+    gatePassNo: {
+      type: Number,
+      required: true,
+      index: true,
+    },
+
+    manualGatePassNumber: {
+      type: Number,
+    },
+
+    date: {
+      type: Date,
+      required: true,
+      index: true,
+    },
+
+    variety: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
+
+    from: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    to: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    truckNumber: {
+      type: String,
+      trim: true,
+    },
+
+    orderDetails: {
+      type: [OutgoingOrderDetailSchema],
+      required: true,
+      validate: {
+        validator: (details: IOutgoingOrderDetail[]) =>
+          Array.isArray(details) && details.length > 0,
+        message: "At least one order detail is required",
+      },
+    },
+
+    remarks: {
+      type: String,
+      trim: true,
+    },
+
+    idempotencyKey: {
+      type: String,
+      trim: true,
+    },
+  },
+  {
+    timestamps: true,
+    versionKey: false,
+  },
+);
+
+/* =======================
+   INDEXES
+======================= */
+
+OutgoingGatePassSchema.index(
+  { idempotencyKey: 1 },
+  { unique: true, sparse: true },
+);
+
+OutgoingGatePassSchema.index({ farmerStorageLinkId: 1, date: -1 });
+
+OutgoingGatePassSchema.index(
+  { farmerStorageLinkId: 1, gatePassNo: 1 },
+  { unique: true },
+);
+
+OutgoingGatePassSchema.index({ date: -1 });
+
+/* =======================
+   MODEL
+======================= */
 
 export const OutgoingGatePass: Model<IOutgoingGatePass> =
   mongoose.models.OutgoingGatePass ||
-  mongoose.model<IOutgoingGatePass>(
-    "OutgoingGatePass",
-    outgoingGatePassSchema,
-  );
+  mongoose.model<IOutgoingGatePass>("OutgoingGatePass", OutgoingGatePassSchema);
