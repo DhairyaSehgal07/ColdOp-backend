@@ -9,6 +9,8 @@ import { coldStorageRoutes } from "./modules/v1/cold-storage/cold-storage.routes
 import { storeAdminRoutes } from "./modules/v1/store-admin/store-admin.routes";
 import { incomingGatePassRoutes } from "./modules/v1/incoming-gate-pass/incoming-gate-pass.routes";
 import { outgoingGatePassRoutes } from "./modules/v1/outgoing-gate-pass/outgoing-gate-pass.routes";
+import { ledgerRoutes } from "./modules/v1/ledger/ledger.routes";
+import { voucherRoutes } from "./modules/v1/voucher/voucher.routes";
 config();
 
 export const buildApp = async (): Promise<FastifyInstance> => {
@@ -78,6 +80,14 @@ export const buildApp = async (): Promise<FastifyInstance> => {
 
   await fastify.register(outgoingGatePassRoutes, {
     prefix: "/api/v1/outgoing-gate-pass",
+  });
+
+  await fastify.register(ledgerRoutes, {
+    prefix: "/api/v1/ledgers",
+  });
+
+  await fastify.register(voucherRoutes, {
+    prefix: "/api/v1/vouchers",
   });
 
   // Health check endpoint

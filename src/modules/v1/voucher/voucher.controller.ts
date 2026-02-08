@@ -2,24 +2,23 @@ import { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
 import { AppError } from "../../../utils/errors.js";
 import {
-  createLedger,
-  getAllLedgers,
-  getLedgerById,
-  updateLedger,
-  deleteLedger,
-  getLedgerEntries,
-} from "./ledger.service.js";
+  createVoucher,
+  getAllVouchers,
+  getVoucherById,
+  updateVoucher,
+  deleteVoucher,
+} from "./voucher.service.js";
 import {
-  createLedgerSchema,
-  updateLedgerSchema,
-  listLedgersQuerySchema,
-  ledgerIdParamsSchema,
+  createVoucherSchema,
+  updateVoucherSchema,
+  listVouchersQuerySchema,
+  voucherIdParamsSchema,
   objectIdString,
-  type CreateLedgerInput,
-  type UpdateLedgerInput,
-  type ListLedgersQuery,
-  type LedgerIdParams,
-} from "./ledger.schema.js";
+  type CreateVoucherInput,
+  type UpdateVoucherInput,
+  type ListVouchersQuery,
+  type VoucherIdParams,
+} from "./voucher.schema.js";
 import { ZodError } from "zod";
 
 function getColdStorageId(request: FastifyRequest): string {
@@ -72,13 +71,13 @@ function sendErrorReply(
   });
 }
 
-export async function createLedgerHandler(
-  request: FastifyRequest<{ Body: CreateLedgerInput }>,
+export async function createVoucherHandler(
+  request: FastifyRequest<{ Body: CreateVoucherInput }>,
   reply: FastifyReply,
 ) {
   try {
-    const parsed = createLedgerSchema.parse({ body: request.body });
-    const payload: CreateLedgerInput = { ...parsed.body };
+    const parsed = createVoucherSchema.parse({ body: request.body });
+    const payload: CreateVoucherInput = { ...parsed.body };
     const raw = request.body as Record<string, unknown> | undefined;
     if (raw?.farmerStorageLinkId != null && raw.farmerStorageLinkId !== "") {
       payload.farmerStorageLinkId = objectIdString.parse(
@@ -89,7 +88,7 @@ export async function createLedgerHandler(
     }
     const coldStorageId = getColdStorageId(request);
     const createdById = getCreatedById(request);
-    const ledger = await createLedger(
+    const data = await createVoucher(
       payload,
       coldStorageId,
       createdById,
@@ -97,8 +96,8 @@ export async function createLedgerHandler(
     );
     return reply.code(201).send({
       success: true,
-      data: ledger,
-      message: "Ledger created successfully",
+      data,
+      message: "Voucher created successfully",
     });
   } catch (error) {
     if (error instanceof ZodError) {
@@ -113,20 +112,20 @@ export async function createLedgerHandler(
     }
     request.log.error(
       { error, body: request.body },
-      "Error in createLedgerHandler",
+      "Error in createVoucherHandler",
     );
     return sendErrorReply(reply, error);
   }
 }
 
-export async function getAllLedgersHandler(
-  request: FastifyRequest<{ Querystring: ListLedgersQuery }>,
+export async function getAllVouchersHandler(
+  request: FastifyRequest<{ Querystring: ListVouchersQuery }>,
   reply: FastifyReply,
 ) {
   try {
-    const query = listLedgersQuerySchema.parse(request.query);
+    const query = listVouchersQuerySchema.parse(request.query);
     const coldStorageId = getColdStorageId(request);
-    const data = await getAllLedgers(coldStorageId, query, request.log);
+    const data = await getAllVouchers(coldStorageId, query, request.log);
     return reply.code(200).send({
       success: true,
       data,
@@ -144,27 +143,27 @@ export async function getAllLedgersHandler(
     }
     request.log.error(
       { error, query: request.query },
-      "Error in getAllLedgersHandler",
+      "Error in getAllVouchersHandler",
     );
     return sendErrorReply(reply, error);
   }
 }
 
-export async function getLedgerByIdHandler(
-  request: FastifyRequest<{ Params: LedgerIdParams }>,
+export async function getVoucherByIdHandler(
+  request: FastifyRequest<{ Params: VoucherIdParams }>,
   reply: FastifyReply,
 ) {
   try {
-    const params = ledgerIdParamsSchema.parse(request.params);
+    const params = voucherIdParamsSchema.parse(request.params);
     const coldStorageId = getColdStorageId(request);
-    const ledger = await getLedgerById(
+    const data = await getVoucherById(
       params.id,
       coldStorageId,
       request.log,
     );
     return reply.code(200).send({
       success: true,
-      data: ledger,
+      data,
     });
   } catch (error) {
     if (error instanceof ZodError) {
@@ -172,42 +171,42 @@ export async function getLedgerByIdHandler(
         success: false,
         error: {
           code: "VALIDATION_ERROR",
-          message: "Invalid ledger ID",
+          message: "Invalid voucher ID",
           details: error.flatten(),
         },
       });
     }
     request.log.error(
       { error, params: request.params },
-      "Error in getLedgerByIdHandler",
+      "Error in getVoucherByIdHandler",
     );
     return sendErrorReply(reply, error);
   }
 }
 
-export async function updateLedgerHandler(
+export async function updateVoucherHandler(
   request: FastifyRequest<{
-    Params: LedgerIdParams;
-    Body: UpdateLedgerInput;
+    Params: VoucherIdParams;
+    Body: UpdateVoucherInput;
   }>,
   reply: FastifyReply,
 ) {
   try {
-    const parsed = updateLedgerSchema.parse({
-      body: request.body,
-    });
-    const params = ledgerIdParamsSchema.parse(request.params);
+    const parsed = updateVoucherSchema.parse({ body: request.body });
+    const params = voucherIdParamsSchema.parse(request.params);
     const coldStorageId = getColdStorageId(request);
-    const ledger = await updateLedger(
+    const updatedById = getCreatedById(request);
+    const data = await updateVoucher(
       params.id,
       coldStorageId,
       parsed.body,
+      updatedById,
       request.log,
     );
     return reply.code(200).send({
       success: true,
-      data: ledger,
-      message: "Ledger updated successfully",
+      data,
+      message: "Voucher updated successfully",
     });
   } catch (error) {
     if (error instanceof ZodError) {
@@ -222,23 +221,23 @@ export async function updateLedgerHandler(
     }
     request.log.error(
       { error, params: request.params, body: request.body },
-      "Error in updateLedgerHandler",
+      "Error in updateVoucherHandler",
     );
     return sendErrorReply(reply, error);
   }
 }
 
-export async function deleteLedgerHandler(
-  request: FastifyRequest<{ Params: LedgerIdParams }>,
+export async function deleteVoucherHandler(
+  request: FastifyRequest<{ Params: VoucherIdParams }>,
   reply: FastifyReply,
 ) {
   try {
-    const params = ledgerIdParamsSchema.parse(request.params);
+    const params = voucherIdParamsSchema.parse(request.params);
     const coldStorageId = getColdStorageId(request);
-    await deleteLedger(params.id, coldStorageId, request.log);
+    await deleteVoucher(params.id, coldStorageId, request.log);
     return reply.code(200).send({
       success: true,
-      message: "Ledger deleted successfully",
+      message: "Voucher deleted successfully",
     });
   } catch (error) {
     if (error instanceof ZodError) {
@@ -246,49 +245,14 @@ export async function deleteLedgerHandler(
         success: false,
         error: {
           code: "VALIDATION_ERROR",
-          message: "Invalid ledger ID",
+          message: "Invalid voucher ID",
           details: error.flatten(),
         },
       });
     }
     request.log.error(
       { error, params: request.params },
-      "Error in deleteLedgerHandler",
-    );
-    return sendErrorReply(reply, error);
-  }
-}
-
-export async function getLedgerEntriesHandler(
-  request: FastifyRequest<{ Params: LedgerIdParams }>,
-  reply: FastifyReply,
-) {
-  try {
-    const params = ledgerIdParamsSchema.parse(request.params);
-    const coldStorageId = getColdStorageId(request);
-    const result = await getLedgerEntries(
-      params.id,
-      coldStorageId,
-      request.log,
-    );
-    return reply.code(200).send({
-      success: true,
-      data: result,
-    });
-  } catch (error) {
-    if (error instanceof ZodError) {
-      return reply.code(400).send({
-        success: false,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid ledger ID",
-          details: error.flatten(),
-        },
-      });
-    }
-    request.log.error(
-      { error, params: request.params },
-      "Error in getLedgerEntriesHandler",
+      "Error in deleteVoucherHandler",
     );
     return sendErrorReply(reply, error);
   }
