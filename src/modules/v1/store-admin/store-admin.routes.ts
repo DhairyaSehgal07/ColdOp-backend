@@ -11,6 +11,8 @@ import {
   updateFarmerStorageLinkHandler,
   getFarmerStorageLinksByColdStorageHandler,
   getNextVoucherNumberHandler,
+  getDaybookHandler,
+  searchOrderByReceiptNumberHandler,
 } from "./store-admin.controller.js";
 import {
   createStoreAdminSchema,
@@ -22,6 +24,7 @@ import {
   quickRegisterFarmerSchema,
   updateFarmerStorageLinkSchema,
   nextVoucherNumberQuerySchema,
+  getDaybookQuerySchema,
 } from "./store-admin.schema.js";
 import { authenticate, authorize } from "../../../utils/auth.js";
 import { Role } from "./store-admin.model.js";
@@ -168,12 +171,203 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
     },
   );
 
-  // Get daybook (all gate passes) for authenticated cold storage
-  fastify.get("/daybook", async (_request, reply) => {
-    return reply.status(200).send({
-      success: true,
-    });
-  });
+  // Get daybook: list of incoming and/or outgoing gate passes with farmer populated, pagination, sort
+  fastify.get(
+    "/daybook",
+    {
+      schema: {
+        ...getDaybookQuerySchema,
+        description:
+          "Get daybook: list of incoming and/or outgoing gate passes. type=all returns merged list sorted by createdAt; type=incoming or type=outgoing filters. sortBy=latest (newest first) or oldest. Pagination: page, limit.",
+        tags: ["Store Admin"],
+        summary: "Get daybook",
+        querystring: {
+          type: "object",
+          properties: {
+            type: {
+              type: "string",
+              enum: ["all", "incoming", "outgoing"],
+              description:
+                "all = merged incoming + outgoing; incoming or outgoing = filter by type (default all)",
+            },
+            sortBy: {
+              type: "string",
+              description:
+                "latest = newest first (-1), anything else = oldest first (default latest)",
+            },
+            limit: {
+              type: "number",
+              description: "Items per page (default 10, max 100)",
+            },
+            page: { type: "number", description: "Page number (default 1)" },
+          },
+        },
+        response: {
+          200: {
+            description:
+              "Daybook: status Success with data (array of incoming/outgoing gate passes, farmer populated, bagSizes/orderDetails sorted) and pagination; or status Fail with message and pagination when no orders",
+            type: "object",
+            properties: {
+              status: { type: "string", enum: ["Success", "Fail"] },
+              message: { type: "string" },
+              data: {
+                type: "array",
+                items: { type: "object", additionalProperties: true },
+              },
+              pagination: {
+                type: "object",
+                properties: {
+                  currentPage: { type: "number" },
+                  totalPages: { type: "number" },
+                  totalItems: { type: "number" },
+                  itemsPerPage: { type: "number" },
+                  hasNextPage: { type: "boolean" },
+                  hasPreviousPage: { type: "boolean" },
+                  nextPage: { type: ["number", "null"] },
+                  previousPage: { type: ["number", "null"] },
+                },
+              },
+            },
+          },
+          400: {
+            description: "Invalid type parameter",
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+          },
+          401: {
+            description: "Unauthorized or missing cold storage context",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          500: {
+            description: "Server error while getting daybook orders",
+            type: "object",
+            properties: {
+              status: { type: "string" },
+              message: { type: "string" },
+              errorMessage: { type: "string" },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 200,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getDaybookHandler as never,
+  );
+
+  // Search incoming and outgoing gate passes by receipt number (gate pass / voucher number)
+  fastify.post(
+    "/search-order-by-receipt",
+    {
+      schema: {
+        description:
+          "Search for orders (incoming and outgoing gate passes) by receipt number. Matches gate pass number or manual receipt number.",
+        tags: ["Store Admin"],
+        summary: "Search order by receipt number",
+        body: {
+          type: "object",
+          required: ["receiptNumber"],
+          properties: {
+            receiptNumber: {
+              type: "string",
+              description: "Receipt / gate pass / voucher number to search for",
+            },
+          },
+        },
+        response: {
+          200: {
+            description: "Orders found",
+            type: "object",
+            properties: {
+              status: { type: "string", enum: ["Success"] },
+              data: {
+                type: "object",
+                properties: {
+                  incoming: {
+                    type: "array",
+                    items: { type: "object", additionalProperties: true },
+                  },
+                  outgoing: {
+                    type: "array",
+                    items: { type: "object", additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: "Receipt number not provided",
+            type: "object",
+            properties: {
+              status: { type: "string", enum: ["Fail"] },
+              message: { type: "string" },
+            },
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          404: {
+            description: "No orders found with this receipt number",
+            type: "object",
+            properties: {
+              status: { type: "string", enum: ["Fail"] },
+              message: { type: "string" },
+            },
+          },
+          500: {
+            description: "Error while searching for orders",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 200,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    searchOrderByReceiptNumberHandler as never,
+  );
 
   // Get next voucher number for a voucher type (incoming or outgoing only)
   fastify.get(

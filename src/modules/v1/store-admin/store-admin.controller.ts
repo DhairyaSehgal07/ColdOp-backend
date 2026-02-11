@@ -11,6 +11,8 @@ import {
   quickRegisterFarmer,
   updateFarmerStorageLink,
   getNextVoucherNumber,
+  getDaybookOrders,
+  searchOrdersByReceiptNumber,
 } from "./store-admin.service.js";
 import {
   CreateStoreAdminInput,
@@ -24,8 +26,9 @@ import {
   UpdateFarmerStorageLinkInput,
   UpdateFarmerStorageLinkParams,
   NextVoucherNumberQuery,
+  searchOrderByReceiptNumberBodySchema,
 } from "./store-admin.schema.js";
-import { AppError } from "../../../utils/errors.js";
+import { AppError, ValidationError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
 
 /** Centralized error reply: AppError → statusCode + code/message; else 500. */
@@ -443,6 +446,182 @@ export async function getNextVoucherNumberHandler(
     request.log.error(
       { error, query: request.query },
       "Error in getNextVoucherNumberHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * Handler for GET /daybook: list of incoming and/or outgoing gate passes with farmer populated,
+ * pagination, and sort. Query: type (all | incoming | outgoing), sortBy (latest | oldest), page, limit.
+ */
+export async function getDaybookHandler(
+  request: FastifyRequest<{
+    Querystring: {
+      type?: "all" | "incoming" | "outgoing";
+      sortBy?: string;
+      limit?: number;
+      page?: number;
+    };
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const req = request as AuthenticatedRequest;
+    const coldStorageId =
+      typeof req.user.coldStorageId === "object" &&
+      req.user.coldStorageId !== null &&
+      "_id" in req.user.coldStorageId
+        ? req.user.coldStorageId._id
+        : (req.user.coldStorageId as string);
+
+    if (!coldStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    const query = request.query;
+    const type = query.type ?? "all";
+    const sortBy =
+      query.sortBy === "latest" ? "latest" : ("oldest" as "latest" | "oldest");
+    const limit = query.limit ?? 10;
+    const page = query.page ?? 1;
+
+    const result = await getDaybookOrders(
+      coldStorageId,
+      { type, sortBy, page, limit },
+      request.log,
+    );
+
+    if (result.status === "Fail" && result.message && !result.data) {
+      return reply.code(200).send({
+        status: result.status,
+        message: result.message,
+        pagination: result.pagination,
+      });
+    }
+
+    if (
+      result.status === "Fail" &&
+      result.message?.includes("Invalid type parameter")
+    ) {
+      return reply.code(400).send({
+        message: result.message,
+      });
+    }
+
+    return reply.code(200).send({
+      status: result.status,
+      ...(result.data != null && { data: result.data }),
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    request.log.error({ error }, "Error in getDaybookHandler");
+
+    if (error instanceof ValidationError) {
+      return reply.code(error.statusCode).send({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      });
+    }
+
+    if (error instanceof AppError) {
+      return reply.code(error.statusCode).send({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      });
+    }
+
+    return reply.code(500).send({
+      status: "Fail",
+      message: "Some error occurred while getting daybook orders",
+      errorMessage:
+        error instanceof Error ? error.message : "An unexpected error occurred",
+    });
+  }
+}
+
+/**
+ * Handler for POST search-order-by-receipt: search incoming and outgoing gate passes
+ * by receipt number (gate pass number or manual number). Uses authenticated store admin's cold storage.
+ */
+export async function searchOrderByReceiptNumberHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  try {
+    const req = request as AuthenticatedRequest;
+    const parsed = searchOrderByReceiptNumberBodySchema.safeParse({
+      body: request.body,
+    });
+    if (!parsed.success) {
+      const bodyErrors = parsed.error.flatten().fieldErrors?.body as
+        | { receiptNumber?: string[] }
+        | undefined;
+      const msg =
+        bodyErrors?.receiptNumber?.[0] ?? "Receipt number is required";
+      request.log.warn(
+        { coldStorageId: req.user?.coldStorageId, body: request.body },
+        "Receipt number validation failed",
+      );
+      return reply.code(400).send({
+        status: "Fail",
+        message: msg,
+      });
+    }
+    const { receiptNumber } = parsed.data.body;
+
+    const coldStorageId =
+      typeof req.user?.coldStorageId === "object" &&
+      req.user?.coldStorageId !== null &&
+      "_id" in req.user.coldStorageId
+        ? req.user.coldStorageId._id
+        : (req.user?.coldStorageId as string);
+
+    if (!coldStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    request.log.info({ receiptNumber, coldStorageId }, "Searching for order with receipt number");
+
+    const result = await searchOrdersByReceiptNumber(
+      coldStorageId,
+      receiptNumber,
+      request.log,
+    );
+
+    if (result.status === "Fail" && result.message) {
+      return reply.code(404).send({
+        status: result.status,
+        message: result.message,
+      });
+    }
+
+    return reply.code(200).send({
+      status: result.status,
+      data: result.data,
+    });
+  } catch (error) {
+    request.log.error(
+      { error, body: request.body },
+      "Error searching for orders by receipt number",
     );
     return sendErrorReply(reply, error);
   }

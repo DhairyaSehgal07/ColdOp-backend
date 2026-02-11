@@ -1,6 +1,5 @@
 import { z } from "zod";
 import mongoose from "mongoose";
-import { GatePassType } from "./incoming-gate-pass.model.js";
 
 const locationSchema = z.object({
   chamber: z.string().trim().min(1, "Chamber is required"),
@@ -16,6 +15,7 @@ const bagSizeSchema = z.object({
   paltaiLocation: locationSchema.optional(),
 });
 
+/** Create payload: type is set server-side to RECEIPT and must not be sent. */
 export const createIncomingGatePassSchema = z.object({
   body: z.object({
     farmerStorageLinkId: z
@@ -28,8 +28,6 @@ export const createIncomingGatePassSchema = z.object({
       ),
 
     date: z.coerce.date(),
-
-    type: z.nativeEnum(GatePassType),
 
     variety: z.string().trim().min(1, "Variety is required"),
 

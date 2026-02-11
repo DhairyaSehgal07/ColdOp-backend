@@ -1,6 +1,9 @@
 import mongoose, { ClientSession, Types } from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
-import { OutgoingGatePass } from "./outgoing-gate-pass.model.js";
+import {
+  OutgoingGatePass,
+  GatePassType,
+} from "./outgoing-gate-pass.model.js";
 import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import type { CreateOutgoingGatePassInput } from "./outgoing-gate-pass.schema.js";
 import {
@@ -220,6 +223,7 @@ function buildIncomingGatePassSnapshots(
     name: string;
     currentQuantity: number;
     initialQuantity: number;
+    type: GatePassType;
     location: { chamber: string; floor: string; row: string };
   }>;
 }> {
@@ -241,6 +245,7 @@ function buildIncomingGatePassSnapshots(
       name: string;
       currentQuantity: number;
       initialQuantity: number;
+      type: GatePassType;
       location: { chamber: string; floor: string; row: string };
     }>;
   }> = [];
@@ -269,6 +274,7 @@ function buildIncomingGatePassSnapshots(
         name: b.name,
         currentQuantity: remaining,
         initialQuantity: b.initialQuantity,
+        type: GatePassType.DELIVERY,
         location: effectiveLocation,
       };
     });

@@ -306,3 +306,59 @@ export const nextVoucherNumberQuerySchema = z.object({
 export type NextVoucherNumberQuery = z.infer<
   typeof nextVoucherNumberQuerySchema
 >["querystring"];
+
+/** Daybook filter: "incoming" = only entries with no outgoing; "outgoing" = entries that have at least one outgoing pass */
+export const DAYBOOK_GATE_PASS_TYPES = ["incoming", "outgoing"] as const;
+
+export type DaybookGatePassType = (typeof DAYBOOK_GATE_PASS_TYPES)[number];
+
+/** Daybook list type: "all" = merged incoming + outgoing; "incoming" | "outgoing" = filter by type */
+export const DAYBOOK_LIST_TYPES = ["all", "incoming", "outgoing"] as const;
+
+export type DaybookListType = (typeof DAYBOOK_LIST_TYPES)[number];
+
+export const getDaybookQuerySchema = z.object({
+  querystring: z.object({
+    type: z
+      .enum(["all", "incoming", "outgoing"], {
+        message: "type must be 'all', 'incoming', or 'outgoing'",
+      })
+      .optional()
+      .default("all"),
+    sortBy: z
+      .string()
+      .optional()
+      .transform((s) => (s === "latest" ? "latest" : "oldest")),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1, "Limit must be at least 1")
+      .max(100, "Limit must not exceed 100")
+      .optional()
+      .default(10),
+    page: z.coerce
+      .number()
+      .int()
+      .min(1, "Page must be at least 1")
+      .optional()
+      .default(1),
+  }),
+});
+
+export type GetDaybookQuery = z.infer<
+  typeof getDaybookQuerySchema
+>["querystring"];
+
+/** Body for POST search-order-by-receipt: receipt number (gate pass / voucher number) */
+export const searchOrderByReceiptNumberBodySchema = z.object({
+  body: z.object({
+    receiptNumber: z
+      .string()
+      .trim()
+      .min(1, "Receipt number is required"),
+  }),
+});
+
+export type SearchOrderByReceiptNumberBody = z.infer<
+  typeof searchOrderByReceiptNumberBodySchema
+>["body"];

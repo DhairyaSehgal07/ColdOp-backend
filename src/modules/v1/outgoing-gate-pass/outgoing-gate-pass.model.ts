@@ -16,11 +16,19 @@ export interface IOutgoingIncomingGatePassSnapshotBagSize {
   currentQuantity: number;
   initialQuantity: number;
 
+  type: GatePassType;
+
   location: {
     chamber: string;
     floor: string;
     row: string;
   };
+}
+
+export enum GatePassType {
+  RECEIPT = "RECEIPT",
+  DELIVERY = "DELIVERY",
+  RESTORE = "RESTORE",
 }
 
 export interface IOutgoingIncomingGatePassSnapshot {
@@ -39,6 +47,8 @@ export interface IOutgoingGatePass extends mongoose.Document {
   gatePassNo: number;
   manualGatePassNumber?: number;
   date: Date;
+
+  type: GatePassType;
 
   variety: string;
 
@@ -103,6 +113,12 @@ const OutgoingIncomingGatePassSnapshotBagSizeSchema =
         type: Number,
         required: true,
         min: 0,
+      },
+
+      type: {
+        type: String,
+        enum: Object.values(GatePassType),
+        required: true,
       },
 
       location: {
@@ -186,6 +202,12 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
       type: Date,
       required: true,
       index: true,
+    },
+
+    type: {
+      type: String,
+      enum: Object.values(GatePassType),
+      required: false,
     },
 
     variety: {

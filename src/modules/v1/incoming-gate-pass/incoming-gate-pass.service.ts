@@ -1,4 +1,7 @@
-import { IncomingGatePass } from "./incoming-gate-pass.model.js";
+import {
+  IncomingGatePass,
+  GatePassType,
+} from "./incoming-gate-pass.model.js";
 import { CreateIncomingGatePassInput } from "./incoming-gate-pass.schema.js";
 import {
   NotFoundError,
@@ -187,7 +190,7 @@ export async function createIncomingGatePass(
         : undefined,
       gatePassNo,
       date: payload.date,
-      type: payload.type,
+      type: GatePassType.RECEIPT,
       variety: payload.variety,
       ...(payload.truckNumber !== undefined && payload.truckNumber !== ""
         ? { truckNumber: payload.truckNumber }

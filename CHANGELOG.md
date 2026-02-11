@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-02-12
+
+### Added
+
+- **Store Admin – Daybook**
+  - `GET /api/v1/store-admin/daybook` — list incoming and/or outgoing gate passes with farmer populated, pagination, and sort (JWT required)
+  - Query: `type` (all | incoming | outgoing), `sortBy` (latest | oldest), `page`, `limit` (default 10, max 100)
+  - Response: `status`, `message`, `data` (array of gate passes with bagSizes/orderDetails sorted), `pagination`
+  - Service `getDaybookOrders` with cold-storage scoping and optional merge by type
+- **Store Admin – Search order by receipt**
+  - `POST /api/v1/store-admin/search-order-by-receipt` — search incoming and outgoing gate passes by receipt number (gate pass number or manual receipt number), JWT required
+  - Body: `{ receiptNumber: string }`; returns matching orders or "No orders found" message
+- **Store Admin – Next voucher number**
+  - `GET /api/v1/store-admin/voucher-number?type=incoming|outgoing` — get next voucher (gate pass) number for the cold storage (JWT required)
+- **Docs**
+  - `docs/curl-get-daybook.sh` — curl examples for daybook (type, sortBy, page, limit)
+  - `docs/curl-search-order-by-receipt.sh` — curl example for search-order-by-receipt
+
+### Changed
+
+- **Outgoing Gate Pass**
+  - Model: added `type` (GatePassType: RECEIPT, DELIVERY, RESTORE) to OutgoingGatePass and snapshot bag sizes
+- **Incoming Gate Pass**
+  - Create schema: `type` removed from request body (set server-side to RECEIPT)
+
 ## [1.5.0] - 2026-02-11
 
 ### Added

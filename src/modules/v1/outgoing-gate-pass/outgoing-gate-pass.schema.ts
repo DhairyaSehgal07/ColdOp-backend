@@ -27,6 +27,7 @@ const outgoingIncomingGatePassAllocationSchema = z.object({
     .min(1, "At least one allocation is required"),
 });
 
+/** Create payload: type is set server-side to DELIVERY (on snapshot bag sizes) and must not be sent. */
 export const createOutgoingGatePassSchema = z.object({
   body: z.object({
     farmerStorageLinkId: z

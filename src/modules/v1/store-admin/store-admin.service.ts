@@ -4,6 +4,8 @@ import {
   LoginStoreAdminInput,
   QuickRegisterFarmerInput,
   UpdateFarmerStorageLinkInput,
+  type DaybookGatePassType,
+  type DaybookListType,
 } from "./store-admin.schema.js";
 import {
   ConflictError,
@@ -21,6 +23,8 @@ import { Farmer } from "../farmer/farmer-model.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
 import { Preferences } from "../preferences/preferences.model.js";
 import { createDebtorLedger } from "../../../utils/accounting/helper-fns.js";
+import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
+import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
 
 /**
  * Get all available resources and actions for Admin permissions
@@ -1101,6 +1105,705 @@ export async function updateFarmerStorageLink(
     );
   }
 }
+
+/* =======================
+   DAYBOOK (incoming + outgoing gate passes)
+======================= */
+
+export interface DaybookEntry {
+  incoming: {
+    _id: unknown;
+    farmerStorageLinkId: unknown;
+    createdBy: unknown;
+    gatePassNo: number;
+    manualParchiNumber?: string;
+    date: Date;
+    type: string;
+    variety: string;
+    truckNumber?: string;
+    bagSizes: {
+      name: string;
+      initialQuantity: number;
+      currentQuantity: number;
+    }[];
+    status: string;
+    remarks?: string;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+  farmer: Record<string, unknown>;
+  outgoingPasses: Record<string, unknown>[];
+  summaries: {
+    totalBagsIncoming: number;
+    totalBagsOutgoing: number;
+  };
+}
+
+export interface DaybookPagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+/** Pagination meta for daybook orders list (all / incoming / outgoing) */
+export interface DaybookOrdersPaginationMeta {
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  itemsPerPage: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+  nextPage: number | null;
+  previousPage: number | null;
+}
+
+export interface GetDaybookOrdersResult {
+  status: "Success" | "Fail";
+  message?: string;
+  data?: Record<string, unknown>[];
+  pagination: DaybookOrdersPaginationMeta;
+}
+
+export interface GetDaybookOptions {
+  limit?: number;
+  page?: number;
+  sortOrder?: "asc" | "desc";
+  gatePassTypes?: DaybookGatePassType[];
+}
+
+const DAYBOOK_STAGE_ORDER: DaybookGatePassType[] = ["incoming", "outgoing"];
+
+function createPaginationMeta(
+  total: number,
+  page: number,
+  limit: number,
+): DaybookOrdersPaginationMeta {
+  const totalPages = Math.ceil(total / limit);
+  return {
+    currentPage: page,
+    totalPages,
+    totalItems: total,
+    itemsPerPage: limit,
+    hasNextPage: page < totalPages,
+    hasPreviousPage: page > 1,
+    nextPage: page < totalPages ? page + 1 : null,
+    previousPage: page > 1 ? page - 1 : null,
+  };
+}
+
+/** Sort bagSizes by name on incoming docs; sort orderDetails by size on outgoing docs. */
+function sortOrderDetails(
+  orders: Array<
+    | { bagSizes?: { name: string }[]; orderDetails?: { size: string }[] }
+    | {
+        toObject: () => Record<string, unknown>;
+        bagSizes?: unknown;
+        orderDetails?: unknown;
+      }
+  >,
+): Record<string, unknown>[] {
+  return orders.map((order) => {
+    const hasToObject =
+      typeof (order as { toObject?: () => Record<string, unknown> })
+        .toObject === "function";
+    const obj = hasToObject
+      ? (order as { toObject: () => Record<string, unknown> }).toObject()
+      : { ...(order as Record<string, unknown>) };
+    if (Array.isArray(obj.bagSizes)) {
+      (obj as { bagSizes: { name: string }[] }).bagSizes = [
+        ...(obj.bagSizes as { name: string }[]),
+      ].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    if (Array.isArray(obj.orderDetails)) {
+      (obj as { orderDetails: { size: string }[] }).orderDetails = [
+        ...(obj.orderDetails as { size: string }[]),
+      ].sort((a, b) => a.size.localeCompare(b.size));
+    }
+    return obj as Record<string, unknown>;
+  });
+}
+
+/**
+ * Get daybook as a list of incoming and/or outgoing gate passes with farmer populated,
+ * pagination, and optional merge (type=all). Sorts bagSizes/orderDetails by size/name.
+ */
+export async function getDaybookOrders(
+  coldStorageId: string,
+  options: {
+    type: DaybookListType;
+    sortBy?: "latest" | "oldest";
+    page?: number;
+    limit?: number;
+  } = { type: "all" },
+  logger?: FastifyBaseLogger,
+): Promise<GetDaybookOrdersResult> {
+  const limit = Math.min(Math.max(options.limit ?? 10, 1), 100) as number;
+  const page = Math.max(options.page ?? 1, 1);
+  const sortOrder = options.sortBy === "latest" ? -1 : 1;
+  const skip = (page - 1) * limit;
+
+  if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+    throw new ValidationError(
+      "Invalid cold storage ID format",
+      "INVALID_COLD_STORAGE_ID",
+    );
+  }
+
+  const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+  const farmerStorageLinkIds = await FarmerStorageLink.find(
+    { coldStorageId: coldStorageObjectId },
+    { _id: 1 },
+  )
+    .lean()
+    .then((links) => links.map((l) => l._id));
+
+  if (farmerStorageLinkIds.length === 0) {
+    logger?.info({ coldStorageId }, "Daybook orders: no farmer-storage links");
+    return {
+      status: "Fail",
+      message: "Cold storage doesn't have any orders",
+      pagination: createPaginationMeta(0, page, limit),
+    };
+  }
+
+  const incomingSelect =
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber createdAt";
+  const outgoingSelect =
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks createdAt";
+
+  const populateLink = [
+    {
+      path: "farmerStorageLinkId",
+      select: "farmerId accountNumber",
+      populate: {
+        path: "farmerId",
+        model: Farmer,
+        select: "name mobileNumber address",
+      },
+    },
+  ];
+
+  switch (options.type) {
+    case "all": {
+      const [incomingCount, outgoingCount] = await Promise.all([
+        IncomingGatePass.countDocuments({
+          farmerStorageLinkId: { $in: farmerStorageLinkIds },
+        }),
+        OutgoingGatePass.countDocuments({
+          farmerStorageLinkId: { $in: farmerStorageLinkIds },
+        }),
+      ]);
+      const totalCount = incomingCount + outgoingCount;
+
+      if (totalCount === 0) {
+        logger?.info({ coldStorageId }, "Daybook orders: no orders");
+        return {
+          status: "Fail",
+          message: "Cold storage doesn't have any orders",
+          pagination: createPaginationMeta(0, page, limit),
+        };
+      }
+
+      const [allIncoming, allOutgoing] = await Promise.all([
+        IncomingGatePass.find({
+          farmerStorageLinkId: { $in: farmerStorageLinkIds },
+        })
+          .sort({ gatePassNo: sortOrder })
+          .select(incomingSelect)
+          .populate(populateLink),
+        OutgoingGatePass.find({
+          farmerStorageLinkId: { $in: farmerStorageLinkIds },
+        })
+          .sort({ gatePassNo: sortOrder })
+          .select(outgoingSelect)
+          .populate(populateLink),
+      ]);
+
+      const allOrders = [...allIncoming, ...allOutgoing] as Array<{
+        gatePassNo: number;
+      }>;
+      allOrders.sort((a, b) => {
+        const gA = a.gatePassNo;
+        const gB = b.gatePassNo;
+        return sortOrder === -1 ? gB - gA : gA - gB;
+      });
+
+      const paginated = allOrders.slice(skip, skip + limit);
+      const sorted = sortOrderDetails(
+        paginated as {
+          bagSizes?: { name: string }[];
+          orderDetails?: { size: string }[];
+        }[],
+      );
+
+      logger?.info(
+        { coldStorageId, totalCount, page, limit },
+        "Daybook orders (all) retrieved",
+      );
+      return {
+        status: "Success",
+        data: sorted,
+        pagination: createPaginationMeta(totalCount, page, limit),
+      };
+    }
+    case "incoming": {
+      const totalCount = await IncomingGatePass.countDocuments({
+        farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      });
+
+      if (totalCount === 0) {
+        return {
+          status: "Fail",
+          message: "No incoming orders found.",
+          pagination: createPaginationMeta(0, page, limit),
+        };
+      }
+
+      const incomingOrders = await IncomingGatePass.find({
+        farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      })
+        .sort({ gatePassNo: sortOrder })
+        .skip(skip)
+        .limit(limit)
+        .select(incomingSelect)
+        .populate(populateLink);
+
+      const sorted = sortOrderDetails(
+        incomingOrders as unknown as { bagSizes?: { name: string }[] }[],
+      );
+
+      return {
+        status: "Success",
+        data: sorted,
+        pagination: createPaginationMeta(totalCount, page, limit),
+      };
+    }
+    case "outgoing": {
+      const totalCount = await OutgoingGatePass.countDocuments({
+        farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      });
+
+      if (totalCount === 0) {
+        return {
+          status: "Fail",
+          message: "No outgoing orders found.",
+          pagination: createPaginationMeta(0, page, limit),
+        };
+      }
+
+      const outgoingOrders = await OutgoingGatePass.find({
+        farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      })
+        .sort({ gatePassNo: sortOrder })
+        .skip(skip)
+        .limit(limit)
+        .select(outgoingSelect)
+        .populate(populateLink);
+
+      const sorted = sortOrderDetails(
+        outgoingOrders as unknown as { orderDetails?: { size: string }[] }[],
+      );
+
+      return {
+        status: "Success",
+        data: sorted,
+        pagination: createPaginationMeta(totalCount, page, limit),
+      };
+    }
+    default: {
+      void options.type as never;
+      throw new ValidationError(
+        "Invalid type parameter. Use 'all', 'incoming', or 'outgoing'.",
+        "INVALID_DAYBOOK_TYPE",
+      );
+    }
+  }
+}
+
+export interface SearchOrdersByReceiptNumberResult {
+  status: "Success" | "Fail";
+  message?: string;
+  data?: {
+    incoming: Record<string, unknown>[];
+    outgoing: Record<string, unknown>[];
+  };
+}
+
+/**
+ * Search incoming and outgoing gate passes by receipt number (gatePassNo or manual numbers).
+ * Scoped to cold storage via farmer-storage-links. Returns populated farmer and sorted bagSizes/orderDetails.
+ */
+export async function searchOrdersByReceiptNumber(
+  coldStorageId: string,
+  receiptNumber: string,
+  logger?: FastifyBaseLogger,
+): Promise<SearchOrdersByReceiptNumberResult> {
+  if (!receiptNumber?.trim()) {
+    throw new ValidationError("Receipt number is required", "MISSING_RECEIPT_NUMBER");
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+    throw new ValidationError(
+      "Invalid cold storage ID format",
+      "INVALID_COLD_STORAGE_ID",
+    );
+  }
+
+  const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+  const farmerStorageLinkIds = await FarmerStorageLink.find(
+    { coldStorageId: coldStorageObjectId },
+    { _id: 1 },
+  )
+    .lean()
+    .then((links) => links.map((l) => l._id));
+
+  if (farmerStorageLinkIds.length === 0) {
+    logger?.info({ coldStorageId }, "Search by receipt: no farmer-storage links");
+    return {
+      status: "Fail",
+      message: "No orders found with this receipt number",
+      data: { incoming: [], outgoing: [] },
+    };
+  }
+
+  const trimmed = receiptNumber.trim();
+  const gatePassNo = Number(trimmed);
+  if (
+    trimmed === "" ||
+    !Number.isInteger(gatePassNo) ||
+    Number.isNaN(gatePassNo)
+  ) {
+    throw new ValidationError(
+      "Receipt number must be a valid gate pass number (integer)",
+      "INVALID_RECEIPT_NUMBER",
+    );
+  }
+
+  const baseFilter = {
+    farmerStorageLinkId: { $in: farmerStorageLinkIds },
+    gatePassNo,
+  };
+
+  const incomingSelect =
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber createdAt";
+  const outgoingSelect =
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks createdAt";
+  const populateLink = [
+    {
+      path: "farmerStorageLinkId",
+      select: "farmerId accountNumber",
+      populate: {
+        path: "farmerId",
+        model: Farmer,
+        select: "name mobileNumber address",
+      },
+    },
+  ];
+
+  const [incomingOrders, outgoingOrders] = await Promise.all([
+    IncomingGatePass.find(baseFilter as Record<string, unknown>)
+      .select(incomingSelect)
+      .populate(populateLink)
+      .lean(),
+    OutgoingGatePass.find(baseFilter as Record<string, unknown>)
+      .select(outgoingSelect)
+      .populate(populateLink)
+      .lean(),
+  ]);
+
+  if (incomingOrders.length === 0 && outgoingOrders.length === 0) {
+    logger?.info(
+      { receiptNumber: trimmed, coldStorageId },
+      "No orders found with receipt number",
+    );
+    return {
+      status: "Fail",
+      message: "No orders found with this receipt number",
+      data: { incoming: [], outgoing: [] },
+    };
+  }
+
+  const processedIncoming = sortOrderDetails(
+    incomingOrders as unknown as {
+      bagSizes?: { name: string }[];
+      orderDetails?: { size: string }[];
+    }[],
+  );
+  const processedOutgoing = sortOrderDetails(
+    outgoingOrders as unknown as {
+      bagSizes?: { name: string }[];
+      orderDetails?: { size: string }[];
+    }[],
+  );
+
+  logger?.info(
+    {
+      receiptNumber: trimmed,
+      coldStorageId,
+      incomingCount: incomingOrders.length,
+      outgoingCount: outgoingOrders.length,
+    },
+    "Search by receipt number: orders found",
+  );
+
+  return {
+    status: "Success",
+    data: {
+      incoming: processedIncoming,
+      outgoing: processedOutgoing,
+    },
+  };
+}
+
+/**
+ * Get daybook: one entry per incoming gate pass with attached outgoing passes (that reference this incoming),
+ * farmer populated, and bag summaries. Scoped to cold storage via farmer-storage-links.
+ * Filter gatePassType: "incoming" = only entries with no outgoing; "outgoing" = entries that have at least one outgoing.
+ */
+export async function getDaybook(
+  coldStorageId: string,
+  options: GetDaybookOptions = {},
+  logger?: FastifyBaseLogger,
+  overrideFarmerStorageLinkIds?: mongoose.Types.ObjectId[],
+): Promise<{ daybook: DaybookEntry[]; pagination: DaybookPagination }> {
+  const limit = Math.min(Math.max(options.limit ?? 10, 1), 100);
+  const page = Math.max(options.page ?? 1, 1);
+  const sortOrder = options.sortOrder ?? "desc";
+  const gatePassTypes = options.gatePassTypes?.length
+    ? options.gatePassTypes
+    : undefined;
+  const sortDir = sortOrder === "desc" ? -1 : 1;
+
+  if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+    throw new ValidationError(
+      "Invalid cold storage ID format",
+      "INVALID_COLD_STORAGE_ID",
+    );
+  }
+
+  const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+
+  let farmerStorageLinkIds: mongoose.Types.ObjectId[];
+  if (
+    overrideFarmerStorageLinkIds != null &&
+    overrideFarmerStorageLinkIds.length > 0
+  ) {
+    farmerStorageLinkIds = overrideFarmerStorageLinkIds;
+  } else {
+    farmerStorageLinkIds = await FarmerStorageLink.find(
+      { coldStorageId: coldStorageObjectId },
+      { _id: 1 },
+    )
+      .lean()
+      .then((links) => links.map((l) => l._id));
+
+    if (farmerStorageLinkIds.length === 0) {
+      logger?.info({ coldStorageId }, "Daybook: no farmer-storage links");
+      return {
+        daybook: [],
+        pagination: { page, limit, total: 0, totalPages: 0 },
+      };
+    }
+  }
+
+  const col = {
+    farmerStorageLinks: FarmerStorageLink.collection.name,
+    farmers: Farmer.collection.name,
+    storeAdmins: StoreAdmin.collection.name,
+    incomingGatePasses: IncomingGatePass.collection.name,
+    outgoingGatePasses: OutgoingGatePass.collection.name,
+  };
+
+  const pipeline: mongoose.PipelineStage[] = [
+    {
+      $match: {
+        farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      },
+    },
+    { $sort: { date: sortDir, gatePassNo: sortDir } },
+    {
+      $lookup: {
+        from: col.farmerStorageLinks,
+        localField: "farmerStorageLinkId",
+        foreignField: "_id",
+        as: "linkDoc",
+      },
+    },
+    { $unwind: { path: "$linkDoc", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: col.farmers,
+        localField: "linkDoc.farmerId",
+        foreignField: "_id",
+        as: "farmerArr",
+      },
+    },
+    {
+      $lookup: {
+        from: col.storeAdmins,
+        localField: "createdBy",
+        foreignField: "_id",
+        as: "incomingCreatedByArr",
+        pipeline: [{ $project: { name: 1, mobileNumber: 1 } }],
+      },
+    },
+    {
+      $lookup: {
+        from: col.outgoingGatePasses,
+        let: { incomingId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $in: ["$$incomingId", "$incomingGatePassSnapshots._id"],
+              },
+            },
+          },
+          { $sort: { date: -1, gatePassNo: -1 } },
+          {
+            $lookup: {
+              from: col.storeAdmins,
+              localField: "createdBy",
+              foreignField: "_id",
+              as: "createdByPopulated",
+              pipeline: [{ $project: { name: 1, mobileNumber: 1 } }],
+            },
+          },
+          {
+            $addFields: {
+              createdBy: { $arrayElemAt: ["$createdByPopulated", 0] },
+            },
+          },
+          { $project: { createdByPopulated: 0 } },
+        ],
+        as: "outgoingPasses",
+      },
+    },
+    {
+      $addFields: {
+        summaries: {
+          totalBagsIncoming: {
+            $sum: "$bagSizes.initialQuantity",
+          },
+          totalBagsOutgoing: {
+            $reduce: {
+              input: { $ifNull: ["$outgoingPasses", []] },
+              initialValue: 0,
+              in: {
+                $add: [
+                  "$$value",
+                  { $sum: "$$this.orderDetails.quantityIssued" },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        incoming: {
+          _id: "$_id",
+          farmerStorageLinkId: "$farmerStorageLinkId",
+          createdBy: { $arrayElemAt: ["$incomingCreatedByArr", 0] },
+          gatePassNo: "$gatePassNo",
+          manualParchiNumber: "$manualParchiNumber",
+          date: "$date",
+          type: "$type",
+          variety: "$variety",
+          truckNumber: "$truckNumber",
+          bagSizes: "$bagSizes",
+          status: "$status",
+          remarks: "$remarks",
+          createdAt: "$createdAt",
+          updatedAt: "$updatedAt",
+        },
+        farmer: {
+          $mergeObjects: [
+            { $ifNull: [{ $arrayElemAt: ["$farmerArr", 0] }, {}] },
+            { accountNumber: "$linkDoc.accountNumber" },
+          ],
+        },
+        outgoingPasses: 1,
+        summaries: 1,
+      },
+    },
+  ];
+
+  if (gatePassTypes && gatePassTypes.length > 0) {
+    const selectedStage =
+      gatePassTypes.length === 1
+        ? gatePassTypes[0]
+        : (gatePassTypes.reduce((max, t) => {
+            const maxIdx = DAYBOOK_STAGE_ORDER.indexOf(max);
+            const idx = DAYBOOK_STAGE_ORDER.indexOf(t);
+            return idx > maxIdx ? t : max;
+          }) as DaybookGatePassType);
+    const stageIndex = DAYBOOK_STAGE_ORDER.indexOf(selectedStage);
+    const andConditions: mongoose.PipelineStage.Match["$match"][string][] = [];
+
+    if (stageIndex >= 1) {
+      andConditions.push({
+        $gt: [{ $size: { $ifNull: ["$outgoingPasses", []] } }, 0],
+      });
+    }
+    if (stageIndex < 1) {
+      andConditions.push({
+        $eq: [{ $size: { $ifNull: ["$outgoingPasses", []] } }, 0],
+      });
+    }
+
+    pipeline.push({
+      $match: {
+        $expr: { $and: andConditions },
+      },
+    });
+
+    const passProject: Record<string, unknown> = {
+      incoming: "$incoming",
+      farmer: "$farmer",
+      summaries: "$summaries",
+    };
+    passProject["outgoingPasses"] = stageIndex >= 1 ? "$outgoingPasses" : [];
+    pipeline.push({ $project: passProject });
+  }
+
+  pipeline.push({
+    $sort: { "incoming.date": sortDir, "incoming.gatePassNo": sortDir },
+  });
+
+  pipeline.push({
+    $facet: {
+      totalCount: [{ $count: "value" }],
+      items: [{ $skip: (page - 1) * limit }, { $limit: limit }],
+    },
+  });
+
+  const result = await IncomingGatePass.aggregate(pipeline).allowDiskUse(true);
+
+  const totalCount =
+    result[0]?.totalCount?.[0]?.value != null
+      ? result[0].totalCount[0].value
+      : 0;
+  const daybook = (result[0]?.items ?? []) as DaybookEntry[];
+  const totalPages = Math.ceil(totalCount / limit);
+
+  logger?.info(
+    { coldStorageId, entryCount: daybook.length, totalCount, page, limit },
+    "Daybook retrieved",
+  );
+
+  return {
+    daybook,
+    pagination: { page, limit, total: totalCount, totalPages },
+  };
+}
+
+/* =======================
+   NEXT VOUCHER NUMBER
+======================= */
 
 /** Voucher types supported by getNextVoucherNumber: incoming and outgoing only */
 export const VOUCHER_TYPES = ["incoming", "outgoing"] as const;
