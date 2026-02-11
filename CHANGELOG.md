@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-02-11
+
+### Added
+
+- **Incoming Gate Pass**
+  - `GET /api/v1/incoming-gate-pass/farmer-storage-link/:farmerStorageLinkId` — list all incoming gate passes for a farmer-storage-link (JWT required, scoped to cold storage)
+  - Service `getIncomingGatePassesByFarmerStorageLinkId` with validation, auth scope, and populated farmer/link/createdBy
+  - Docs: `docs/curl-get-incoming-gate-passes-by-farmer-storage-link.sh` for testing the endpoint
+
 ## [1.4.0] - 2026-02-08
 
 ### Added

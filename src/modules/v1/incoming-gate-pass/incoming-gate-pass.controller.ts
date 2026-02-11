@@ -1,5 +1,8 @@
 import { FastifyReply, FastifyRequest } from "fastify";
-import { createIncomingGatePass } from "./incoming-gate-pass.service.js";
+import {
+  createIncomingGatePass,
+  getIncomingGatePassesByFarmerStorageLinkId,
+} from "./incoming-gate-pass.service.js";
 import { CreateIncomingGatePassInput } from "./incoming-gate-pass.schema.js";
 import { AppError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
@@ -69,6 +72,39 @@ export async function createIncomingGatePassHandler(
     request.log.error(
       { error, body: request.body },
       "Error in createIncomingGatePassHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * Handler for listing all incoming gate passes for a farmer-storage-link
+ */
+export async function getIncomingGatePassesByFarmerStorageLinkIdHandler(
+  request: FastifyRequest<{
+    Params: { farmerStorageLinkId: string };
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const { farmerStorageLinkId } = request.params;
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+
+    const list = await getIncomingGatePassesByFarmerStorageLinkId(
+      farmerStorageLinkId,
+      loggedInUserColdStorageId,
+      request.log,
+    );
+
+    return reply.code(200).send({
+      success: true,
+      data: list,
+      message: "Incoming gate passes retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error(
+      { error, farmerStorageLinkId: request.params?.farmerStorageLinkId },
+      "Error in getIncomingGatePassesByFarmerStorageLinkIdHandler",
     );
     return sendErrorReply(reply, error);
   }

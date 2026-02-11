@@ -9,6 +9,109 @@ import {
 import mongoose from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
+
+/**
+ * List all incoming gate passes for a farmer-storage-link.
+ * Scopes to the given cold storage so the link must belong to that cold storage.
+ *
+ * @param farmerStorageLinkId - Farmer-storage link ID
+ * @param loggedInUserColdStorageId - Cold storage ID of the logged-in user (for auth scope)
+ * @param logger - Optional logger instance
+ * @returns Array of incoming gate passes with populated farmerStorageLinkId (name, accountNumber, address, mobileNumber)
+ * @throws ValidationError if farmerStorageLinkId is invalid
+ * @throws NotFoundError if farmer-storage-link not found or not in user's cold storage
+ */
+export async function getIncomingGatePassesByFarmerStorageLinkId(
+  farmerStorageLinkId: string,
+  loggedInUserColdStorageId: string | undefined,
+  logger?: FastifyBaseLogger,
+) {
+  if (!mongoose.Types.ObjectId.isValid(farmerStorageLinkId)) {
+    throw new ValidationError(
+      "Invalid farmer storage link ID format",
+      "INVALID_FARMER_STORAGE_LINK_ID",
+    );
+  }
+
+  const linkIdObj = new mongoose.Types.ObjectId(farmerStorageLinkId);
+  const storageLink = await FarmerStorageLink.findById(linkIdObj).lean();
+
+  if (!storageLink) {
+    logger?.warn(
+      { farmerStorageLinkId },
+      "Farmer-storage-link not found for list incoming gate passes",
+    );
+    throw new NotFoundError(
+      "Farmer-storage-link not found",
+      "FARMER_STORAGE_LINK_NOT_FOUND",
+    );
+  }
+
+  const linkColdStorageId =
+    typeof storageLink.coldStorageId === "object" &&
+    storageLink.coldStorageId !== null
+      ? (
+          storageLink.coldStorageId as { _id: mongoose.Types.ObjectId }
+        )._id.toString()
+      : (storageLink.coldStorageId as string);
+
+  if (
+    loggedInUserColdStorageId &&
+    linkColdStorageId !== loggedInUserColdStorageId
+  ) {
+    logger?.warn(
+      { farmerStorageLinkId, linkColdStorageId, loggedInUserColdStorageId },
+      "Farmer-storage-link does not belong to user's cold storage",
+    );
+    throw new NotFoundError(
+      "Farmer-storage-link not found",
+      "FARMER_STORAGE_LINK_NOT_FOUND",
+    );
+  }
+
+  const list = await IncomingGatePass.find({ farmerStorageLinkId: linkIdObj })
+    .sort({ date: -1, gatePassNo: -1 })
+    .populate({
+      path: "farmerStorageLinkId",
+      select: "accountNumber farmerId",
+      populate: {
+        path: "farmerId",
+        select: "name address mobileNumber",
+      },
+    })
+    .populate({ path: "createdBy", select: "name" })
+    .lean();
+
+  type PopulatedLink = {
+    accountNumber: number;
+    farmerId: { name: string; address: string; mobileNumber: string };
+  };
+  type PopulatedAdmin = { _id: unknown; name: string };
+
+  return list.map((raw) => {
+    const row = raw as unknown as Record<string, unknown>;
+    const populatedLink = row.farmerStorageLinkId as
+      | PopulatedLink
+      | null
+      | undefined;
+    const populatedAdmin = row.createdBy as PopulatedAdmin | null | undefined;
+    return {
+      ...row,
+      farmerStorageLinkId:
+        populatedLink && populatedLink.farmerId
+          ? {
+              name: populatedLink.farmerId.name,
+              accountNumber: populatedLink.accountNumber,
+              address: populatedLink.farmerId.address,
+              mobileNumber: populatedLink.farmerId.mobileNumber,
+            }
+          : row.farmerStorageLinkId,
+      createdBy: populatedAdmin
+        ? { _id: populatedAdmin._id, name: populatedAdmin.name }
+        : row.createdBy,
+    };
+  });
+}
 import { ColdStorage } from "../cold-storage/cold-storage.model.js";
 import Ledger from "../ledger/ledger.model.js";
 import { Preferences } from "../preferences/preferences.model.js";
