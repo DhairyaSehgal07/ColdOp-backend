@@ -10,6 +10,7 @@ import {
 } from "../../../utils/errors.js";
 import type { ILedger } from "./ledger.model.js";
 import { LedgerType } from "./ledger.model.js";
+import { initializeDefaultLedgersForColdStorage } from "../../../utils/accounting/initialise-default-ledgers.js";
 
 /** Loose type for mongoose query filter objects (Mongoose 9 uses QueryFilter internally). */
 type QueryFilter = Record<string, unknown>;
@@ -79,6 +80,34 @@ export async function createLedger(
     "Ledger created",
   );
   return ledger;
+}
+
+/**
+ * Create default ledgers for the cold storage (no farmer-storage link).
+ * Idempotent: existing ledgers with the same names are skipped.
+ * Returns all cold-storage-level ledgers after creation.
+ */
+export async function createDefaultLedgersForColdStorage(
+  coldStorageId: string,
+  createdById: string,
+  logger?: FastifyBaseLogger,
+): Promise<Array<Record<string, unknown>>> {
+  const coldId = toObjectId(coldStorageId);
+  await initializeDefaultLedgersForColdStorage(createdById, coldStorageId);
+  const ledgers = await Ledger.find({
+    coldStorageId: coldId,
+    $or: [
+      { farmerStorageLinkId: null },
+      { farmerStorageLinkId: { $exists: false } },
+    ],
+  })
+    .sort({ name: 1 })
+    .lean();
+  logger?.info(
+    { coldStorageId, count: ledgers.length },
+    "Default ledgers created/ensured for cold storage",
+  );
+  return ledgers as Array<Record<string, unknown>>;
 }
 
 /**

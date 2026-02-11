@@ -3,6 +3,7 @@ import type { AuthenticatedRequest } from "../../../utils/auth.js";
 import { AppError } from "../../../utils/errors.js";
 import {
   createLedger,
+  createDefaultLedgersForColdStorage,
   getAllLedgers,
   getLedgerById,
   updateLedger,
@@ -115,6 +116,29 @@ export async function createLedgerHandler(
       { error, body: request.body },
       "Error in createLedgerHandler",
     );
+    return sendErrorReply(reply, error);
+  }
+}
+
+export async function createDefaultLedgersHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  try {
+    const coldStorageId = getColdStorageId(request);
+    const createdById = getCreatedById(request);
+    const ledgers = await createDefaultLedgersForColdStorage(
+      coldStorageId,
+      createdById,
+      request.log,
+    );
+    return reply.code(201).send({
+      success: true,
+      data: { ledgers },
+      message: "Default ledgers created successfully",
+    });
+  } catch (error) {
+    request.log.error({ error }, "Error in createDefaultLedgersHandler");
     return sendErrorReply(reply, error);
   }
 }

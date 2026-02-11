@@ -9,14 +9,23 @@ import {
 import mongoose from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
+import { ColdStorage } from "../cold-storage/cold-storage.model.js";
+import Ledger from "../ledger/ledger.model.js";
+import { Preferences } from "../preferences/preferences.model.js";
 import { getNextVoucherNumber } from "../store-admin/store-admin.service.js";
+import {
+  createVoucher,
+  type CreateVoucherParams,
+} from "../../../utils/accounting/helper-fns.js";
+import { getNextJournalVoucherNumber } from "../../../utils/accounting/generate-voucher-number.js";
 
 /**
  * Creates a new incoming gate pass.
  * Resolves farmer-storage-link, gets next gate pass number for the cold storage, then creates the document.
  *
- * @param payload - Create body (farmerStorageLinkId, date, type, variety, truckNumber, bagSizes, remarks?)
+ * @param payload - Create body (farmerStorageLinkId, date, type, variety, truckNumber, bagSizes, remarks?, and optional voucher fields)
  * @param createdById - Optional store admin ID (from auth)
+ * @param loggedInUserColdStorageId - Cold storage ID of the logged-in user (for preferences.showFinances check)
  * @param logger - Optional logger instance
  * @returns Created incoming gate pass document
  * @throws NotFoundError if farmer-storage-link not found
@@ -26,6 +35,7 @@ import { getNextVoucherNumber } from "../store-admin/store-admin.service.js";
 export async function createIncomingGatePass(
   payload: CreateIncomingGatePassInput,
   createdById: string | undefined,
+  loggedInUserColdStorageId: string | undefined,
   logger?: FastifyBaseLogger,
 ) {
   try {
@@ -61,7 +71,7 @@ export async function createIncomingGatePass(
 
     const gatePassNo = await getNextVoucherNumber(
       coldStorageId,
-      "incoming-gate-pass",
+      "incoming",
       logger,
     );
 
@@ -81,6 +91,7 @@ export async function createIncomingGatePass(
         : {}),
       bagSizes: payload.bagSizes,
       remarks: payload.remarks,
+      manualParchiNumber: payload.manualParchiNumber,
     });
 
     logger?.info(
@@ -91,6 +102,102 @@ export async function createIncomingGatePass(
       },
       "Incoming gate pass created successfully",
     );
+
+    // Create voucher when logged-in user's cold storage has showFinances enabled.
+    // Ledgers are resolved on backend: debit = farmer's ledger (farmer storage link), credit = Store Rent ledger.
+    if (loggedInUserColdStorageId) {
+      const coldStorage = await ColdStorage.findById(loggedInUserColdStorageId)
+        .select("preferencesId")
+        .lean();
+      const preferences = coldStorage?.preferencesId
+        ? await Preferences.findById(coldStorage.preferencesId).lean()
+        : null;
+
+      if (preferences?.showFinances) {
+        const amount = payload.amount;
+        if (amount == null || amount <= 0) {
+          throw new ValidationError(
+            "Amount is required and must be greater than 0 when showFinances is enabled",
+            "AMOUNT_REQUIRED_FOR_VOUCHER",
+          );
+        }
+
+        const coldIdObj = new mongoose.Types.ObjectId(coldStorageId);
+        const linkIdObj = new mongoose.Types.ObjectId(
+          payload.farmerStorageLinkId,
+        );
+        const createdByObjId = payload.createdById
+          ? new mongoose.Types.ObjectId(payload.createdById)
+          : createdById
+            ? new mongoose.Types.ObjectId(createdById)
+            : undefined;
+
+        if (!createdByObjId) {
+          throw new ValidationError(
+            "Created by (store admin) is required to create voucher",
+            "CREATED_BY_REQUIRED",
+          );
+        }
+
+        // Farmer's ledger (debit): ledger linked to this farmer storage link (Debtors category).
+        const farmerLedger = await Ledger.findOne({
+          coldStorageId: coldIdObj,
+          farmerStorageLinkId: linkIdObj,
+          category: "Debtors",
+        })
+          .select("_id")
+          .lean();
+
+        if (!farmerLedger) {
+          throw new NotFoundError(
+            "Farmer ledger not found for this farmer storage link",
+            "FARMER_LEDGER_NOT_FOUND",
+          );
+        }
+
+        // Current store's Store Rent ledger (credit): cold-storage-level ledger for logged-in store admin.
+        const loggedInColdStorageObj = new mongoose.Types.ObjectId(
+          loggedInUserColdStorageId,
+        );
+        const storeRentLedger = await Ledger.findOne({
+          coldStorageId: loggedInColdStorageObj,
+          createdBy: createdByObjId,
+          name: "Store Rent",
+          farmerStorageLinkId: null,
+        })
+          .select("_id")
+          .lean();
+
+        if (!storeRentLedger) {
+          throw new NotFoundError(
+            "Store Rent ledger not found for the current store",
+            "STORE_RENT_LEDGER_NOT_FOUND",
+          );
+        }
+
+        const manualParchi = payload.manualParchiNumber?.trim();
+        const narration = manualParchi
+          ? `Voucher rent entry for gate pass no. ${gatePassNo}, manual parchi no. ${manualParchi}`
+          : `Voucher rent entry for gate pass no. ${gatePassNo}`;
+        const voucherNumber = await getNextJournalVoucherNumber(
+          coldStorageId,
+          linkIdObj,
+        );
+
+        const voucherParams: CreateVoucherParams = {
+          creditLedgerId: new mongoose.Types.ObjectId(storeRentLedger._id),
+          debitLedgerId: new mongoose.Types.ObjectId(farmerLedger._id),
+          voucherNumber,
+          amount,
+          narration,
+          coldStorageId: coldIdObj,
+          farmerStorageLinkId: linkIdObj,
+          createdBy: createdByObjId,
+          date: payload.date,
+        };
+        await createVoucher(voucherParams);
+      }
+    }
 
     const populated = await IncomingGatePass.findById(doc._id)
       .populate({

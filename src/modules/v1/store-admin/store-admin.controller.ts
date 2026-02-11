@@ -10,6 +10,7 @@ import {
   logoutStoreAdmin,
   quickRegisterFarmer,
   updateFarmerStorageLink,
+  getNextVoucherNumber,
 } from "./store-admin.service.js";
 import {
   CreateStoreAdminInput,
@@ -22,6 +23,7 @@ import {
   QuickRegisterFarmerInput,
   UpdateFarmerStorageLinkInput,
   UpdateFarmerStorageLinkParams,
+  NextVoucherNumberQuery,
 } from "./store-admin.schema.js";
 import { AppError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
@@ -395,6 +397,52 @@ export async function updateFarmerStorageLinkHandler(
     request.log.error(
       { error, params: request.params, body: request.body },
       "Error in updateFarmerStorageLinkHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * Handler for getting the next voucher number for a voucher type (incoming or outgoing).
+ * Uses authenticated store admin's cold storage.
+ */
+export async function getNextVoucherNumberHandler(
+  request: FastifyRequest<{ Querystring: NextVoucherNumberQuery }>,
+  reply: FastifyReply,
+) {
+  try {
+    const req = request as AuthenticatedRequest;
+    const coldStorageId =
+      typeof req.user.coldStorageId === "object" &&
+      req.user.coldStorageId !== null &&
+      "_id" in req.user.coldStorageId
+        ? req.user.coldStorageId._id
+        : (req.user.coldStorageId as string);
+
+    if (!coldStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    const nextNumber = await getNextVoucherNumber(
+      coldStorageId,
+      request.query.type,
+      request.log,
+    );
+
+    return reply.send({
+      success: true,
+      data: { nextNumber },
+    });
+  } catch (error) {
+    request.log.error(
+      { error, query: request.query },
+      "Error in getNextVoucherNumberHandler",
     );
     return sendErrorReply(reply, error);
   }

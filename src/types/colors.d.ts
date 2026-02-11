@@ -1,5 +1,5 @@
 // Type declarations for colors package
-declare module 'colors' {
+declare module "colors" {
   interface String {
     // Basic colors
     black: string;

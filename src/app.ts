@@ -6,6 +6,7 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { config } from "dotenv";
 import { coldStorageRoutes } from "./modules/v1/cold-storage/cold-storage.routes";
+import { preferencesRoutes } from "./modules/v1/preferences/preferences.routes";
 import { storeAdminRoutes } from "./modules/v1/store-admin/store-admin.routes";
 import { incomingGatePassRoutes } from "./modules/v1/incoming-gate-pass/incoming-gate-pass.routes";
 import { outgoingGatePassRoutes } from "./modules/v1/outgoing-gate-pass/outgoing-gate-pass.routes";
@@ -68,6 +69,10 @@ export const buildApp = async (): Promise<FastifyInstance> => {
   // Register routes
   await fastify.register(coldStorageRoutes, {
     prefix: "/api/v1/cold-storage",
+  });
+
+  await fastify.register(preferencesRoutes, {
+    prefix: "/api/v1/preferences",
   });
 
   await fastify.register(storeAdminRoutes, {

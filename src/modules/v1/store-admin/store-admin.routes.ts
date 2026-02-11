@@ -10,6 +10,7 @@ import {
   quickRegisterFarmerHandler,
   updateFarmerStorageLinkHandler,
   getFarmerStorageLinksByColdStorageHandler,
+  getNextVoucherNumberHandler,
 } from "./store-admin.controller.js";
 import {
   createStoreAdminSchema,
@@ -20,6 +21,7 @@ import {
   loginStoreAdminSchema,
   quickRegisterFarmerSchema,
   updateFarmerStorageLinkSchema,
+  nextVoucherNumberQuerySchema,
 } from "./store-admin.schema.js";
 import { authenticate, authorize } from "../../../utils/auth.js";
 import { Role } from "./store-admin.model.js";
@@ -137,6 +139,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                     accountNumber: { type: "number" },
                     isActive: { type: "boolean" },
                     notes: { type: "string" },
+                    costPerBag: { type: "number" },
                   },
                 },
               },
@@ -172,12 +175,70 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // Get next voucher number for a voucher type
-  fastify.get("/next-voucher-number", async (_request, reply) => {
-    return reply.status(200).send({
-      success: true,
-    });
-  });
+  // Get next voucher number for a voucher type (incoming or outgoing only)
+  fastify.get(
+    "/voucher-number",
+    {
+      schema: {
+        ...nextVoucherNumberQuerySchema,
+        description:
+          "Get the next voucher (gate pass) number for incoming or outgoing gate pass",
+        tags: ["Store Admin"],
+        summary: "Get next voucher number",
+        response: {
+          200: {
+            description: "Next voucher number",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  nextNumber: { type: "number" },
+                },
+              },
+            },
+          },
+          400: {
+            description: "Bad request - invalid or missing type",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 200,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getNextVoucherNumberHandler as never,
+  );
   // Get store admin by ID
   fastify.get(
     "/:id",
@@ -432,14 +493,20 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
         summary: "Login store admin",
         response: {
           200: {
-            description: "Login successful",
+            description:
+              "Login successful; storeAdmin includes coldStorageId and preferences (coldStorageId.preferencesId) populated",
             type: "object",
             properties: {
               success: { type: "boolean" },
               data: {
                 type: "object",
                 properties: {
-                  storeAdmin: { type: "object", additionalProperties: true },
+                  storeAdmin: {
+                    type: "object",
+                    additionalProperties: true,
+                    description:
+                      "Store admin with coldStorageId and coldStorageId.preferencesId populated",
+                  },
                   token: { type: "string" },
                 },
               },

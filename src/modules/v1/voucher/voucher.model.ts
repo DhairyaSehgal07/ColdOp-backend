@@ -140,11 +140,6 @@ voucherSchema.index(
 voucherSchema.index({ coldStorageId: 1, date: -1 });
 voucherSchema.index({ farmerStorageLinkId: 1, date: -1 });
 
-voucherSchema.index({ debitLedger: 1 });
-voucherSchema.index({ creditLedger: 1 });
-
-voucherSchema.index({ createdBy: 1 });
-
 /* =======================
    VALIDATION HOOKS
 ======================= */
@@ -173,17 +168,33 @@ voucherSchema.pre("save", async function (this: HydratedDocument<IVoucher>) {
   }
 
   type LedgerScope = {
+    _id: Types.ObjectId;
     coldStorageId: Types.ObjectId;
     farmerStorageLinkId?: Types.ObjectId | null;
   };
-  const [d, c] = ledgers as unknown as LedgerScope[];
+  const ledgerList = ledgers as unknown as LedgerScope[];
+  const d = ledgerList.find(
+    (l) => l._id.toString() === this.debitLedger.toString(),
+  );
+  const c = ledgerList.find(
+    (l) => l._id.toString() === this.creditLedger.toString(),
+  );
+  if (!d || !c) {
+    const error = new Error("One or both ledgers not found");
+    error.name = "ValidationError";
+    throw error;
+  }
   const sameColdStorage =
     d.coldStorageId.toString() === c.coldStorageId.toString() &&
     this.coldStorageId.toString() === d.coldStorageId.toString();
   const linkD = d.farmerStorageLinkId?.toString() ?? null;
   const linkC = c.farmerStorageLinkId?.toString() ?? null;
   const linkV = this.farmerStorageLinkId?.toString() ?? null;
-  const sameScope = linkD === linkC && linkD === linkV;
+  // Same scope: both same link as voucher, OR one ledger is storage-level (null) and the other matches voucher's link (e.g. rent: Store Rent credit + farmer debit)
+  const sameScope =
+    (linkD === linkC && linkD === linkV) ||
+    (linkD === linkV && linkC === null) ||
+    (linkC === linkV && linkD === null);
 
   if (!sameColdStorage || !sameScope) {
     const error = new Error(

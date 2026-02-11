@@ -8,6 +8,7 @@ export interface IFarmerStorageLink extends Document {
   accountNumber: number;
   isActive: boolean;
   notes?: string;
+  costPerBag?: number;
 
   createdAt: Date;
   updatedAt: Date;
@@ -44,6 +45,10 @@ const farmerStorageLinkSchema = new Schema<IFarmerStorageLink>(
 
     notes: {
       type: String,
+    },
+
+    costPerBag: {
+      type: Number,
     },
   },
   {

@@ -4,6 +4,18 @@ import { CreateIncomingGatePassInput } from "./incoming-gate-pass.schema.js";
 import { AppError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
 
+function getLoggedInUserColdStorageId(
+  request: FastifyRequest,
+): string | undefined {
+  const req = request as AuthenticatedRequest;
+  if (!req.user?.coldStorageId) return undefined;
+  return typeof req.user.coldStorageId === "object" &&
+    req.user.coldStorageId !== null &&
+    "_id" in req.user.coldStorageId
+    ? (req.user.coldStorageId as { _id: string })._id
+    : (req.user.coldStorageId as string);
+}
+
 /** Centralized error reply: AppError → statusCode + code/message; else 500. */
 function sendErrorReply(
   reply: FastifyReply,
@@ -39,10 +51,12 @@ export async function createIncomingGatePassHandler(
   try {
     const req = request as AuthenticatedRequest;
     const createdById = req.user?.id;
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
 
     const incomingGatePass = await createIncomingGatePass(
       request.body,
       createdById,
+      loggedInUserColdStorageId,
       request.log,
     );
 

@@ -133,11 +133,6 @@ ledgerSchema.index(
   { unique: true },
 );
 
-ledgerSchema.index({ type: 1 });
-ledgerSchema.index({ coldStorageId: 1 });
-ledgerSchema.index({ farmerStorageLinkId: 1 });
-ledgerSchema.index({ createdBy: 1 });
-
 /* =======================
    HOOKS
 ======================= */

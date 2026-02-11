@@ -212,6 +212,12 @@ export const quickRegisterFarmerSchema = z.object({
       .int()
       .positive("Account number must be a positive integer")
       .optional(),
+
+    /** Optional opening balance for the farmer's debtor ledger (when showFinances is enabled). */
+    openingBalance: z.coerce.number().optional(),
+
+    /** Optional cost per bag to store on the farmer-storage-link. */
+    costPerBag: z.coerce.number().positive().optional(),
   }),
 });
 
@@ -287,3 +293,16 @@ export type UpdateFarmerStorageLinkParams = z.infer<
 export type UpdateFarmerStorageLinkInput = z.infer<
   typeof updateFarmerStorageLinkSchema
 >["body"];
+
+/** Query for GET /next-voucher-number: only "incoming" and "outgoing" allowed */
+export const nextVoucherNumberQuerySchema = z.object({
+  querystring: z.object({
+    type: z.enum(["incoming", "outgoing"], {
+      message: "type must be 'incoming' or 'outgoing'",
+    }),
+  }),
+});
+
+export type NextVoucherNumberQuery = z.infer<
+  typeof nextVoucherNumberQuerySchema
+>["querystring"];

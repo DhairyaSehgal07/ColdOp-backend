@@ -40,6 +40,32 @@ export const createIncomingGatePassSchema = z.object({
       .min(1, "At least one bag size is required"),
 
     remarks: z.string().trim().optional(),
+
+    manualParchiNumber: z.string().trim().optional(),
+
+    // Voucher amount when cold storage showFinances is true (ledgers resolved on backend)
+    amount: z.coerce
+      .number()
+      .positive("Amount must be greater than 0")
+      .optional(),
+
+    coldStorageId: z
+      .string()
+      .trim()
+      .refine(
+        (val) => !val || mongoose.Types.ObjectId.isValid(val),
+        "Invalid cold storage ID format",
+      )
+      .optional(),
+
+    createdById: z
+      .string()
+      .trim()
+      .refine(
+        (val) => !val || mongoose.Types.ObjectId.isValid(val),
+        "Invalid createdById format",
+      )
+      .optional(),
   }),
 });
 

@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import {
   createLedgerHandler,
+  createDefaultLedgersHandler,
   getAllLedgersHandler,
   getLedgerByIdHandler,
   updateLedgerHandler,
@@ -73,6 +74,48 @@ export async function ledgerRoutes(fastify: FastifyInstance) {
     createLedgerHandler as never,
   );
 
+  fastify.post(
+    "/default",
+    {
+      schema: {
+        description:
+          "Create default ledgers for the current logged-in cold storage (no farmer link). Idempotent: skips ledgers that already exist.",
+        tags: ["Accounting - Ledgers"],
+        summary: "Create default ledgers",
+        body: {
+          type: "object",
+          additionalProperties: false,
+          maxProperties: 0,
+        },
+        response: {
+          201: {
+            description: "Default ledgers created successfully",
+            type: "object",
+            properties: {
+              success: { type: "boolean", const: true },
+              data: {
+                type: "object",
+                properties: {
+                  ledgers: {
+                    type: "array",
+                    items: { type: "object", additionalProperties: true },
+                  },
+                },
+              },
+              message: { type: "string" },
+            },
+          },
+          400: errorResponseSchema,
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: { max: 10, timeWindow: "1 minute" },
+      },
+    },
+    createDefaultLedgersHandler as never,
+  );
+
   fastify.get(
     "/",
     {
@@ -80,6 +123,51 @@ export async function ledgerRoutes(fastify: FastifyInstance) {
         description: "Get all ledgers for the cold storage",
         tags: ["Accounting - Ledgers"],
         summary: "List ledgers",
+        querystring: {
+          type: "object",
+          properties: {
+            type: {
+              type: "string",
+              enum: ["Asset", "Liability", "Income", "Expense", "Equity"],
+            },
+            search: { type: "string" },
+            farmerStorageLinkId: { type: "string", nullable: true },
+            from: { type: "string", format: "date-time" },
+            to: { type: "string", format: "date-time" },
+          },
+        },
+        response: {
+          200: {
+            description: "List of ledgers with transaction count",
+            type: "object",
+            properties: {
+              success: { type: "boolean", const: true },
+              data: {
+                type: "array",
+                items: { type: "object", additionalProperties: true },
+              },
+            },
+          },
+          400: errorResponseSchema,
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: { max: 60, timeWindow: "1 minute" },
+      },
+    },
+    getAllLedgersHandler as never,
+  );
+
+  // Get all ledgers for the current logged-in store-admin's cold storage (explicit path)
+  fastify.get(
+    "/cold-storage",
+    {
+      schema: {
+        description:
+          "Get all ledgers for the current logged-in store-admin's cold storage",
+        tags: ["Accounting - Ledgers"],
+        summary: "List ledgers for my cold storage",
         querystring: {
           type: "object",
           properties: {

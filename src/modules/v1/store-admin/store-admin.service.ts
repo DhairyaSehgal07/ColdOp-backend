@@ -19,6 +19,8 @@ import type { ResourcePermission } from "../role-permission/role-permission.mode
 import bcrypt from "bcryptjs";
 import { Farmer } from "../farmer/farmer-model.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
+import { Preferences } from "../preferences/preferences.model.js";
+import { createDebtorLedger } from "../../../utils/accounting/helper-fns.js";
 
 /**
  * Get all available resources and actions for Admin permissions
@@ -504,12 +506,15 @@ export async function loginStoreAdmin(
   logger?: FastifyBaseLogger,
 ) {
   try {
-    // Find store admin by mobile number and include password
+    // Find store admin by mobile number and include password; populate coldStorage and its preferences
     const storeAdmin = await StoreAdmin.findOne({
       mobileNumber: payload.mobileNumber,
     })
       .select("+password")
-      .populate("coldStorageId")
+      .populate({
+        path: "coldStorageId",
+        populate: { path: "preferencesId" },
+      })
       .lean();
 
     if (!storeAdmin) {
@@ -763,13 +768,16 @@ export async function quickRegisterFarmer(
       "Farmer created successfully",
     );
 
-    // Create farmer-storage-link
+    // Create farmer-storage-link (include costPerBag if received in payload)
     const farmerStorageLink = await FarmerStorageLink.create({
       farmerId: farmer._id,
       coldStorageId: payload.coldStorageId,
       linkedById: payload.linkedById,
       accountNumber,
       isActive: true,
+      ...(payload.costPerBag !== undefined && {
+        costPerBag: payload.costPerBag,
+      }),
     });
 
     logger?.info(
@@ -781,6 +789,20 @@ export async function quickRegisterFarmer(
       },
       "Farmer-storage-link created successfully",
     );
+
+    // Create debtor ledger for farmer when cold storage has showFinances enabled
+    const preferences = coldStorage.preferencesId
+      ? await Preferences.findById(coldStorage.preferencesId).lean()
+      : null;
+    if (preferences?.showFinances) {
+      await createDebtorLedger({
+        farmerStorageLinkId: farmerStorageLink._id,
+        coldStorageId: coldStorage._id,
+        name: farmer.name,
+        openingBalance: payload.openingBalance ?? 0,
+        createdBy: new mongoose.Types.ObjectId(payload.linkedById),
+      });
+    }
 
     // Return farmer without password and the link
     const { password: _, ...farmerWithoutPassword } = farmer.toObject();
@@ -1080,20 +1102,15 @@ export async function updateFarmerStorageLink(
   }
 }
 
-/** Voucher types supported by getNextVoucherNumber */
-export const VOUCHER_TYPES = [
-  "incoming-gate-pass",
-  "grading-gate-pass",
-  "storage-gate-pass",
-  "nikasi-gate-pass",
-  "outgoing-gate-pass",
-] as const;
+/** Voucher types supported by getNextVoucherNumber: incoming and outgoing only */
+export const VOUCHER_TYPES = ["incoming", "outgoing"] as const;
 
 export type VoucherType = (typeof VOUCHER_TYPES)[number];
 
 /**
  * Get the next voucher (gate pass) number for the given cold storage and voucher type.
- * Scopes the max gatePassNo to documents that belong to this cold storage via the link chain.
+ * Only "incoming" (IncomingGatePass) and "outgoing" (OutgoingGatePass) are supported.
+ * Scopes by farmerStorageLinkIds for this cold storage.
  */
 export async function getNextVoucherNumber(
   coldStorageId: string,
@@ -1102,14 +1119,13 @@ export async function getNextVoucherNumber(
 ): Promise<number> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
 
-  // Farmer storage link IDs for this cold storage (used for incoming → grading chain)
   const farmerStorageLinkIds = await FarmerStorageLink.find({
     coldStorageId: coldStorageObjectId,
   })
     .distinct("_id")
     .lean();
 
-  if (type === "incoming-gate-pass") {
+  if (type === "incoming") {
     const IncomingGatePassModel = mongoose.model("IncomingGatePass");
     const last = await IncomingGatePassModel.findOne({
       farmerStorageLinkId: { $in: farmerStorageLinkIds },
@@ -1123,78 +1139,10 @@ export async function getNextVoucherNumber(
     return next;
   }
 
-  if (type === "grading-gate-pass") {
-    const IncomingGatePassModel = mongoose.model("IncomingGatePass");
-    const GradingGatePassModel = mongoose.model("GradingGatePass");
-    const incomingIds = await IncomingGatePassModel.find({
-      farmerStorageLinkId: { $in: farmerStorageLinkIds },
-    })
-      .distinct("_id")
-      .lean();
-    const last = await GradingGatePassModel.findOne({
-      incomingGatePassId: { $in: incomingIds },
-    })
-      .sort({ gatePassNo: -1 })
-      .select("gatePassNo")
-      .lean();
-    const next =
-      ((last as { gatePassNo?: number } | null)?.gatePassNo ?? 0) + 1;
-    logger?.debug({ coldStorageId, type, next }, "Next voucher number");
-    return next;
-  }
-
-  // For storage, nikasi, outgoing we need grading gate pass IDs belonging to this cold storage
-  const IncomingGatePassModel = mongoose.model("IncomingGatePass");
-  const GradingGatePassModel = mongoose.model("GradingGatePass");
-  const incomingIdsForGrading = await IncomingGatePassModel.find({
-    farmerStorageLinkId: { $in: farmerStorageLinkIds },
-  })
-    .distinct("_id")
-    .lean();
-  const gradingGatePassIds = await GradingGatePassModel.find({
-    incomingGatePassId: { $in: incomingIdsForGrading },
-  })
-    .distinct("_id")
-    .lean();
-
-  if (type === "storage-gate-pass") {
-    const StorageGatePassModel = mongoose.model("StorageGatePass");
-    const last = await StorageGatePassModel.findOne({
-      gradingGatePassIds: { $in: gradingGatePassIds },
-    })
-      .sort({ gatePassNo: -1 })
-      .select("gatePassNo")
-      .lean();
-    const next =
-      ((last as { gatePassNo?: number } | null)?.gatePassNo ?? 0) + 1;
-    logger?.debug({ coldStorageId, type, next }, "Next voucher number");
-    return next;
-  }
-
-  if (type === "nikasi-gate-pass") {
-    const NikasiGatePassModel = mongoose.model("NikasiGatePass");
-    const last = await NikasiGatePassModel.findOne({
-      gradingGatePassIds: { $in: gradingGatePassIds },
-    })
-      .sort({ gatePassNo: -1 })
-      .select("gatePassNo")
-      .lean();
-    const next =
-      ((last as { gatePassNo?: number } | null)?.gatePassNo ?? 0) + 1;
-    logger?.debug({ coldStorageId, type, next }, "Next voucher number");
-    return next;
-  }
-
-  if (type === "outgoing-gate-pass") {
-    const StorageGatePassModel = mongoose.model("StorageGatePass");
+  if (type === "outgoing") {
     const OutgoingGatePassModel = mongoose.model("OutgoingGatePass");
-    const storageGatePassIds = await StorageGatePassModel.find({
-      gradingGatePassIds: { $in: gradingGatePassIds },
-    })
-      .distinct("_id")
-      .lean();
     const last = await OutgoingGatePassModel.findOne({
-      storageGatePassIds: { $in: storageGatePassIds },
+      farmerStorageLinkId: { $in: farmerStorageLinkIds },
     })
       .sort({ gatePassNo: -1 })
       .select("gatePassNo")

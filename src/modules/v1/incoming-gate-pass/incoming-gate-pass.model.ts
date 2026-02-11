@@ -37,7 +37,10 @@ export interface IIncomingGatePass {
   farmerStorageLinkId: Types.ObjectId;
   createdBy?: Types.ObjectId;
 
-  gatePassNo: number;
+  gatePassNo: {
+    type: number;
+    required: true;
+  };
   date: Date;
 
   type: GatePassType;
@@ -50,6 +53,8 @@ export interface IIncomingGatePass {
   status: GatePassStatus;
 
   remarks?: string;
+
+  manualParchiNumber?: string;
 
   createdAt: Date;
   updatedAt: Date;
@@ -171,6 +176,12 @@ const IncomingGatePassSchema = new Schema<IIncomingGatePass>(
 
     remarks: {
       type: String,
+      trim: true,
+    },
+
+    manualParchiNumber: {
+      type: String,
+      required: false,
       trim: true,
     },
   },
