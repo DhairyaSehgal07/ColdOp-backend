@@ -37,10 +37,7 @@ export interface IIncomingGatePass {
   farmerStorageLinkId: Types.ObjectId;
   createdBy?: Types.ObjectId;
 
-  gatePassNo: {
-    type: number;
-    required: true;
-  };
+  gatePassNo: number;
   date: Date;
 
   type: GatePassType;
@@ -55,6 +52,9 @@ export interface IIncomingGatePass {
   remarks?: string;
 
   manualParchiNumber?: string;
+
+  /** Reference to the rent entry voucher created when showFinances is enabled */
+  rentEntryVoucherId?: Types.ObjectId;
 
   createdAt: Date;
   updatedAt: Date;
@@ -183,6 +183,13 @@ const IncomingGatePassSchema = new Schema<IIncomingGatePass>(
       type: String,
       required: false,
       trim: true,
+    },
+
+    rentEntryVoucherId: {
+      type: Schema.Types.ObjectId,
+      ref: "Voucher",
+      required: false,
+      index: true,
     },
   },
   {

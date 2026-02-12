@@ -10,6 +10,7 @@ import { preferencesRoutes } from "./modules/v1/preferences/preferences.routes";
 import { storeAdminRoutes } from "./modules/v1/store-admin/store-admin.routes";
 import { incomingGatePassRoutes } from "./modules/v1/incoming-gate-pass/incoming-gate-pass.routes";
 import { outgoingGatePassRoutes } from "./modules/v1/outgoing-gate-pass/outgoing-gate-pass.routes";
+import { editHistoryRoutes } from "./modules/v1/edit-history/edit-history.routes";
 import { ledgerRoutes } from "./modules/v1/ledger/ledger.routes";
 import { voucherRoutes } from "./modules/v1/voucher/voucher.routes";
 config();
@@ -85,6 +86,10 @@ export const buildApp = async (): Promise<FastifyInstance> => {
 
   await fastify.register(outgoingGatePassRoutes, {
     prefix: "/api/v1/outgoing-gate-pass",
+  });
+
+  await fastify.register(editHistoryRoutes, {
+    prefix: "/api/v1/edit-history",
   });
 
   await fastify.register(ledgerRoutes, {

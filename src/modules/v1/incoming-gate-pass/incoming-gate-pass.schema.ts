@@ -70,3 +70,52 @@ export const createIncomingGatePassSchema = z.object({
 export type CreateIncomingGatePassInput = z.infer<
   typeof createIncomingGatePassSchema
 >["body"];
+
+/** Update payload: all fields optional; at least one required. Quantities update both initial and current. */
+export const updateIncomingGatePassSchema = z.object({
+  params: z.object({
+    id: z
+      .string()
+      .trim()
+      .min(1, "Incoming gate pass ID is required")
+      .refine(
+        (val) => mongoose.Types.ObjectId.isValid(val),
+        "Invalid incoming gate pass ID format",
+      ),
+  }),
+  body: z
+    .object({
+      date: z.coerce.date().optional(),
+      variety: z.string().trim().min(1, "Variety cannot be empty").optional(),
+      truckNumber: z.string().trim().optional(),
+      remarks: z.string().trim().optional(),
+      manualParchiNumber: z.string().trim().optional(),
+      bagSizes: z
+        .array(bagSizeSchema)
+        .min(1, "At least one bag size is required")
+        .optional(),
+      /** Rent entry voucher amount (when gate pass has an associated rent voucher). */
+      amount: z.coerce
+        .number()
+        .positive("Amount must be greater than 0")
+        .optional(),
+    })
+    .refine(
+      (data) =>
+        data.date !== undefined ||
+        data.variety !== undefined ||
+        data.truckNumber !== undefined ||
+        data.remarks !== undefined ||
+        data.manualParchiNumber !== undefined ||
+        data.bagSizes !== undefined ||
+        data.amount !== undefined,
+      "At least one field must be provided for update",
+    ),
+});
+
+export type UpdateIncomingGatePassParams = z.infer<
+  typeof updateIncomingGatePassSchema
+>["params"];
+export type UpdateIncomingGatePassBody = z.infer<
+  typeof updateIncomingGatePassSchema
+>["body"];

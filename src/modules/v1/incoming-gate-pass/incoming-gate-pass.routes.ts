@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import {
   createIncomingGatePassHandler,
   getIncomingGatePassesByFarmerStorageLinkIdHandler,
+  updateIncomingGatePassHandler,
 } from "./incoming-gate-pass.controller.js";
 import { createIncomingGatePassSchema } from "./incoming-gate-pass.schema.js";
 import { authenticate } from "../../../utils/auth.js";
@@ -156,5 +157,139 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
       },
     },
     createIncomingGatePassHandler as never,
+  );
+
+  // Update (edit) incoming gate pass by ID
+  fastify.patch(
+    "/:id",
+    {
+      schema: {
+        description:
+          "Update an existing incoming gate pass by ID. When updating bagSizes, both initial and current quantities are updated. An edit-history entry is created.",
+        tags: ["Incoming Gate Pass"],
+        summary: "Edit incoming gate pass",
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: {
+            id: { type: "string", description: "Incoming gate pass ID" },
+          },
+        },
+        body: {
+          type: "object",
+          minProperties: 1,
+          properties: {
+            date: { type: "string", format: "date-time" },
+            variety: { type: "string" },
+            truckNumber: { type: "string" },
+            remarks: { type: "string" },
+            manualParchiNumber: { type: "string" },
+            amount: {
+              type: "number",
+              minimum: 0.01,
+              description:
+                "Rent entry voucher amount (only when gate pass has an associated rent voucher)",
+            },
+            bagSizes: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                required: [
+                  "name",
+                  "initialQuantity",
+                  "currentQuantity",
+                  "location",
+                ],
+                properties: {
+                  name: { type: "string" },
+                  initialQuantity: { type: "number", minimum: 0 },
+                  currentQuantity: { type: "number", minimum: 0 },
+                  location: {
+                    type: "object",
+                    required: ["chamber", "floor", "row"],
+                    properties: {
+                      chamber: { type: "string" },
+                      floor: { type: "string" },
+                      row: { type: "string" },
+                    },
+                  },
+                  paltaiLocation: {
+                    type: "object",
+                    properties: {
+                      chamber: { type: "string" },
+                      floor: { type: "string" },
+                      row: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        response: {
+          200: {
+            description: "Incoming gate pass updated successfully",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: { type: "object", additionalProperties: true },
+              message: { type: "string" },
+            },
+          },
+          400: {
+            description:
+              "Bad request - invalid ID, closed gate pass, or validation error",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          404: {
+            description: "Incoming gate pass not found",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          409: {
+            description: "Conflict",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    updateIncomingGatePassHandler as never,
   );
 }

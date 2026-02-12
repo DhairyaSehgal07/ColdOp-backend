@@ -1270,7 +1270,7 @@ export async function getDaybookOrders(
   const incomingSelect =
     "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber createdAt";
   const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks createdAt";
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks incomingGatePassSnapshots createdAt";
 
   const populateLink = [
     {
@@ -1309,24 +1309,24 @@ export async function getDaybookOrders(
         IncomingGatePass.find({
           farmerStorageLinkId: { $in: farmerStorageLinkIds },
         })
-          .sort({ gatePassNo: sortOrder })
+          .sort({ createdAt: sortOrder })
           .select(incomingSelect)
           .populate(populateLink),
         OutgoingGatePass.find({
           farmerStorageLinkId: { $in: farmerStorageLinkIds },
         })
-          .sort({ gatePassNo: sortOrder })
+          .sort({ createdAt: sortOrder })
           .select(outgoingSelect)
           .populate(populateLink),
       ]);
 
       const allOrders = [...allIncoming, ...allOutgoing] as Array<{
-        gatePassNo: number;
+        createdAt: Date | string;
       }>;
       allOrders.sort((a, b) => {
-        const gA = a.gatePassNo;
-        const gB = b.gatePassNo;
-        return sortOrder === -1 ? gB - gA : gA - gB;
+        const tA = new Date(a.createdAt).getTime();
+        const tB = new Date(b.createdAt).getTime();
+        return sortOrder === -1 ? tB - tA : tA - tB;
       });
 
       const paginated = allOrders.slice(skip, skip + limit);
@@ -1363,7 +1363,7 @@ export async function getDaybookOrders(
       const incomingOrders = await IncomingGatePass.find({
         farmerStorageLinkId: { $in: farmerStorageLinkIds },
       })
-        .sort({ gatePassNo: sortOrder })
+        .sort({ createdAt: sortOrder })
         .skip(skip)
         .limit(limit)
         .select(incomingSelect)
@@ -1395,7 +1395,7 @@ export async function getDaybookOrders(
       const outgoingOrders = await OutgoingGatePass.find({
         farmerStorageLinkId: { $in: farmerStorageLinkIds },
       })
-        .sort({ gatePassNo: sortOrder })
+        .sort({ createdAt: sortOrder })
         .skip(skip)
         .limit(limit)
         .select(outgoingSelect)
@@ -1440,7 +1440,10 @@ export async function searchOrdersByReceiptNumber(
   logger?: FastifyBaseLogger,
 ): Promise<SearchOrdersByReceiptNumberResult> {
   if (!receiptNumber?.trim()) {
-    throw new ValidationError("Receipt number is required", "MISSING_RECEIPT_NUMBER");
+    throw new ValidationError(
+      "Receipt number is required",
+      "MISSING_RECEIPT_NUMBER",
+    );
   }
 
   if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
@@ -1459,7 +1462,10 @@ export async function searchOrdersByReceiptNumber(
     .then((links) => links.map((l) => l._id));
 
   if (farmerStorageLinkIds.length === 0) {
-    logger?.info({ coldStorageId }, "Search by receipt: no farmer-storage links");
+    logger?.info(
+      { coldStorageId },
+      "Search by receipt: no farmer-storage links",
+    );
     return {
       status: "Fail",
       message: "No orders found with this receipt number",
@@ -1488,7 +1494,7 @@ export async function searchOrdersByReceiptNumber(
   const incomingSelect =
     "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber createdAt";
   const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks createdAt";
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks incomingGatePassSnapshots createdAt";
   const populateLink = [
     {
       path: "farmerStorageLinkId",

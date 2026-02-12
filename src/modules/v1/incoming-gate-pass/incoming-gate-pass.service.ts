@@ -1,8 +1,12 @@
 import {
   IncomingGatePass,
   GatePassType,
+  GatePassStatus,
 } from "./incoming-gate-pass.model.js";
-import { CreateIncomingGatePassInput } from "./incoming-gate-pass.schema.js";
+import {
+  CreateIncomingGatePassInput,
+  UpdateIncomingGatePassBody,
+} from "./incoming-gate-pass.schema.js";
 import {
   NotFoundError,
   ValidationError,
@@ -124,6 +128,12 @@ import {
   type CreateVoucherParams,
 } from "../../../utils/accounting/helper-fns.js";
 import { getNextJournalVoucherNumber } from "../../../utils/accounting/generate-voucher-number.js";
+import {
+  recordEditHistory,
+  EditHistoryEntityType,
+  EditHistoryAction,
+} from "../edit-history/edit-history.service.js";
+import Voucher from "../voucher/voucher.model.js";
 
 /**
  * Creates a new incoming gate pass.
@@ -301,7 +311,10 @@ export async function createIncomingGatePass(
           createdBy: createdByObjId,
           date: payload.date,
         };
-        await createVoucher(voucherParams);
+        const voucher = await createVoucher(voucherParams);
+        await IncomingGatePass.findByIdAndUpdate(doc._id, {
+          rentEntryVoucherId: voucher._id,
+        });
       }
     }
 
@@ -385,5 +398,320 @@ export async function createIncomingGatePass(
       500,
       "CREATE_INCOMING_GATE_PASS_ERROR",
     );
+  }
+}
+
+/** Sanitize a lean document for edit-history snapshot (serializable, no __v). */
+function sanitizeForSnapshot(
+  doc: Record<string, unknown> | null,
+): Record<string, unknown> | undefined {
+  if (!doc) return undefined;
+  const out = { ...doc };
+  delete out.__v;
+  if (out._id && typeof out._id === "object" && "toString" in out._id) {
+    out._id = (out._id as { toString(): string }).toString();
+  }
+  if (Array.isArray(out.bagSizes)) {
+    out.bagSizes = out.bagSizes.map((b: unknown) => {
+      const item = b as Record<string, unknown>;
+      const copy = { ...item };
+      if (copy.location && typeof copy.location === "object") {
+        copy.location = { ...(copy.location as Record<string, unknown>) };
+      }
+      if (copy.paltaiLocation && typeof copy.paltaiLocation === "object") {
+        copy.paltaiLocation = {
+          ...(copy.paltaiLocation as Record<string, unknown>),
+        };
+      }
+      return copy;
+    });
+  }
+  return out;
+}
+
+/**
+ * Updates an existing incoming gate pass.
+ * Only OPEN gate passes can be edited. Updates both initial and current quantities when bagSizes are provided.
+ * Uses a MongoDB transaction so the document update and edit-history entry succeed or roll back together.
+ *
+ * @param id - Incoming gate pass document _id
+ * @param payload - Fields to update (date, variety, truckNumber, remarks, manualParchiNumber, bagSizes)
+ * @param editedById - Store admin ID performing the edit (for edit history)
+ * @param loggedInUserColdStorageId - Cold storage ID of the logged-in user (for auth scope)
+ * @param logger - Optional logger instance
+ * @returns Updated incoming gate pass document (populated)
+ * @throws ValidationError if id invalid, no fields to update, or gate pass is closed
+ * @throws NotFoundError if gate pass not found or not in user's cold storage
+ */
+export async function updateIncomingGatePass(
+  id: string,
+  payload: UpdateIncomingGatePassBody,
+  editedById: string | undefined,
+  loggedInUserColdStorageId: string | undefined,
+  logger?: FastifyBaseLogger,
+) {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ValidationError(
+      "Invalid incoming gate pass ID format",
+      "INVALID_INCOMING_GATE_PASS_ID",
+    );
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const idObj = new mongoose.Types.ObjectId(id);
+    const existing = await IncomingGatePass.findById(idObj)
+      .session(session)
+      .lean();
+
+    if (!existing) {
+      logger?.warn({ id }, "Incoming gate pass not found for update");
+      throw new NotFoundError(
+        "Incoming gate pass not found",
+        "INCOMING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const linkId =
+      typeof existing.farmerStorageLinkId === "object" &&
+      existing.farmerStorageLinkId !== null &&
+      "_id" in existing.farmerStorageLinkId
+        ? (existing.farmerStorageLinkId as { _id: mongoose.Types.ObjectId })._id
+        : existing.farmerStorageLinkId;
+    const linkIdObj =
+      typeof linkId === "object" ? linkId : new mongoose.Types.ObjectId(linkId);
+    const storageLink = await FarmerStorageLink.findById(linkIdObj)
+      .session(session)
+      .lean();
+
+    if (!storageLink) {
+      throw new NotFoundError(
+        "Incoming gate pass not found",
+        "INCOMING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const linkColdStorageId =
+      typeof storageLink.coldStorageId === "object" &&
+      storageLink.coldStorageId !== null
+        ? (
+            storageLink.coldStorageId as { _id: mongoose.Types.ObjectId }
+          )._id.toString()
+        : (storageLink.coldStorageId as string);
+
+    if (
+      loggedInUserColdStorageId &&
+      linkColdStorageId !== loggedInUserColdStorageId
+    ) {
+      logger?.warn(
+        { id, linkColdStorageId, loggedInUserColdStorageId },
+        "Incoming gate pass does not belong to user's cold storage",
+      );
+      throw new NotFoundError(
+        "Incoming gate pass not found",
+        "INCOMING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const status = (existing as { status?: string }).status;
+    if (status === GatePassStatus.CLOSED) {
+      throw new ValidationError(
+        "Cannot edit a closed gate pass",
+        "GATE_PASS_CLOSED",
+      );
+    }
+
+    const rentEntryVoucherId = (
+      existing as { rentEntryVoucherId?: mongoose.Types.ObjectId }
+    ).rentEntryVoucherId;
+
+    const updateFields: Record<string, unknown> = {};
+    if (payload.date !== undefined) updateFields.date = payload.date;
+    if (payload.variety !== undefined) updateFields.variety = payload.variety;
+    if (payload.truckNumber !== undefined)
+      updateFields.truckNumber = payload.truckNumber;
+    if (payload.remarks !== undefined) updateFields.remarks = payload.remarks;
+    if (payload.manualParchiNumber !== undefined)
+      updateFields.manualParchiNumber = payload.manualParchiNumber;
+    if (payload.bagSizes !== undefined) {
+      updateFields.bagSizes = payload.bagSizes.map((b) => ({
+        name: b.name,
+        initialQuantity: b.initialQuantity,
+        currentQuantity: b.currentQuantity,
+        location: b.location,
+        ...(b.paltaiLocation && { paltaiLocation: b.paltaiLocation }),
+      }));
+    }
+
+    const hasRentAmountUpdate =
+      payload.amount !== undefined &&
+      payload.amount > 0 &&
+      rentEntryVoucherId != null;
+
+    if (payload.amount !== undefined && payload.amount <= 0) {
+      throw new ValidationError(
+        "Rent entry amount must be greater than 0",
+        "INVALID_AMOUNT",
+      );
+    }
+    if (payload.amount !== undefined && rentEntryVoucherId == null) {
+      throw new ValidationError(
+        "This gate pass has no rent entry voucher; amount cannot be updated",
+        "NO_RENT_ENTRY_VOUCHER",
+      );
+    }
+    if (hasRentAmountUpdate) {
+      const voucherUpdate: Record<string, unknown> = {
+        amount: payload.amount,
+      };
+      if (editedById) {
+        voucherUpdate.updatedBy = new mongoose.Types.ObjectId(editedById);
+      }
+      await Voucher.findByIdAndUpdate(
+        rentEntryVoucherId,
+        { $set: voucherUpdate },
+        { session },
+      );
+    }
+
+    if (Object.keys(updateFields).length === 0 && !hasRentAmountUpdate) {
+      throw new ValidationError(
+        "No valid fields to update",
+        "NO_UPDATE_FIELDS",
+      );
+    }
+
+    const snapshotBefore = sanitizeForSnapshot(
+      existing as unknown as Record<string, unknown>,
+    );
+
+    const updated = await IncomingGatePass.findByIdAndUpdate(
+      idObj,
+      { $set: updateFields },
+      { new: true, session, runValidators: true, lean: true },
+    );
+
+    if (!updated) {
+      throw new NotFoundError(
+        "Incoming gate pass not found",
+        "INCOMING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const snapshotAfter = sanitizeForSnapshot(
+      updated as unknown as Record<string, unknown>,
+    );
+
+    const changeParts: string[] = [];
+    if (payload.date !== undefined) changeParts.push("date");
+    if (payload.variety !== undefined) changeParts.push("variety");
+    if (payload.truckNumber !== undefined) changeParts.push("truck number");
+    if (payload.remarks !== undefined) changeParts.push("remarks");
+    if (payload.manualParchiNumber !== undefined)
+      changeParts.push("manual parchi number");
+    if (payload.bagSizes !== undefined)
+      changeParts.push("quantities (initial & current)");
+    if (hasRentAmountUpdate) changeParts.push("rent entry amount");
+    const changeSummary = `Incoming gate pass updated: ${changeParts.join(", ")}`;
+
+    await recordEditHistory({
+      entityType: EditHistoryEntityType.INCOMING_GATE_PASS,
+      documentId: idObj,
+      coldStorageId: new mongoose.Types.ObjectId(linkColdStorageId),
+      editedById,
+      action: EditHistoryAction.UPDATE,
+      changeSummary,
+      snapshotBefore,
+      snapshotAfter,
+      session,
+      logger,
+    });
+
+    await session.commitTransaction();
+
+    logger?.info(
+      { incomingGatePassId: id, updatedFields: Object.keys(updateFields) },
+      "Incoming gate pass updated successfully",
+    );
+
+    const populated = await IncomingGatePass.findById(idObj)
+      .populate({
+        path: "farmerStorageLinkId",
+        select: "accountNumber farmerId",
+        populate: {
+          path: "farmerId",
+          select: "name address mobileNumber",
+        },
+      })
+      .populate({ path: "createdBy", select: "name" })
+      .lean();
+
+    if (!populated) {
+      return updated as unknown as Record<string, unknown>;
+    }
+
+    const raw = populated as unknown as Record<string, unknown>;
+    type PopulatedLink = {
+      accountNumber: number;
+      farmerId: { name: string; address: string; mobileNumber: string };
+    };
+    type PopulatedAdmin = { _id: unknown; name: string };
+    const populatedLink = raw.farmerStorageLinkId as
+      | PopulatedLink
+      | null
+      | undefined;
+    const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+
+    return {
+      ...raw,
+      farmerStorageLinkId:
+        populatedLink && populatedLink.farmerId
+          ? {
+              name: populatedLink.farmerId.name,
+              accountNumber: populatedLink.accountNumber,
+              address: populatedLink.farmerId.address,
+              mobileNumber: populatedLink.farmerId.mobileNumber,
+            }
+          : raw.farmerStorageLinkId,
+      createdBy: populatedAdmin
+        ? { _id: populatedAdmin._id, name: populatedAdmin.name }
+        : raw.createdBy,
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ValidationError ||
+      error instanceof ConflictError
+    ) {
+      throw error;
+    }
+    if (error instanceof mongoose.Error.ValidationError) {
+      const messages = Object.values(error.errors).map((err) => err.message);
+      throw new ValidationError(
+        messages.join(", "),
+        "MONGOOSE_VALIDATION_ERROR",
+      );
+    }
+    if (error instanceof Error && "code" in error && error.code === 11000) {
+      const mongooseError = error as Error & {
+        keyPattern?: Record<string, unknown>;
+      };
+      const field = Object.keys(mongooseError.keyPattern || {})[0] || "field";
+      throw new ConflictError(`${field} already exists`, "DUPLICATE_KEY_ERROR");
+    }
+    logger?.error(
+      { error, id, payload },
+      "Unexpected error updating incoming gate pass",
+    );
+    throw new AppError(
+      "Failed to update incoming gate pass",
+      500,
+      "UPDATE_INCOMING_GATE_PASS_ERROR",
+    );
+  } finally {
+    await session.endSession();
   }
 }

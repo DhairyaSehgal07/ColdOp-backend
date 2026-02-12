@@ -17,6 +17,12 @@ import type {
   IIncomingGatePass,
   IBagSize,
 } from "../incoming-gate-pass/incoming-gate-pass.model.js";
+import {
+  recordEditHistory,
+  recordEditHistoryBulk,
+  EditHistoryEntityType,
+  EditHistoryAction,
+} from "../edit-history/edit-history.service.js";
 
 /* =======================
    TYPES (internal)
@@ -544,6 +550,24 @@ export async function createOutgoingGatePass(
       );
     }
 
+    // Record edit history for each modified incoming gate pass (who edited, when)
+    const uniqueIncomingIds = [
+      ...new Set(validated.map((v) => v.incomingGatePassId)),
+    ];
+    await recordEditHistoryBulk(
+      uniqueIncomingIds.map((id) => ({
+        entityType: EditHistoryEntityType.INCOMING_GATE_PASS,
+        documentId: new Types.ObjectId(id),
+        coldStorageId,
+        editedById: createdById,
+        action: EditHistoryAction.QUANTITY_ADJUSTMENT,
+        changeSummary: `Quantities reduced by outgoing gate pass #${payload.gatePassNo}`,
+        logger,
+      })),
+      session,
+      logger,
+    );
+
     const incomingGatePassSnapshots = buildIncomingGatePassSnapshots(
       validated,
       incomingPassMap,
@@ -583,6 +607,17 @@ export async function createOutgoingGatePass(
       },
       "Outgoing gate pass created successfully",
     );
+
+    // Record edit history for outgoing gate pass (who created, when)
+    await recordEditHistory({
+      entityType: EditHistoryEntityType.OUTGOING_GATE_PASS,
+      documentId: doc._id,
+      coldStorageId,
+      editedById: createdById,
+      action: EditHistoryAction.CREATE,
+      changeSummary: `Outgoing gate pass #${doc.gatePassNo} created`,
+      logger,
+    });
 
     const populated = await OutgoingGatePass.findById(doc._id)
       .populate({
