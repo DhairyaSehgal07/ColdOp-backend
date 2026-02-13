@@ -12,10 +12,7 @@ import type {
   UpdateVoucherInput,
   ListVouchersQuery,
 } from "./voucher.schema.js";
-import {
-  NotFoundError,
-  BadRequestError,
-} from "../../../utils/errors.js";
+import { NotFoundError, BadRequestError } from "../../../utils/errors.js";
 import { VoucherType } from "./voucher.model.js";
 
 type QueryFilter = Record<string, unknown>;
@@ -49,7 +46,10 @@ export async function createVoucher(
   ]);
 
   if (!debitLedger || !creditLedger) {
-    logger?.warn({ debitLedgerId, creditLedgerId, coldStorageId }, "Ledger not found");
+    logger?.warn(
+      { debitLedgerId, creditLedgerId, coldStorageId },
+      "Ledger not found",
+    );
     throw new NotFoundError("One or both ledgers not found");
   }
 
@@ -113,7 +113,10 @@ export async function createVoucher(
       { voucherId: created._id, voucherNumber, coldStorageId },
       "Voucher created",
     );
-    return (populated ?? created.toObject()) as unknown as Record<string, unknown>;
+    return (populated ?? created.toObject()) as unknown as Record<
+      string,
+      unknown
+    >;
   } catch (error) {
     await session.abortTransaction();
     throw error;
@@ -276,7 +279,8 @@ export async function updateVoucher(
     if (payload.creditLedger !== undefined)
       updateData.creditLedger = toObjectId(payload.creditLedger);
     if (payload.amount !== undefined) updateData.amount = payload.amount;
-    if (payload.narration !== undefined) updateData.narration = payload.narration;
+    if (payload.narration !== undefined)
+      updateData.narration = payload.narration;
 
     const updated = await Voucher.findByIdAndUpdate(
       voucherId,
@@ -289,7 +293,10 @@ export async function updateVoucher(
 
     await session.commitTransaction();
     logger?.info({ voucherId, coldStorageId }, "Voucher updated");
-    return (updated ?? oldVoucher.toObject()) as unknown as Record<string, unknown>;
+    return (updated ?? oldVoucher.toObject()) as unknown as Record<
+      string,
+      unknown
+    >;
   } catch (error) {
     await session.abortTransaction();
     throw error;

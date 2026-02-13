@@ -1,9 +1,6 @@
 import mongoose, { ClientSession, Types } from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
-import {
-  OutgoingGatePass,
-  GatePassType,
-} from "./outgoing-gate-pass.model.js";
+import { OutgoingGatePass, GatePassType } from "./outgoing-gate-pass.model.js";
 import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import type { CreateOutgoingGatePassInput } from "./outgoing-gate-pass.schema.js";
 import {

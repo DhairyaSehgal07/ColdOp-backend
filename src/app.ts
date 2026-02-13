@@ -5,14 +5,14 @@ import cookie from "@fastify/cookie";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { config } from "dotenv";
-import { coldStorageRoutes } from "./modules/v1/cold-storage/cold-storage.routes";
-import { preferencesRoutes } from "./modules/v1/preferences/preferences.routes";
-import { storeAdminRoutes } from "./modules/v1/store-admin/store-admin.routes";
-import { incomingGatePassRoutes } from "./modules/v1/incoming-gate-pass/incoming-gate-pass.routes";
-import { outgoingGatePassRoutes } from "./modules/v1/outgoing-gate-pass/outgoing-gate-pass.routes";
-import { editHistoryRoutes } from "./modules/v1/edit-history/edit-history.routes";
-import { ledgerRoutes } from "./modules/v1/ledger/ledger.routes";
-import { voucherRoutes } from "./modules/v1/voucher/voucher.routes";
+import { coldStorageRoutes } from "./modules/v1/cold-storage/cold-storage.routes.js";
+import { preferencesRoutes } from "./modules/v1/preferences/preferences.routes.js";
+import { storeAdminRoutes } from "./modules/v1/store-admin/store-admin.routes.js";
+import { incomingGatePassRoutes } from "./modules/v1/incoming-gate-pass/incoming-gate-pass.routes.js";
+import { outgoingGatePassRoutes } from "./modules/v1/outgoing-gate-pass/outgoing-gate-pass.routes.js";
+import { editHistoryRoutes } from "./modules/v1/edit-history/edit-history.routes.js";
+import { ledgerRoutes } from "./modules/v1/ledger/ledger.routes.js";
+import { voucherRoutes } from "./modules/v1/voucher/voucher.routes.js";
 config();
 
 export const buildApp = async (): Promise<FastifyInstance> => {

@@ -599,7 +599,10 @@ export async function searchOrderByReceiptNumberHandler(
       });
     }
 
-    request.log.info({ receiptNumber, coldStorageId }, "Searching for order with receipt number");
+    request.log.info(
+      { receiptNumber, coldStorageId },
+      "Searching for order with receipt number",
+    );
 
     const result = await searchOrdersByReceiptNumber(
       coldStorageId,

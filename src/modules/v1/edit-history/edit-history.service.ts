@@ -20,19 +20,37 @@ export interface RecordEditHistoryParams {
   logger?: FastifyBaseLogger;
 }
 
-function toObjectIdString(id: string | { _id: string } | undefined): string | undefined {
+function toObjectIdString(
+  id: string | { _id: string } | undefined,
+): string | undefined {
   if (id == null) return undefined;
   const raw = typeof id === "string" ? id.trim() : id._id?.trim();
   return raw || undefined;
 }
 
 /** Record one edit history entry (who edited, when). Call when a gate pass is created/updated. */
-export async function recordEditHistory(params: RecordEditHistoryParams): Promise<void> {
-  const { entityType, documentId, coldStorageId, editedById, action, changeSummary, snapshotBefore, snapshotAfter, session, logger } = params;
+export async function recordEditHistory(
+  params: RecordEditHistoryParams,
+): Promise<void> {
+  const {
+    entityType,
+    documentId,
+    coldStorageId,
+    editedById,
+    action,
+    changeSummary,
+    snapshotBefore,
+    snapshotAfter,
+    session,
+    logger,
+  } = params;
 
   const editedByStr = toObjectIdString(editedById);
   if (!editedByStr || !mongoose.Types.ObjectId.isValid(editedByStr)) {
-    logger?.debug({ entityType, documentId: documentId.toString(), action }, "Skipping edit history: no valid editedBy user id");
+    logger?.debug(
+      { entityType, documentId: documentId.toString(), action },
+      "Skipping edit history: no valid editedBy user id",
+    );
     return;
   }
 
@@ -54,7 +72,10 @@ export async function recordEditHistory(params: RecordEditHistoryParams): Promis
       session ? { session } : {},
     );
   } catch (err) {
-    logger?.warn({ err, entityType, documentId: documentId.toString(), action }, "Failed to record edit history (non-fatal)");
+    logger?.warn(
+      { err, entityType, documentId: documentId.toString(), action },
+      "Failed to record edit history (non-fatal)",
+    );
   }
 }
 
@@ -89,8 +110,14 @@ export async function recordEditHistoryBulk(
   try {
     await EditHistory.insertMany(docs, session ? { session } : {});
   } catch (err) {
-    logger?.warn({ err, count: docs.length }, "Failed to record edit history bulk (non-fatal)");
+    logger?.warn(
+      { err, count: docs.length },
+      "Failed to record edit history bulk (non-fatal)",
+    );
   }
 }
 
-export { EditHistoryEntityType, EditHistoryAction } from "./edit-history.model.js";
+export {
+  EditHistoryEntityType,
+  EditHistoryAction,
+} from "./edit-history.model.js";

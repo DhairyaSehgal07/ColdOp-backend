@@ -1,5 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { getEditHistoryByDocumentHandler, getEditHistoryByStorageHandler } from "./edit-history.controller.js";
+import {
+  getEditHistoryByDocumentHandler,
+  getEditHistoryByStorageHandler,
+} from "./edit-history.controller.js";
 import { authenticate } from "../../../utils/auth.js";
 
 const editHistoryItemSchema = {
@@ -16,8 +19,16 @@ const editHistoryItemSchema = {
     editedAt: { type: "string", format: "date-time" },
     action: { type: "string" },
     changeSummary: { type: "string" },
-    snapshotBefore: { type: "object", additionalProperties: true, description: "Document state before edit" },
-    snapshotAfter: { type: "object", additionalProperties: true, description: "Document state after edit" },
+    snapshotBefore: {
+      type: "object",
+      additionalProperties: true,
+      description: "Document state before edit",
+    },
+    snapshotAfter: {
+      type: "object",
+      additionalProperties: true,
+      description: "Document state after edit",
+    },
   },
 };
 
@@ -68,7 +79,10 @@ export async function editHistoryRoutes(fastify: FastifyInstance) {
               enum: ["incoming_gate_pass", "outgoing_gate_pass"],
               description: "Type of gate pass",
             },
-            documentId: { type: "string", description: "Gate pass document _id" },
+            documentId: {
+              type: "string",
+              description: "Gate pass document _id",
+            },
           },
         },
         response: listResponseSchema,

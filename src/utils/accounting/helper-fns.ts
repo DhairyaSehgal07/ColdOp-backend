@@ -1,6 +1,8 @@
 import mongoose, { Types } from "mongoose";
-import Ledger, { LedgerType } from "../../modules/v1/ledger/ledger.model";
-import Voucher, { VoucherType } from "../../modules/v1/voucher/voucher.model";
+import Ledger, { LedgerType } from "../../modules/v1/ledger/ledger.model.js";
+import Voucher, {
+  VoucherType,
+} from "../../modules/v1/voucher/voucher.model.js";
 import { getNextJournalVoucherNumber } from "./generate-voucher-number.js";
 import { applyVoucherBalances } from "./update-balances.js";
 

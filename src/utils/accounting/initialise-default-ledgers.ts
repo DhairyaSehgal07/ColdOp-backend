@@ -3,7 +3,7 @@ import { Types } from "mongoose";
 import Ledger, {
   LedgerType,
   ILedger,
-} from "../../modules/v1/ledger/ledger.model";
+} from "../../modules/v1/ledger/ledger.model.js";
 
 /* =======================
    TYPES

@@ -572,11 +572,13 @@ export async function updateIncomingGatePass(
         );
       }
       const debitLedgerId =
-        typeof rentVoucher.debitLedger === "object" && rentVoucher.debitLedger != null
+        typeof rentVoucher.debitLedger === "object" &&
+        rentVoucher.debitLedger != null
           ? (rentVoucher.debitLedger as mongoose.Types.ObjectId)
           : new mongoose.Types.ObjectId(rentVoucher.debitLedger);
       const creditLedgerId =
-        typeof rentVoucher.creditLedger === "object" && rentVoucher.creditLedger != null
+        typeof rentVoucher.creditLedger === "object" &&
+        rentVoucher.creditLedger != null
           ? (rentVoucher.creditLedger as mongoose.Types.ObjectId)
           : new mongoose.Types.ObjectId(rentVoucher.creditLedger);
       const oldAmount = Number(rentVoucher.amount);

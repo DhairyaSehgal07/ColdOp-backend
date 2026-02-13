@@ -1,5 +1,5 @@
 import mongoose, { Types } from "mongoose";
-import Voucher from "../../modules/v1/voucher/voucher.model";
+import Voucher from "../../modules/v1/voucher/voucher.model.js";
 
 type ClientSession = mongoose.mongo.ClientSession;
 

@@ -352,10 +352,7 @@ export type GetDaybookQuery = z.infer<
 /** Body for POST search-order-by-receipt: receipt number (gate pass / voucher number) */
 export const searchOrderByReceiptNumberBodySchema = z.object({
   body: z.object({
-    receiptNumber: z
-      .string()
-      .trim()
-      .min(1, "Receipt number is required"),
+    receiptNumber: z.string().trim().min(1, "Receipt number is required"),
   }),
 });
 

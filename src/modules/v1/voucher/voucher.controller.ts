@@ -156,11 +156,7 @@ export async function getVoucherByIdHandler(
   try {
     const params = voucherIdParamsSchema.parse(request.params);
     const coldStorageId = getColdStorageId(request);
-    const data = await getVoucherById(
-      params.id,
-      coldStorageId,
-      request.log,
-    );
+    const data = await getVoucherById(params.id, coldStorageId, request.log);
     return reply.code(200).send({
       success: true,
       data,

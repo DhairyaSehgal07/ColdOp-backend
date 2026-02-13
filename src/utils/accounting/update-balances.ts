@@ -1,5 +1,5 @@
 import mongoose, { Types } from "mongoose";
-import Ledger from "../../modules/v1/ledger/ledger.model";
+import Ledger from "../../modules/v1/ledger/ledger.model.js";
 
 type ClientSession = mongoose.mongo.ClientSession;
 
@@ -26,8 +26,16 @@ export async function applyVoucherBalances(
 
   const opts = session ? { session } : {};
   await Promise.all([
-    Ledger.findByIdAndUpdate(debitLedgerId, { $inc: { balance: amount } }, opts),
-    Ledger.findByIdAndUpdate(creditLedgerId, { $inc: { balance: -amount } }, opts),
+    Ledger.findByIdAndUpdate(
+      debitLedgerId,
+      { $inc: { balance: amount } },
+      opts,
+    ),
+    Ledger.findByIdAndUpdate(
+      creditLedgerId,
+      { $inc: { balance: -amount } },
+      opts,
+    ),
   ]);
 }
 
@@ -53,7 +61,15 @@ export async function reverseVoucherBalances(
 
   const opts = session ? { session } : {};
   await Promise.all([
-    Ledger.findByIdAndUpdate(debitLedgerId, { $inc: { balance: -amount } }, opts),
-    Ledger.findByIdAndUpdate(creditLedgerId, { $inc: { balance: amount } }, opts),
+    Ledger.findByIdAndUpdate(
+      debitLedgerId,
+      { $inc: { balance: -amount } },
+      opts,
+    ),
+    Ledger.findByIdAndUpdate(
+      creditLedgerId,
+      { $inc: { balance: amount } },
+      opts,
+    ),
   ]);
 }

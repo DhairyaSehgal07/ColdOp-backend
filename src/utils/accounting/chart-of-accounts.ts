@@ -1,4 +1,4 @@
-import { LedgerType } from "../../modules/v1/ledger/ledger.model";
+import { LedgerType } from "../../modules/v1/ledger/ledger.model.js";
 
 /* =======================
    TYPES
