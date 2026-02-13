@@ -75,6 +75,7 @@ export async function createVoucher(
     const voucherNumber = await getNextJournalVoucherNumber(
       coldId,
       farmerStorageLinkId,
+      session,
     );
 
     const [created] = await Voucher.create(
@@ -95,7 +96,12 @@ export async function createVoucher(
       { session },
     );
 
-    await applyVoucherBalances(debitLedgerId, creditLedgerId, payload.amount);
+    await applyVoucherBalances(
+      debitLedgerId,
+      creditLedgerId,
+      payload.amount,
+      session,
+    );
     await session.commitTransaction();
 
     const populated = await Voucher.findById(created._id)

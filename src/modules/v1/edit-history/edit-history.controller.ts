@@ -21,6 +21,8 @@ type EditHistoryItem = {
   editedAt: Date;
   action: string;
   changeSummary?: string;
+  snapshotBefore?: Record<string, unknown>;
+  snapshotAfter?: Record<string, unknown>;
   [key: string]: unknown;
 };
 
@@ -33,6 +35,8 @@ type EditHistoryResponseItem = {
   editedAt: Date;
   action: string;
   changeSummary?: string;
+  snapshotBefore?: Record<string, unknown>;
+  snapshotAfter?: Record<string, unknown>;
 };
 
 function getColdStorageId(request: FastifyRequest): string | undefined {
@@ -71,6 +75,8 @@ async function withEditorNames(items: EditHistoryItem[]): Promise<EditHistoryRes
     editedAt: item.editedAt,
     action: item.action,
     changeSummary: item.changeSummary,
+    snapshotBefore: item.snapshotBefore,
+    snapshotAfter: item.snapshotAfter,
   }));
 }
 

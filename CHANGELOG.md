@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-02-13
+
+### Added
+
+- **Ledger – Balance sheet**
+  - `GET /api/v1/ledger/balance-sheet` — balance sheet (Indian standard: Assets, Liabilities, Equity; P&L net profit/loss to equity). Optional query `from`/`to` for period balances (JWT required).
+
+### Changed
+
+- **Ledger**
+  - Create-ledger validation: response now includes first validation error message and flattened Zod details.
+  - Create-ledger body: `farmerStorageLinkId` handling moved into schema (no manual parsing in controller).
+- **Edit history**
+  - List edit-history response and route schema now include `snapshotBefore` and `snapshotAfter` for each item.
+- **Incoming gate pass**
+  - Rent amount update: reverses and reapplies voucher balances via `reverseVoucherBalances`/`applyVoucherBalances` so ledger balances stay correct when rent is edited.
+  - Rent voucher creation no longer passes voucher number; number is generated inside voucher flow.
+- **Voucher**
+  - `createVoucher` accepts optional Mongoose `session`; passes session to `getNextJournalVoucherNumber` and `applyVoucherBalances` for transactional consistency.
+- **Accounting utils**
+  - `getNextJournalVoucherNumber` accepts optional `session` for use inside transactions.
+  - `applyVoucherBalances` and `reverseVoucherBalances` accept optional `session`.
+  - Helper and validate-chart-of-accounts updates for session-aware balance and voucher handling.
+
 ## [1.6.0] - 2026-02-12
 
 ### Added

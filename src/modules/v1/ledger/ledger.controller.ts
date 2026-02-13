@@ -9,17 +9,19 @@ import {
   updateLedger,
   deleteLedger,
   getLedgerEntries,
+  getBalanceSheet,
 } from "./ledger.service.js";
 import {
   createLedgerSchema,
   updateLedgerSchema,
   listLedgersQuerySchema,
   ledgerIdParamsSchema,
-  objectIdString,
+  balanceSheetQuerySchema,
   type CreateLedgerInput,
   type UpdateLedgerInput,
   type ListLedgersQuery,
   type LedgerIdParams,
+  type BalanceSheetQuery,
 } from "./ledger.schema.js";
 import { ZodError } from "zod";
 
@@ -79,15 +81,7 @@ export async function createLedgerHandler(
 ) {
   try {
     const parsed = createLedgerSchema.parse({ body: request.body });
-    const payload: CreateLedgerInput = { ...parsed.body };
-    const raw = request.body as Record<string, unknown> | undefined;
-    if (raw?.farmerStorageLinkId != null && raw.farmerStorageLinkId !== "") {
-      payload.farmerStorageLinkId = objectIdString.parse(
-        raw.farmerStorageLinkId as string,
-      ) as string;
-    } else if (raw && "farmerStorageLinkId" in raw) {
-      payload.farmerStorageLinkId = null;
-    }
+    const payload: CreateLedgerInput = parsed.body;
     const coldStorageId = getColdStorageId(request);
     const createdById = getCreatedById(request);
     const ledger = await createLedger(
@@ -103,12 +97,19 @@ export async function createLedgerHandler(
     });
   } catch (error) {
     if (error instanceof ZodError) {
+      const flattened = error.flatten();
+      const firstMessage =
+        flattened.formErrors[0] ??
+        (flattened.fieldErrors &&
+          Object.values(flattened.fieldErrors).flat()[0]);
+      const message =
+        typeof firstMessage === "string" ? firstMessage : "Validation failed";
       return reply.code(400).send({
         success: false,
         error: {
           code: "VALIDATION_ERROR",
-          message: "Validation failed",
-          details: error.flatten(),
+          message,
+          details: flattened,
         },
       });
     }
@@ -181,11 +182,7 @@ export async function getLedgerByIdHandler(
   try {
     const params = ledgerIdParamsSchema.parse(request.params);
     const coldStorageId = getColdStorageId(request);
-    const ledger = await getLedgerById(
-      params.id,
-      coldStorageId,
-      request.log,
-    );
+    const ledger = await getLedgerById(params.id, coldStorageId, request.log);
     return reply.code(200).send({
       success: true,
       data: ledger,
@@ -313,6 +310,37 @@ export async function getLedgerEntriesHandler(
     request.log.error(
       { error, params: request.params },
       "Error in getLedgerEntriesHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}
+
+export async function getBalanceSheetHandler(
+  request: FastifyRequest<{ Querystring: BalanceSheetQuery }>,
+  reply: FastifyReply,
+) {
+  try {
+    const query = balanceSheetQuerySchema.parse(request.query);
+    const coldStorageId = getColdStorageId(request);
+    const data = await getBalanceSheet(coldStorageId, query, request.log);
+    return reply.code(200).send({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    if (error instanceof ZodError) {
+      return reply.code(400).send({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Invalid query parameters",
+          details: error.flatten(),
+        },
+      });
+    }
+    request.log.error(
+      { error, query: request.query },
+      "Error in getBalanceSheetHandler",
     );
     return sendErrorReply(reply, error);
   }

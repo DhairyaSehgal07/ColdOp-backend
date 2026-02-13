@@ -127,7 +127,10 @@ import {
   createVoucher,
   type CreateVoucherParams,
 } from "../../../utils/accounting/helper-fns.js";
-import { getNextJournalVoucherNumber } from "../../../utils/accounting/generate-voucher-number.js";
+import {
+  applyVoucherBalances,
+  reverseVoucherBalances,
+} from "../../../utils/accounting/update-balances.js";
 import {
   recordEditHistory,
   EditHistoryEntityType,
@@ -295,15 +298,10 @@ export async function createIncomingGatePass(
         const narration = manualParchi
           ? `Voucher rent entry for gate pass no. ${gatePassNo}, manual parchi no. ${manualParchi}`
           : `Voucher rent entry for gate pass no. ${gatePassNo}`;
-        const voucherNumber = await getNextJournalVoucherNumber(
-          coldStorageId,
-          linkIdObj,
-        );
 
         const voucherParams: CreateVoucherParams = {
           creditLedgerId: new mongoose.Types.ObjectId(storeRentLedger._id),
           debitLedgerId: new mongoose.Types.ObjectId(farmerLedger._id),
-          voucherNumber,
           amount,
           narration,
           coldStorageId: coldIdObj,
@@ -563,8 +561,42 @@ export async function updateIncomingGatePass(
       );
     }
     if (hasRentAmountUpdate) {
+      const rentVoucher = await Voucher.findById(rentEntryVoucherId)
+        .session(session)
+        .select("debitLedger creditLedger amount")
+        .lean();
+      if (!rentVoucher) {
+        throw new NotFoundError(
+          "Rent entry voucher not found",
+          "RENT_VOUCHER_NOT_FOUND",
+        );
+      }
+      const debitLedgerId =
+        typeof rentVoucher.debitLedger === "object" && rentVoucher.debitLedger != null
+          ? (rentVoucher.debitLedger as mongoose.Types.ObjectId)
+          : new mongoose.Types.ObjectId(rentVoucher.debitLedger);
+      const creditLedgerId =
+        typeof rentVoucher.creditLedger === "object" && rentVoucher.creditLedger != null
+          ? (rentVoucher.creditLedger as mongoose.Types.ObjectId)
+          : new mongoose.Types.ObjectId(rentVoucher.creditLedger);
+      const oldAmount = Number(rentVoucher.amount);
+      const newAmount = payload.amount as number;
+
+      await reverseVoucherBalances(
+        debitLedgerId,
+        creditLedgerId,
+        oldAmount,
+        session,
+      );
+      await applyVoucherBalances(
+        debitLedgerId,
+        creditLedgerId,
+        newAmount,
+        session,
+      );
+
       const voucherUpdate: Record<string, unknown> = {
-        amount: payload.amount,
+        amount: newAmount,
       };
       if (editedById) {
         voucherUpdate.updatedBy = new mongoose.Types.ObjectId(editedById);

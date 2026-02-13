@@ -1,6 +1,8 @@
-import { Types } from "mongoose";
+import mongoose, { Types } from "mongoose";
 import Ledger, { LedgerType } from "../../modules/v1/ledger/ledger.model";
 import Voucher, { VoucherType } from "../../modules/v1/voucher/voucher.model";
+import { getNextJournalVoucherNumber } from "./generate-voucher-number.js";
+import { applyVoucherBalances } from "./update-balances.js";
 
 interface CreateDebtorLedgerParams {
   farmerStorageLinkId: Types.ObjectId;
@@ -52,7 +54,6 @@ export async function createDebtorLedger({
 export interface CreateVoucherParams {
   creditLedgerId: Types.ObjectId;
   debitLedgerId: Types.ObjectId;
-  voucherNumber: number;
   amount: number;
   narration: string;
   coldStorageId: Types.ObjectId;
@@ -62,10 +63,14 @@ export interface CreateVoucherParams {
   date?: Date;
 }
 
+/**
+ * Create a journal voucher and update debit/credit ledger balances in a single
+ * MongoDB transaction. Ensures voucher creation and balance updates succeed or
+ * fail together (best practice for double-entry consistency).
+ */
 export async function createVoucher({
   creditLedgerId,
   debitLedgerId,
-  voucherNumber,
   amount,
   narration,
   coldStorageId,
@@ -73,17 +78,45 @@ export async function createVoucher({
   createdBy,
   date = new Date(),
 }: CreateVoucherParams) {
-  const voucher = await Voucher.create({
-    type: VoucherType.Journal,
-    voucherNumber,
-    date,
-    debitLedger: debitLedgerId,
-    creditLedger: creditLedgerId,
-    amount,
-    narration,
-    coldStorageId,
-    farmerStorageLinkId,
-    createdBy,
-  });
-  return voucher;
+  if (amount <= 0) {
+    throw new Error("Voucher amount must be greater than 0");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const voucherNumber = await getNextJournalVoucherNumber(
+      coldStorageId,
+      farmerStorageLinkId,
+      session,
+    );
+
+    const [voucher] = await Voucher.create(
+      [
+        {
+          type: VoucherType.Journal,
+          voucherNumber,
+          date,
+          debitLedger: debitLedgerId,
+          creditLedger: creditLedgerId,
+          amount,
+          narration,
+          coldStorageId,
+          farmerStorageLinkId,
+          createdBy,
+        },
+      ],
+      { session },
+    );
+
+    await applyVoucherBalances(debitLedgerId, creditLedgerId, amount, session);
+
+    await session.commitTransaction();
+    return voucher;
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    await session.endSession();
+  }
 }

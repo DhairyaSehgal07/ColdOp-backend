@@ -2,7 +2,12 @@ import mongoose, { Types } from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
 import Ledger from "./ledger.model.js";
 import Voucher from "../voucher/voucher.model.js";
-import type { CreateLedgerInput, UpdateLedgerInput, ListLedgersQuery } from "./ledger.schema.js";
+import type {
+  CreateLedgerInput,
+  UpdateLedgerInput,
+  ListLedgersQuery,
+  BalanceSheetQuery,
+} from "./ledger.schema.js";
 import {
   NotFoundError,
   ConflictError,
@@ -15,9 +20,7 @@ import { initializeDefaultLedgersForColdStorage } from "../../../utils/accountin
 /** Loose type for mongoose query filter objects (Mongoose 9 uses QueryFilter internally). */
 type QueryFilter = Record<string, unknown>;
 
-function toObjectId(
-  coldStorageId: string,
-): mongoose.Types.ObjectId {
+function toObjectId(coldStorageId: string): mongoose.Types.ObjectId {
   return new mongoose.Types.ObjectId(coldStorageId);
 }
 
@@ -53,7 +56,10 @@ export async function createLedger(
 
   const existing = await Ledger.findOne(filter).lean();
   if (existing) {
-    logger?.warn({ name: payload.name, coldStorageId }, "Duplicate ledger name");
+    logger?.warn(
+      { name: payload.name, coldStorageId },
+      "Duplicate ledger name",
+    );
     throw new ConflictError("Ledger with this name already exists");
   }
 
@@ -107,7 +113,7 @@ export async function createDefaultLedgersForColdStorage(
     { coldStorageId, count: ledgers.length },
     "Default ledgers created/ensured for cold storage",
   );
-  return ledgers as Array<Record<string, unknown>>;
+  return ledgers as unknown as Array<Record<string, unknown>>;
 }
 
 /**
@@ -160,7 +166,11 @@ export async function getAllLedgers(
     query.farmerStorageLinkId !== undefined &&
     query.farmerStorageLinkId !== null &&
     query.farmerStorageLinkId !== ""
-      ? { farmerStorageLinkId: new mongoose.Types.ObjectId(query.farmerStorageLinkId) }
+      ? {
+          farmerStorageLinkId: new mongoose.Types.ObjectId(
+            query.farmerStorageLinkId,
+          ),
+        }
       : {
           $or: [
             { farmerStorageLinkId: null },
@@ -173,10 +183,7 @@ export async function getAllLedgers(
       const count = await Voucher.countDocuments({
         coldStorageId: coldId,
         ...scopeFilter,
-        $or: [
-          { debitLedger: ledger._id },
-          { creditLedger: ledger._id },
-        ],
+        $or: [{ debitLedger: ledger._id }, { creditLedger: ledger._id }],
       });
       return {
         ...ledger,
@@ -189,7 +196,9 @@ export async function getAllLedgers(
     { count: ledgersWithCount.length, coldStorageId },
     "Ledgers listed",
   );
-  return ledgersWithCount as Array<Record<string, unknown> & { transactionCount: number }>;
+  return ledgersWithCount as Array<
+    Record<string, unknown> & { transactionCount: number }
+  >;
 }
 
 /**
@@ -250,15 +259,14 @@ export async function updateLedger(
     payload.type !== undefined && payload.type !== ledger.type;
 
   if (openingBalanceChanged || typeChanged) {
-    const scopeCondition: QueryFilter =
-      ledger.farmerStorageLinkId
-        ? { farmerStorageLinkId: ledger.farmerStorageLinkId }
-        : {
-            $or: [
-              { farmerStorageLinkId: null },
-              { farmerStorageLinkId: { $exists: false } },
-            ],
-          };
+    const scopeCondition: QueryFilter = ledger.farmerStorageLinkId
+      ? { farmerStorageLinkId: ledger.farmerStorageLinkId }
+      : {
+          $or: [
+            { farmerStorageLinkId: null },
+            { farmerStorageLinkId: { $exists: false } },
+          ],
+        };
     const baseMatch = {
       coldStorageId: coldId,
       ...scopeCondition,
@@ -345,7 +353,9 @@ export async function deleteLedger(
   const hasTransactions = await ledger.hasTransactions();
   if (hasTransactions) {
     logger?.warn({ ledgerId }, "Cannot delete ledger with transactions");
-    throw new BadRequestError("Cannot delete ledger with existing transactions");
+    throw new BadRequestError(
+      "Cannot delete ledger with existing transactions",
+    );
   }
 
   await Ledger.findByIdAndDelete(ledgerId);
@@ -360,7 +370,12 @@ export async function getLedgerEntries(
   coldStorageId: string,
   logger?: FastifyBaseLogger,
 ): Promise<{
-  ledger: { _id: Types.ObjectId; name: string; type: string; openingBalance: number };
+  ledger: {
+    _id: Types.ObjectId;
+    name: string;
+    type: string;
+    openingBalance: number;
+  };
   entries: Array<{
     entryType: "Debit" | "Credit";
     amount: number;
@@ -386,10 +401,7 @@ export async function getLedgerEntries(
     coldStorageId: coldId,
     $and: [
       {
-        $or: [
-          { debitLedger: ledgerIdObj },
-          { creditLedger: ledgerIdObj },
-        ],
+        $or: [{ debitLedger: ledgerIdObj }, { creditLedger: ledgerIdObj }],
       },
       ledger.farmerStorageLinkId
         ? { farmerStorageLinkId: ledger.farmerStorageLinkId }
@@ -440,7 +452,10 @@ export async function getLedgerEntries(
     };
   });
 
-  logger?.info({ ledgerId, entryCount: entries.length }, "Ledger entries fetched");
+  logger?.info(
+    { ledgerId, entryCount: entries.length },
+    "Ledger entries fetched",
+  );
   return {
     ledger: {
       _id: ledger._id as Types.ObjectId,
@@ -449,5 +464,243 @@ export async function getLedgerEntries(
       openingBalance: ledger.openingBalance,
     },
     entries,
+  };
+}
+
+/** Ledger with computed balance for balance sheet (type + subType for grouping). */
+type LedgerBalanceRow = {
+  _id: Types.ObjectId;
+  name: string;
+  type: LedgerType;
+  subType: string;
+  openingBalance: number;
+  balance: number;
+};
+
+/**
+ * Get balance sheet for the cold storage (storage-level ledgers only).
+ * Uses a single $facet aggregation to compute debit/credit totals per ledger when
+ * a date range is provided, instead of 2N separate aggregations (MongoDB best practice).
+ * Follows standard Indian accounting: Assets = Liabilities + Equity; P&L net profit/loss to equity.
+ */
+export async function getBalanceSheet(
+  coldStorageId: string,
+  query: BalanceSheetQuery,
+  logger?: FastifyBaseLogger,
+): Promise<{
+  assets: {
+    fixedAssets: {
+      total: number;
+      breakdown: Array<{ name: string; balance: number }>;
+    };
+    currentAssets: {
+      total: number;
+      breakdown: Array<{ name: string; balance: number }>;
+    };
+    total: number;
+  };
+  liabilitiesAndEquity: {
+    currentLiabilities: {
+      total: number;
+      breakdown: Array<{ name: string; balance: number }>;
+    };
+    longTermLiabilities: {
+      total: number;
+      breakdown: Array<{ name: string; balance: number }>;
+    };
+    equity: {
+      total: number;
+      breakdown: Array<{ name: string; balance: number }>;
+    };
+    netProfit: number | null;
+    netLoss: number | null;
+    total: number;
+  };
+}> {
+  const coldId = toObjectId(coldStorageId);
+  const scopeFilter: QueryFilter = {
+    $or: [
+      { farmerStorageLinkId: null },
+      { farmerStorageLinkId: { $exists: false } },
+    ],
+  };
+
+  const ledgers = await Ledger.find({
+    coldStorageId: coldId,
+    ...scopeFilter,
+  })
+    .select("name type subType openingBalance balance _id")
+    .lean();
+
+  const hasDateFilter = !!(query.from ?? query.to);
+  const debitMap = new Map<string, number>();
+  const creditMap = new Map<string, number>();
+
+  if (hasDateFilter) {
+    const dateFilter: { $gte?: Date; $lte?: Date } = {};
+    if (query.from) dateFilter.$gte = query.from;
+    if (query.to) {
+      const end = new Date(query.to);
+      end.setHours(23, 59, 59, 999);
+      dateFilter.$lte = end;
+    }
+    const voucherMatch: QueryFilter = {
+      coldStorageId: coldId,
+      ...scopeFilter,
+      date: dateFilter,
+    };
+
+    const [facetResult] = await Voucher.aggregate<{
+      debits: Array<{ _id: Types.ObjectId; total: number }>;
+      credits: Array<{ _id: Types.ObjectId; total: number }>;
+    }>([
+      { $match: voucherMatch },
+      {
+        $facet: {
+          debits: [
+            { $group: { _id: "$debitLedger", total: { $sum: "$amount" } } },
+          ],
+          credits: [
+            { $group: { _id: "$creditLedger", total: { $sum: "$amount" } } },
+          ],
+        },
+      },
+    ]);
+
+    if (facetResult?.debits) {
+      for (const d of facetResult.debits) {
+        debitMap.set(d._id.toString(), d.total);
+      }
+    }
+    if (facetResult?.credits) {
+      for (const c of facetResult.credits) {
+        creditMap.set(c._id.toString(), c.total);
+      }
+    }
+  }
+
+  const ledgerBalances: LedgerBalanceRow[] = ledgers.map((l) => {
+    const idStr = (l._id as Types.ObjectId).toString();
+    let balance: number;
+    if (hasDateFilter) {
+      const debitSum = debitMap.get(idStr) ?? 0;
+      const creditSum = creditMap.get(idStr) ?? 0;
+      const netTransactions =
+        l.type === "Asset" || l.type === "Expense"
+          ? debitSum - creditSum
+          : creditSum - debitSum;
+      balance = l.openingBalance + netTransactions;
+    } else {
+      balance = l.balance;
+    }
+    return {
+      _id: l._id as Types.ObjectId,
+      name: l.name,
+      type: l.type as LedgerType,
+      subType: l.subType,
+      openingBalance: l.openingBalance,
+      balance,
+    };
+  });
+
+  const incomeLedgers = ledgerBalances.filter((l) => l.type === "Income");
+  const expenseLedgers = ledgerBalances.filter((l) => l.type === "Expense");
+  const totalIncome = incomeLedgers.reduce(
+    (sum, l) => sum + Math.max(0, l.balance),
+    0,
+  );
+  const totalExpenses = expenseLedgers.reduce(
+    (sum, l) => sum + Math.max(0, l.balance),
+    0,
+  );
+  const netProfit = totalIncome - totalExpenses;
+
+  const assetLedgers = ledgerBalances.filter((l) => l.type === "Asset");
+  const fixedAssets = assetLedgers.filter((l) => l.subType === "Fixed Assets");
+  const currentAssets = assetLedgers.filter(
+    (l) => l.subType === "Current Assets",
+  );
+  const fixedAssetsTotal = fixedAssets.reduce(
+    (sum, l) => sum + Math.max(0, l.balance),
+    0,
+  );
+  const currentAssetsTotal = currentAssets.reduce(
+    (sum, l) => sum + Math.max(0, l.balance),
+    0,
+  );
+  const totalAssets = fixedAssetsTotal + currentAssetsTotal;
+
+  const liabilityLedgers = ledgerBalances.filter((l) => l.type === "Liability");
+  const currentLiabilities = liabilityLedgers.filter(
+    (l) => l.subType === "Current Liabilities",
+  );
+  const longTermLiabilities = liabilityLedgers.filter(
+    (l) => l.subType === "Long-term Liabilities",
+  );
+  const currentLiabilitiesTotal = currentLiabilities.reduce(
+    (sum, l) => sum + Math.max(0, l.balance),
+    0,
+  );
+  const longTermLiabilitiesTotal = longTermLiabilities.reduce(
+    (sum, l) => sum + Math.max(0, l.balance),
+    0,
+  );
+
+  const equityLedgers = ledgerBalances.filter((l) => l.type === "Equity");
+  const equityTotal = equityLedgers.reduce(
+    (sum, l) => sum + Math.max(0, l.balance),
+    0,
+  );
+  const totalEquity = equityTotal + (netProfit > 0 ? netProfit : 0);
+  const netLoss = netProfit < 0 ? Math.abs(netProfit) : 0;
+  const totalLiabilitiesAndEquity =
+    currentLiabilitiesTotal + longTermLiabilitiesTotal + totalEquity - netLoss;
+
+  logger?.info({ coldStorageId }, "Balance sheet generated");
+
+  return {
+    assets: {
+      fixedAssets: {
+        total: fixedAssetsTotal,
+        breakdown: fixedAssets.map((l) => ({
+          name: l.name,
+          balance: Math.max(0, l.balance),
+        })),
+      },
+      currentAssets: {
+        total: currentAssetsTotal,
+        breakdown: currentAssets.map((l) => ({
+          name: l.name,
+          balance: Math.max(0, l.balance),
+        })),
+      },
+      total: totalAssets,
+    },
+    liabilitiesAndEquity: {
+      currentLiabilities: {
+        total: currentLiabilitiesTotal,
+        breakdown: currentLiabilities.map((l) => ({
+          name: l.name,
+          balance: Math.max(0, l.balance),
+        })),
+      },
+      longTermLiabilities: {
+        total: longTermLiabilitiesTotal,
+        breakdown: longTermLiabilities.map((l) => ({
+          name: l.name,
+          balance: Math.max(0, l.balance),
+        })),
+      },
+      equity: {
+        total: totalEquity,
+        breakdown: equityLedgers.map((l) => ({
+          name: l.name,
+          balance: Math.max(0, l.balance),
+        })),
+      },
+      netProfit: netProfit > 0 ? netProfit : null,
+      netLoss: netLoss > 0 ? netLoss : null,
+      total: totalLiabilitiesAndEquity,
+    },
   };
 }

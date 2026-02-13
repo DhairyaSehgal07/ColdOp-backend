@@ -7,6 +7,7 @@ import {
   updateLedgerHandler,
   deleteLedgerHandler,
   getLedgerEntriesHandler,
+  getBalanceSheetHandler,
 } from "./ledger.controller.js";
 import { authenticate } from "../../../utils/auth.js";
 
@@ -159,37 +160,80 @@ export async function ledgerRoutes(fastify: FastifyInstance) {
     getAllLedgersHandler as never,
   );
 
-  // Get all ledgers for the current logged-in store-admin's cold storage (explicit path)
   fastify.get(
-    "/cold-storage",
+    "/balance-sheet",
     {
       schema: {
         description:
-          "Get all ledgers for the current logged-in store-admin's cold storage",
+          "Get balance sheet (Indian standard: Assets, Liabilities, Equity; P&L net profit/loss to equity). Optional from/to for period balances.",
         tags: ["Accounting - Ledgers"],
-        summary: "List ledgers for my cold storage",
+        summary: "Get balance sheet",
         querystring: {
           type: "object",
           properties: {
-            type: {
-              type: "string",
-              enum: ["Asset", "Liability", "Income", "Expense", "Equity"],
-            },
-            search: { type: "string" },
-            farmerStorageLinkId: { type: "string", nullable: true },
             from: { type: "string", format: "date-time" },
             to: { type: "string", format: "date-time" },
           },
         },
         response: {
           200: {
-            description: "List of ledgers with transaction count",
+            description: "Balance sheet data",
             type: "object",
             properties: {
               success: { type: "boolean", const: true },
               data: {
-                type: "array",
-                items: { type: "object", additionalProperties: true },
+                type: "object",
+                properties: {
+                  assets: {
+                    type: "object",
+                    properties: {
+                      fixedAssets: {
+                        type: "object",
+                        properties: {
+                          total: { type: "number" },
+                          breakdown: {
+                            type: "array",
+                            items: {
+                              type: "object",
+                              properties: {
+                                name: { type: "string" },
+                                balance: { type: "number" },
+                              },
+                            },
+                          },
+                        },
+                      },
+                      currentAssets: {
+                        type: "object",
+                        properties: {
+                          total: { type: "number" },
+                          breakdown: {
+                            type: "array",
+                            items: {
+                              type: "object",
+                              properties: {
+                                name: { type: "string" },
+                                balance: { type: "number" },
+                              },
+                            },
+                          },
+                        },
+                      },
+                      total: { type: "number" },
+                    },
+                  },
+                  liabilitiesAndEquity: {
+                    type: "object",
+                    properties: {
+                      currentLiabilities: { type: "object" },
+                      longTermLiabilities: { type: "object" },
+                      equity: { type: "object" },
+                      netProfit: { type: ["number", "null"] },
+                      netLoss: { type: ["number", "null"] },
+                      total: { type: "number" },
+                    },
+                  },
+                },
               },
             },
           },
@@ -201,7 +245,7 @@ export async function ledgerRoutes(fastify: FastifyInstance) {
         rateLimit: { max: 60, timeWindow: "1 minute" },
       },
     },
-    getAllLedgersHandler as never,
+    getBalanceSheetHandler as never,
   );
 
   fastify.get(

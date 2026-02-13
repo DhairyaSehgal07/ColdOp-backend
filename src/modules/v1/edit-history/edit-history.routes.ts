@@ -16,6 +16,8 @@ const editHistoryItemSchema = {
     editedAt: { type: "string", format: "date-time" },
     action: { type: "string" },
     changeSummary: { type: "string" },
+    snapshotBefore: { type: "object", additionalProperties: true, description: "Document state before edit" },
+    snapshotAfter: { type: "object", additionalProperties: true, description: "Document state after edit" },
   },
 };
 
