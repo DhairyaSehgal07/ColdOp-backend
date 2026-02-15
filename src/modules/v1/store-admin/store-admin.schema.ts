@@ -283,6 +283,12 @@ export const updateFarmerStorageLinkSchema = z.object({
         "Invalid store admin ID format",
       )
       .optional(),
+
+    /** Optional opening balance for the farmer's debtor ledger (when showFinances is enabled). */
+    openingBalance: z.coerce.number().optional(),
+
+    /** Optional cost per bag to store on the farmer-storage-link. */
+    costPerBag: z.coerce.number().positive().optional(),
   }),
 });
 

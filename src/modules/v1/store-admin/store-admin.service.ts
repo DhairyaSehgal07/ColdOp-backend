@@ -23,6 +23,8 @@ import { Farmer } from "../farmer/farmer-model.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
 import { Preferences } from "../preferences/preferences.model.js";
 import { createDebtorLedger } from "../../../utils/accounting/helper-fns.js";
+import Ledger from "../ledger/ledger.model.js";
+import { updateLedger } from "../ledger/ledger.service.js";
 import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
 
@@ -988,6 +990,7 @@ export async function updateFarmerStorageLink(
       isActive: boolean;
       notes: string;
       linkedById: mongoose.Types.ObjectId;
+      costPerBag: number;
     }> = {};
 
     if (payload.accountNumber !== undefined) {
@@ -1003,6 +1006,9 @@ export async function updateFarmerStorageLink(
       linkUpdateData.linkedById = new mongoose.Types.ObjectId(
         payload.linkedById,
       );
+    }
+    if (payload.costPerBag !== undefined) {
+      linkUpdateData.costPerBag = payload.costPerBag;
     }
 
     // Update farmer if there are farmer fields to update
@@ -1041,6 +1047,24 @@ export async function updateFarmerStorageLink(
         "Farmer-storage-link not found",
         "FARMER_STORAGE_LINK_NOT_FOUND",
       );
+    }
+
+    // Update debtor ledger opening balance when provided (mirrors quick-register behaviour)
+    if (payload.openingBalance !== undefined) {
+      const debtorLedger = await Ledger.findOne({
+        coldStorageId,
+        farmerStorageLinkId: new mongoose.Types.ObjectId(id),
+        category: "Debtors",
+      }).lean();
+
+      if (debtorLedger) {
+        await updateLedger(
+          debtorLedger._id.toString(),
+          coldStorageId.toString(),
+          { openingBalance: payload.openingBalance },
+          logger,
+        );
+      }
     }
 
     // Get updated farmer if not already fetched
