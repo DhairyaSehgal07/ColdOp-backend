@@ -183,7 +183,7 @@ export async function initializeDefaultLedgers(
         isSystemLedger: true,
       },
       {
-        name: "Other income",
+        name: "Other Income",
         type: LedgerType.Income,
         subType: "Operating Income",
         category: "Service Revenue",
