@@ -63,7 +63,12 @@ export async function createVoucher(
   const linkD = d.farmerStorageLinkId?.toString() ?? null;
   const linkC = c.farmerStorageLinkId?.toString() ?? null;
   const linkV = farmerStorageLinkId?.toString() ?? null;
-  if (linkD !== linkC || linkD !== linkV) {
+  // Same scope: both same link as voucher, OR one ledger is storage-level (null) and the other matches voucher's link (e.g. rent: Store Rent credit + farmer debit)
+  const sameScope =
+    (linkD === linkC && linkD === linkV) ||
+    (linkD === linkV && linkC === null) ||
+    (linkC === linkV && linkD === null);
+  if (!sameScope) {
     throw new BadRequestError(
       "Ledgers must belong to the same cold storage and same scope (storage or same farmer-storage link)",
     );
