@@ -10,6 +10,7 @@ import {
   quickRegisterFarmerHandler,
   updateFarmerStorageLinkHandler,
   getFarmerStorageLinksByColdStorageHandler,
+  getGatePassesByFarmerStorageLinkHandler,
   getNextVoucherNumberHandler,
   getDaybookHandler,
   searchOrderByReceiptNumberHandler,
@@ -161,14 +162,124 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
     getFarmerStorageLinksByColdStorageHandler as never,
   );
 
-  // Get vouchers (daybook) for a single farmer-storage-link
+  // Get all incoming and outgoing gate passes for a single farmer-storage-link (same response format as daybook)
   fastify.get(
-    "/farmer-storage-links/:farmerStorageLinkId/vouchers",
-    async (_request, reply) => {
-      return reply.status(200).send({
-        success: true,
-      });
+    "/farmer-storage-links/:farmerStorageLinkId/gate-passes",
+    {
+      schema: {
+        description:
+          "Get gate passes for a farmer-storage-link. Same response format as daybook: status, data (array), pagination (single page). Query: from, to (YYYY-MM-DD), type (all | incoming | outgoing), sortBy (latest | oldest).",
+        tags: ["Store Admin"],
+        summary: "Get gate passes by farmer-storage-link",
+        params: {
+          type: "object",
+          required: ["farmerStorageLinkId"],
+          properties: {
+            farmerStorageLinkId: {
+              type: "string",
+              description: "Farmer-storage-link ID",
+            },
+          },
+        },
+        querystring: {
+          type: "object",
+          properties: {
+            from: {
+              type: "string",
+              description: "Start date (YYYY-MM-DD) inclusive",
+            },
+            to: {
+              type: "string",
+              description: "End date (YYYY-MM-DD) inclusive",
+            },
+            type: {
+              type: "string",
+              enum: ["all", "incoming", "outgoing"],
+              description:
+                "all = merged list; incoming or outgoing = filter by type (default all)",
+            },
+            sortBy: {
+              type: "string",
+              description:
+                "latest = newest first, anything else = oldest first (default latest)",
+            },
+          },
+        },
+        response: {
+          200: {
+            description:
+              "status Success with data (full array of gate passes, farmer populated) and pagination (single page); or status Fail with message and pagination when no orders",
+            type: "object",
+            properties: {
+              status: { type: "string", enum: ["Success", "Fail"] },
+              message: { type: "string" },
+              data: {
+                type: "array",
+                items: { type: "object", additionalProperties: true },
+              },
+              pagination: {
+                type: "object",
+                properties: {
+                  currentPage: { type: "number" },
+                  totalPages: { type: "number" },
+                  totalItems: { type: "number" },
+                  itemsPerPage: { type: "number" },
+                  hasNextPage: { type: "boolean" },
+                  hasPreviousPage: { type: "boolean" },
+                  nextPage: { type: ["number", "null"] },
+                  previousPage: { type: ["number", "null"] },
+                },
+              },
+            },
+          },
+          400: {
+            description: "Invalid type or validation error",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+              message: { type: "string" },
+            },
+          },
+          401: {
+            description: "Unauthorized or missing cold storage",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          404: {
+            description: "Farmer-storage-link not found",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
     },
+    getGatePassesByFarmerStorageLinkHandler as never,
   );
 
   // Get daybook: list of incoming and/or outgoing gate passes with farmer populated, pagination, sort

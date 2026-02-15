@@ -349,6 +349,50 @@ export type GetDaybookQuery = z.infer<
   typeof getDaybookQuerySchema
 >["querystring"];
 
+/** Params and querystring for GET farmer-storage-links/:farmerStorageLinkId/gate-passes (no pagination) */
+export const getGatePassesByFarmerStorageLinkSchema = z.object({
+  params: z.object({
+    farmerStorageLinkId: z
+      .string()
+      .trim()
+      .min(1, "Farmer storage link ID is required")
+      .refine(
+        (val) => mongoose.Types.ObjectId.isValid(val),
+        "Invalid farmer storage link ID format",
+      ),
+  }),
+  querystring: z.object({
+    from: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "from must be YYYY-MM-DD")
+      .optional(),
+    to: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "to must be YYYY-MM-DD")
+      .optional(),
+    type: z
+      .enum(["all", "incoming", "outgoing"], {
+        message: "type must be 'all', 'incoming', or 'outgoing'",
+      })
+      .optional()
+      .default("all"),
+    sortBy: z
+      .string()
+      .optional()
+      .transform((s) => (s === "latest" ? "latest" : "oldest")),
+  }),
+});
+
+export type GetGatePassesByFarmerStorageLinkParams = z.infer<
+  typeof getGatePassesByFarmerStorageLinkSchema
+>["params"];
+
+export type GetGatePassesByFarmerStorageLinkQuery = z.infer<
+  typeof getGatePassesByFarmerStorageLinkSchema
+>["querystring"];
+
 /** Body for POST search-order-by-receipt: receipt number (gate pass / voucher number) */
 export const searchOrderByReceiptNumberBodySchema = z.object({
   body: z.object({

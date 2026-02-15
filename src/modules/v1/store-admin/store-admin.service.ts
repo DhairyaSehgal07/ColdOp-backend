@@ -1225,6 +1225,203 @@ function sortOrderDetails(
 }
 
 /**
+ * Get all incoming and outgoing gate passes for a single farmer-storage-link.
+ * Returns same format as daybook: status, data (merged/filtered array), pagination (single page, no pagination logic).
+ * Optional filter: from, to (YYYY-MM-DD). Optional: type (all | incoming | outgoing), sortBy.
+ * Scoped to the given cold storage.
+ */
+export async function getGatePassesByFarmerStorageLinkId(
+  farmerStorageLinkId: string,
+  coldStorageId: string,
+  options: {
+    from?: string;
+    to?: string;
+    type?: DaybookListType;
+    sortBy?: "latest" | "oldest";
+  } = {},
+  logger?: FastifyBaseLogger,
+): Promise<GetDaybookOrdersResult> {
+  if (!mongoose.Types.ObjectId.isValid(farmerStorageLinkId)) {
+    throw new ValidationError(
+      "Invalid farmer storage link ID format",
+      "INVALID_FARMER_STORAGE_LINK_ID",
+    );
+  }
+  if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+    throw new ValidationError(
+      "Invalid cold storage ID format",
+      "INVALID_COLD_STORAGE_ID",
+    );
+  }
+
+  const linkIdObj = new mongoose.Types.ObjectId(farmerStorageLinkId);
+  const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+
+  const storageLink = await FarmerStorageLink.findOne({
+    _id: linkIdObj,
+    coldStorageId: coldStorageObjectId,
+  }).lean();
+
+  if (!storageLink) {
+    logger?.warn(
+      { farmerStorageLinkId, coldStorageId },
+      "Farmer-storage-link not found or does not belong to cold storage",
+    );
+    throw new NotFoundError(
+      "Farmer-storage-link not found",
+      "FARMER_STORAGE_LINK_NOT_FOUND",
+    );
+  }
+
+  const dateFilter: { date?: { $gte?: Date; $lte?: Date } } = {};
+  if (options.from || options.to) {
+    const dateClause: { $gte?: Date; $lte?: Date } = {};
+    if (options.from) dateClause.$gte = new Date(options.from);
+    if (options.to) {
+      const toEnd = new Date(options.to);
+      toEnd.setHours(23, 59, 59, 999);
+      dateClause.$lte = toEnd;
+    }
+    dateFilter.date = dateClause;
+  }
+  const incomingFilter = { farmerStorageLinkId: linkIdObj, ...dateFilter };
+  const outgoingFilter = { farmerStorageLinkId: linkIdObj, ...dateFilter };
+
+  const sortOrder = options.sortBy === "latest" ? -1 : 1;
+  const type = options.type ?? "all";
+
+  const incomingSelect =
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber createdAt";
+  const outgoingSelect =
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks incomingGatePassSnapshots createdAt";
+
+  const populateLink = [
+    {
+      path: "farmerStorageLinkId",
+      select: "farmerId accountNumber",
+      populate: {
+        path: "farmerId",
+        model: Farmer,
+        select: "name mobileNumber address",
+      },
+    },
+  ];
+
+  switch (type) {
+    case "all": {
+      const [incomingList, outgoingList] = await Promise.all([
+        IncomingGatePass.find(incomingFilter)
+          .sort({ createdAt: sortOrder })
+          .select(incomingSelect)
+          .populate(populateLink)
+          .lean(),
+        OutgoingGatePass.find(outgoingFilter)
+          .sort({ createdAt: sortOrder })
+          .select(outgoingSelect)
+          .populate(populateLink)
+          .lean(),
+      ]);
+
+      const allOrders = [...incomingList, ...outgoingList] as Array<{
+        createdAt: Date | string;
+      }>;
+      allOrders.sort((a, b) => {
+        const tA = new Date(a.createdAt).getTime();
+        const tB = new Date(b.createdAt).getTime();
+        return sortOrder === -1 ? tB - tA : tA - tB;
+      });
+
+      const totalCount = allOrders.length;
+      if (totalCount === 0) {
+        logger?.info(
+          { farmerStorageLinkId, from: options.from, to: options.to },
+          "Gate passes by farmer-storage-link: no orders",
+        );
+        return {
+          status: "Fail",
+          message: "No gate passes found. Try changing the filters.",
+          pagination: createPaginationMeta(0, 1, 1),
+        };
+      }
+
+      const sorted = sortOrderDetails(
+        allOrders as {
+          bagSizes?: { name: string }[];
+          orderDetails?: { size: string }[];
+        }[],
+      );
+
+      logger?.info(
+        { farmerStorageLinkId, totalCount },
+        "Gate passes by farmer-storage-link (all) retrieved",
+      );
+      return {
+        status: "Success",
+        data: sorted,
+        pagination: createPaginationMeta(totalCount, 1, totalCount),
+      };
+    }
+    case "incoming": {
+      const incomingOrders = await IncomingGatePass.find(incomingFilter)
+        .sort({ createdAt: sortOrder })
+        .select(incomingSelect)
+        .populate(populateLink)
+        .lean();
+
+      const totalCount = incomingOrders.length;
+      if (totalCount === 0) {
+        return {
+          status: "Fail",
+          message: "No incoming gate passes found.",
+          pagination: createPaginationMeta(0, 1, 1),
+        };
+      }
+
+      const sorted = sortOrderDetails(
+        incomingOrders as unknown as { bagSizes?: { name: string }[] }[],
+      );
+      return {
+        status: "Success",
+        data: sorted,
+        pagination: createPaginationMeta(totalCount, 1, totalCount),
+      };
+    }
+    case "outgoing": {
+      const outgoingOrders = await OutgoingGatePass.find(outgoingFilter)
+        .sort({ createdAt: sortOrder })
+        .select(outgoingSelect)
+        .populate(populateLink)
+        .lean();
+
+      const totalCount = outgoingOrders.length;
+      if (totalCount === 0) {
+        return {
+          status: "Fail",
+          message: "No outgoing gate passes found.",
+          pagination: createPaginationMeta(0, 1, 1),
+        };
+      }
+
+      const sorted = sortOrderDetails(
+        outgoingOrders as unknown as { orderDetails?: { size: string }[] }[],
+      );
+      return {
+        status: "Success",
+        data: sorted,
+        pagination: createPaginationMeta(totalCount, 1, totalCount),
+      };
+    }
+    default: {
+      void type as never;
+      throw new ValidationError(
+        "Invalid type parameter. Use 'all', 'incoming', or 'outgoing'.",
+        "INVALID_DAYBOOK_TYPE",
+      );
+    }
+  }
+}
+
+/**
  * Get daybook as a list of incoming and/or outgoing gate passes with farmer populated,
  * pagination, and optional merge (type=all). Sorts bagSizes/orderDetails by size/name.
  */

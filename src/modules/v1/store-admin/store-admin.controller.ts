@@ -13,6 +13,7 @@ import {
   getNextVoucherNumber,
   getDaybookOrders,
   searchOrdersByReceiptNumber,
+  getGatePassesByFarmerStorageLinkId,
 } from "./store-admin.service.js";
 import {
   CreateStoreAdminInput,
@@ -27,6 +28,9 @@ import {
   UpdateFarmerStorageLinkParams,
   NextVoucherNumberQuery,
   searchOrderByReceiptNumberBodySchema,
+  GetGatePassesByFarmerStorageLinkParams,
+  GetGatePassesByFarmerStorageLinkQuery,
+  getGatePassesByFarmerStorageLinkSchema,
 } from "./store-admin.schema.js";
 import { AppError, ValidationError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
@@ -142,6 +146,89 @@ export async function getFarmerStorageLinksByColdStorageHandler(
     request.log.error(
       { error },
       "Error in getFarmerStorageLinksByColdStorageHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * Handler for GET farmer-storage-links/:farmerStorageLinkId/gate-passes.
+ * Same response format as daybook: status, data (array), pagination. Query: from, to, type, sortBy, page, limit.
+ */
+export async function getGatePassesByFarmerStorageLinkHandler(
+  request: FastifyRequest<{
+    Params: GetGatePassesByFarmerStorageLinkParams;
+    Querystring: GetGatePassesByFarmerStorageLinkQuery;
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const req = request as AuthenticatedRequest;
+    const coldStorageId =
+      typeof req.user.coldStorageId === "object" &&
+      req.user.coldStorageId !== null &&
+      "_id" in req.user.coldStorageId
+        ? req.user.coldStorageId._id
+        : (req.user.coldStorageId as string);
+
+    if (!coldStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    const parsed = getGatePassesByFarmerStorageLinkSchema.safeParse({
+      params: request.params,
+      querystring: request.query ?? {},
+    });
+    if (!parsed.success) {
+      const msg = parsed.error.flatten().formErrors?.[0] ?? "Invalid request";
+      return reply.code(400).send({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: msg },
+      });
+    }
+
+    const { farmerStorageLinkId } = parsed.data.params;
+    const { from, to, type, sortBy } = parsed.data.querystring;
+
+    const result = await getGatePassesByFarmerStorageLinkId(
+      farmerStorageLinkId,
+      coldStorageId,
+      { from, to, type, sortBy },
+      request.log,
+    );
+
+    if (result.status === "Fail" && result.message && !result.data) {
+      return reply.code(200).send({
+        status: result.status,
+        message: result.message,
+        pagination: result.pagination,
+      });
+    }
+
+    if (
+      result.status === "Fail" &&
+      result.message?.includes("Invalid type parameter")
+    ) {
+      return reply.code(400).send({
+        message: result.message,
+      });
+    }
+
+    return reply.code(200).send({
+      status: result.status,
+      ...(result.data != null && { data: result.data }),
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    request.log.error(
+      { error, params: request.params, query: request.query },
+      "Error in getGatePassesByFarmerStorageLinkHandler",
     );
     return sendErrorReply(reply, error);
   }
