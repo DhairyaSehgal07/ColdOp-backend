@@ -6,7 +6,7 @@ import {
   applyVoucherBalances,
   reverseVoucherBalances,
 } from "../../../utils/accounting/update-balances.js";
-import { getNextJournalVoucherNumber } from "../../../utils/accounting/generate-voucher-number.js";
+import { getNextGeneralVoucherNumber } from "../../../utils/accounting/helper-fns.js";
 import type {
   CreateVoucherInput,
   UpdateVoucherInput,
@@ -72,9 +72,9 @@ export async function createVoucher(
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const voucherNumber = await getNextJournalVoucherNumber(
-      coldId,
-      farmerStorageLinkId,
+    const voucherNumber = await getNextGeneralVoucherNumber(
+      coldStorageId,
+      logger,
       session,
     );
 

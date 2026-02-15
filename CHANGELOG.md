@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-02-15
+
+### Changed
+
+- **Incoming gate pass**
+  - Create rent entry voucher *before* creating the gate pass document so the gate pass is created with `rentEntryVoucherId` in one go (correct ordering, no post-create update).
+- **Voucher**
+  - `createVoucher` uses `getNextGeneralVoucherNumber` from accounting helper-fns (replacing `getNextJournalVoucherNumber` from removed module). Signature: `(coldStorageId, logger?, session?)`.
+
+### Removed
+
+- **Accounting utils**
+  - Removed `src/utils/accounting/generate-voucher-number.ts`; voucher number logic moved into `helper-fns.ts` as `getNextGeneralVoucherNumber`.
+
 ## [1.7.0] - 2026-02-13
 
 ### Added

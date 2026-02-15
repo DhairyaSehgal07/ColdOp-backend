@@ -1,9 +1,9 @@
 import mongoose, { Types } from "mongoose";
+import type { FastifyBaseLogger } from "fastify";
 import Ledger, { LedgerType } from "../../modules/v1/ledger/ledger.model.js";
 import Voucher, {
   VoucherType,
 } from "../../modules/v1/voucher/voucher.model.js";
-import { getNextJournalVoucherNumber } from "./generate-voucher-number.js";
 import { applyVoucherBalances } from "./update-balances.js";
 
 interface CreateDebtorLedgerParams {
@@ -87,9 +87,9 @@ export async function createVoucher({
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const voucherNumber = await getNextJournalVoucherNumber(
-      coldStorageId,
-      farmerStorageLinkId,
+    const voucherNumber = await getNextGeneralVoucherNumber(
+      coldStorageId.toString(),
+      undefined,
       session,
     );
 
@@ -121,4 +121,41 @@ export async function createVoucher({
   } finally {
     await session.endSession();
   }
+}
+
+/**
+ * Get the next journal voucher number for the given cold storage.
+ * One sequence per cold storage (same as incoming/outgoing gate pass numbers).
+ * Call with the current logged-in user's cold storage ID (e.g. from request.user.coldStorageId).
+ *
+ * @param coldStorageId - Cold storage ID (use the logged-in user's cold storage).
+ * @param logger - Optional Fastify logger for debug.
+ * @param session - Optional MongoDB session; use when generating number inside a transaction.
+ * @returns Next voucher number (1 if no vouchers exist).
+ */
+export async function getNextGeneralVoucherNumber(
+  coldStorageId: string,
+  logger?: FastifyBaseLogger,
+  session?: mongoose.mongo.ClientSession,
+): Promise<number> {
+  const coldStorageObjectId = new Types.ObjectId(coldStorageId);
+
+  const agg = Voucher.aggregate<{ maxNo: number | null }>([
+    { $match: { coldStorageId: coldStorageObjectId } },
+    { $group: { _id: null, maxNo: { $max: "$voucherNumber" } } },
+    { $project: { maxNo: 1, _id: 0 } },
+  ]);
+
+  if (session) {
+    agg.session(session);
+  }
+
+  const result = await agg.exec();
+  const next = (result[0]?.maxNo ?? 0) + 1;
+
+  logger?.debug(
+    { coldStorageId, next },
+    "Next general (journal) voucher number",
+  );
+  return next;
 }

@@ -194,36 +194,9 @@ export async function createIncomingGatePass(
       logger,
     );
 
-    const doc = await IncomingGatePass.create({
-      farmerStorageLinkId: new mongoose.Types.ObjectId(
-        payload.farmerStorageLinkId,
-      ),
-      createdBy: createdById
-        ? new mongoose.Types.ObjectId(createdById)
-        : undefined,
-      gatePassNo,
-      date: payload.date,
-      type: GatePassType.RECEIPT,
-      variety: payload.variety,
-      ...(payload.truckNumber !== undefined && payload.truckNumber !== ""
-        ? { truckNumber: payload.truckNumber }
-        : {}),
-      bagSizes: payload.bagSizes,
-      remarks: payload.remarks,
-      manualParchiNumber: payload.manualParchiNumber,
-    });
+    // Check showFinances upfront and create voucher BEFORE gate pass
+    let rentEntryVoucherId: mongoose.Types.ObjectId | undefined;
 
-    logger?.info(
-      {
-        incomingGatePassId: doc._id,
-        farmerStorageLinkId: payload.farmerStorageLinkId,
-        gatePassNo: doc.gatePassNo,
-      },
-      "Incoming gate pass created successfully",
-    );
-
-    // Create voucher when logged-in user's cold storage has showFinances enabled.
-    // Ledgers are resolved on backend: debit = farmer's ledger (farmer storage link), credit = Store Rent ledger.
     if (loggedInUserColdStorageId) {
       const coldStorage = await ColdStorage.findById(loggedInUserColdStorageId)
         .select("preferencesId")
@@ -310,11 +283,48 @@ export async function createIncomingGatePass(
           date: payload.date,
         };
         const voucher = await createVoucher(voucherParams);
-        await IncomingGatePass.findByIdAndUpdate(doc._id, {
-          rentEntryVoucherId: voucher._id,
-        });
+        rentEntryVoucherId = voucher._id;
+
+        logger?.info(
+          {
+            voucherId: voucher._id,
+            gatePassNo,
+          },
+          "Rent entry voucher created before gate pass",
+        );
       }
     }
+
+    // Now create the gate pass with the voucher ID if it exists
+    const doc = await IncomingGatePass.create({
+      farmerStorageLinkId: new mongoose.Types.ObjectId(
+        payload.farmerStorageLinkId,
+      ),
+      createdBy: createdById
+        ? new mongoose.Types.ObjectId(createdById)
+        : undefined,
+      gatePassNo,
+      date: payload.date,
+      type: GatePassType.RECEIPT,
+      variety: payload.variety,
+      ...(payload.truckNumber !== undefined && payload.truckNumber !== ""
+        ? { truckNumber: payload.truckNumber }
+        : {}),
+      bagSizes: payload.bagSizes,
+      remarks: payload.remarks,
+      manualParchiNumber: payload.manualParchiNumber,
+      ...(rentEntryVoucherId ? { rentEntryVoucherId } : {}),
+    });
+
+    logger?.info(
+      {
+        incomingGatePassId: doc._id,
+        farmerStorageLinkId: payload.farmerStorageLinkId,
+        gatePassNo: doc.gatePassNo,
+        ...(rentEntryVoucherId ? { rentEntryVoucherId } : {}),
+      },
+      "Incoming gate pass created successfully",
+    );
 
     const populated = await IncomingGatePass.findById(doc._id)
       .populate({
