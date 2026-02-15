@@ -13,6 +13,7 @@ import { outgoingGatePassRoutes } from "./modules/v1/outgoing-gate-pass/outgoing
 import { editHistoryRoutes } from "./modules/v1/edit-history/edit-history.routes.js";
 import { ledgerRoutes } from "./modules/v1/ledger/ledger.routes.js";
 import { voucherRoutes } from "./modules/v1/voucher/voucher.routes.js";
+import { analyticsRoutes } from "./modules/v1/analytics/analytics.routes.js";
 config();
 
 export const buildApp = async (): Promise<FastifyInstance> => {
@@ -98,6 +99,10 @@ export const buildApp = async (): Promise<FastifyInstance> => {
 
   await fastify.register(voucherRoutes, {
     prefix: "/api/v1/vouchers",
+  });
+
+  await fastify.register(analyticsRoutes, {
+    prefix: "/api/v1/analytics",
   });
 
   // Health check endpoint
