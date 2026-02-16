@@ -1317,7 +1317,7 @@ export async function getGatePassesByFarmerStorageLinkId(
   const incomingSelect =
     "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber createdAt";
   const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks incomingGatePassSnapshots createdAt";
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots createdAt";
 
   const populateLink = [
     {
@@ -1491,7 +1491,7 @@ export async function getDaybookOrders(
   const incomingSelect =
     "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber createdAt";
   const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks incomingGatePassSnapshots createdAt";
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots createdAt";
 
   const populateLink = [
     {
@@ -1502,6 +1502,11 @@ export async function getDaybookOrders(
         model: Farmer,
         select: "name mobileNumber address",
       },
+    },
+    {
+      path: "createdBy",
+      model: StoreAdmin,
+      select: "name",
     },
   ];
 
@@ -1715,7 +1720,7 @@ export async function searchOrdersByReceiptNumber(
   const incomingSelect =
     "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber createdAt";
   const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks incomingGatePassSnapshots createdAt";
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots createdAt";
   const populateLink = [
     {
       path: "farmerStorageLinkId",

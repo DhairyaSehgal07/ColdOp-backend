@@ -49,10 +49,10 @@ export const createOutgoingGatePassSchema = z.object({
       .int("Gate pass number must be an integer")
       .positive("Gate pass number must be a positive number"),
 
-    manualGatePassNumber: z.coerce
+    manualParchiNumber: z.coerce
       .number()
-      .int("Manual gate pass number must be an integer")
-      .positive("Manual gate pass number must be a positive number")
+      .int("Manual parchi number must be an integer")
+      .positive("Manual parchi number must be a positive number")
       .optional(),
 
     date: z.coerce.date(),

@@ -605,8 +605,8 @@ export async function createOutgoingGatePass(
           to: payload.to,
           truckNumber: payload.truckNumber ?? "",
           orderDetails,
-          ...(payload.manualGatePassNumber !== undefined && {
-            manualGatePassNumber: payload.manualGatePassNumber,
+          ...(payload.manualParchiNumber !== undefined && {
+            manualParchiNumber: payload.manualParchiNumber,
           }),
           remarks: payload.remarks,
           idempotencyKey: payload.idempotencyKey,

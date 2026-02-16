@@ -46,7 +46,7 @@ export interface IOutgoingGatePass extends mongoose.Document {
   incomingGatePassSnapshots: IOutgoingIncomingGatePassSnapshot[];
 
   gatePassNo: number;
-  manualGatePassNumber?: number;
+  manualParchiNumber?: number;
   date: Date;
 
   type: GatePassType;
@@ -201,7 +201,7 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
       index: true,
     },
 
-    manualGatePassNumber: {
+    manualParchiNumber: {
       type: Number,
     },
 

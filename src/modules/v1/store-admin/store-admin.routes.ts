@@ -323,7 +323,22 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
               message: { type: "string" },
               data: {
                 type: "array",
-                items: { type: "object", additionalProperties: true },
+                items: {
+                  type: "object",
+                  additionalProperties: true,
+                  properties: {
+                    truckNumber: {
+                      type: "string",
+                      description:
+                        "Truck number (incoming orders and outgoing orders)",
+                    },
+                    manualParchiNumber: {
+                      type: ["string", "number"],
+                      description:
+                        "Manual parchi/voucher number (incoming: string, outgoing: number)",
+                    },
+                  },
+                },
               },
               pagination: {
                 type: "object",
