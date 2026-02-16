@@ -34,6 +34,7 @@ export enum GatePassType {
 export interface IOutgoingIncomingGatePassSnapshot {
   _id: Types.ObjectId;
   gatePassNo: number;
+  variety: string;
   bagSizes: IOutgoingIncomingGatePassSnapshotBagSize[];
 }
 
@@ -50,10 +51,10 @@ export interface IOutgoingGatePass extends mongoose.Document {
 
   type: GatePassType;
 
-  variety: string;
+  variety?: string;
 
-  from: string;
-  to: string;
+  from?: string;
+  to?: string;
 
   truckNumber: string;
 
@@ -156,6 +157,12 @@ const OutgoingIncomingGatePassSnapshotSchema =
         required: true,
       },
 
+      variety: {
+        type: String,
+        required: true,
+        trim: true,
+      },
+
       bagSizes: {
         type: [OutgoingIncomingGatePassSnapshotBagSizeSchema],
         required: true,
@@ -212,20 +219,18 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
 
     variety: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
       index: true,
     },
 
     from: {
       type: String,
-      required: true,
       trim: true,
     },
 
     to: {
       type: String,
-      required: true,
       trim: true,
     },
 

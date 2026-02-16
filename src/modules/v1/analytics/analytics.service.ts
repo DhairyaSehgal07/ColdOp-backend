@@ -67,6 +67,13 @@ export interface StockSummaryResult {
  * initial quantity, current quantity, and quantity removed (initial - current).
  * Only documents belonging to the given cold storage are used (via farmer-storage links).
  * Caller must pass the logged-in store admin's coldStorageId from the JWT.
+ *
+ * Aggregation source: IncomingGatePass only. Quantities are summed from each
+ * incoming gate pass's bagSizes (initialQuantity, currentQuantity). This is
+ * unaffected by OutgoingGatePass; outgoing passes only decrement currentQuantity
+ * on IncomingGatePass at creation time, so this summary always reflects the
+ * current stock correctly. OutgoingGatePass.incomingGatePassSnapshots (which
+ * now only stores sizes that were updated per outgoing pass) is not used here.
  */
 export async function getStockSummary(
   coldStorageId: string,

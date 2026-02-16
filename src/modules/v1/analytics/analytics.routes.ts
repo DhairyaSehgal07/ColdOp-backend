@@ -99,7 +99,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed; total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Scoped to authenticated user's cold storage.",
+          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate pass snapshots are not used). Scoped to authenticated user's cold storage.",
         tags: ["Analytics"],
         summary: "Get stock summary",
         response: {

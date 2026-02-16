@@ -22,6 +22,11 @@ const outgoingIncomingGatePassAllocationSchema = z.object({
       (val) => mongoose.Types.ObjectId.isValid(val),
       "Invalid incoming gate pass ID format",
     ),
+  variety: z
+    .string()
+    .trim()
+    .min(1, "Variety is required")
+    .max(100, "Variety must not exceed 100 characters"),
   allocations: z
     .array(outgoingAllocationSchema)
     .min(1, "At least one allocation is required"),
@@ -52,14 +57,16 @@ export const createOutgoingGatePassSchema = z.object({
 
     date: z.coerce.date(),
 
-    variety: z
+    from: z
       .string()
       .trim()
-      .min(1, "Variety is required")
-      .max(100, "Variety must not exceed 100 characters"),
-
-    from: z.string().trim().min(1, "From is required").max(200),
-    to: z.string().trim().min(1, "To is required").max(200),
+      .max(200, "From must not exceed 200 characters")
+      .optional(),
+    to: z
+      .string()
+      .trim()
+      .max(200, "To must not exceed 200 characters")
+      .optional(),
 
     truckNumber: z
       .string()

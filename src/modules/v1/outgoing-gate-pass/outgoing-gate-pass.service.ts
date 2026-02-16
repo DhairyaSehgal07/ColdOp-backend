@@ -33,6 +33,7 @@ interface OutgoingValidatedAllocation {
 
 interface OutgoingIncomingPassWithFilteredAllocations {
   incomingGatePassId: string;
+  variety: string;
   allocations: OutgoingValidatedAllocation[];
 }
 
@@ -75,6 +76,7 @@ function validateOutgoingGatePassInput(
 
     result.push({
       incomingGatePassId: ip.incomingGatePassId,
+      variety: ip.variety.trim(),
       allocations: nonZeroAllocations.map((a) => ({
         incomingGatePassId: ip.incomingGatePassId,
         size: a.size,
@@ -128,16 +130,14 @@ async function fetchAndValidateIncomingGatePasses(
     incomingPassMap.set(doc._id.toString(), doc);
   }
 
-  const expectedVariety = payload.variety.trim();
-
   for (const item of validated) {
     const incomingPass = incomingPassMap.get(item.incomingGatePassId);
     if (!incomingPass) continue;
 
     const ipVariety = (incomingPass as { variety?: string }).variety?.trim();
-    if (ipVariety !== expectedVariety) {
+    if (ipVariety !== item.variety) {
       throw new ValidationError(
-        `Variety mismatch for incoming gate pass ${item.incomingGatePassId}: expected "${expectedVariety}", got "${ipVariety}"`,
+        `Variety mismatch for incoming gate pass ${item.incomingGatePassId}: expected "${item.variety}", got "${ipVariety}"`,
         "VARIETY_MISMATCH",
       );
     }
@@ -222,6 +222,7 @@ function buildIncomingGatePassSnapshots(
 ): Array<{
   _id: Types.ObjectId;
   gatePassNo: number;
+  variety: string;
   bagSizes: Array<{
     name: string;
     currentQuantity: number;
@@ -244,6 +245,7 @@ function buildIncomingGatePassSnapshots(
   const snapshots: Array<{
     _id: Types.ObjectId;
     gatePassNo: number;
+    variety: string;
     bagSizes: Array<{
       name: string;
       currentQuantity: number;
@@ -261,30 +263,50 @@ function buildIncomingGatePassSnapshots(
     };
     if (!ip?.bagSizes) continue;
 
-    const bagSizes = ip.bagSizes.map((b) => {
-      const key = `${item.incomingGatePassId}|${normalizeSize(b.name)}`;
+    const detailBySize = new Map(
+      ip.bagSizes.map((b) => [normalizeSize(b.name), b]),
+    );
+
+    // Only include bag sizes that were updated (had quantities removed in this outgoing gate pass)
+    const bagSizes: Array<{
+      name: string;
+      currentQuantity: number;
+      initialQuantity: number;
+      type: GatePassType;
+      location: { chamber: string; floor: string; row: string };
+    }> = [];
+
+    for (const alloc of item.allocations) {
+      const bag = detailBySize.get(normalizeSize(alloc.size));
+      if (!bag) continue;
+
+      const key = `${item.incomingGatePassId}|${normalizeSize(alloc.size)}`;
       const allocated = allocatedBySize.get(key) ?? 0;
-      const remaining = Math.max(0, b.currentQuantity - allocated);
+      const remaining = Math.max(0, bag.currentQuantity - allocated);
       // Use paltai location as latest location when present (bags moved in cold storage)
       const effectiveLocation =
-        b.paltaiLocation &&
-        b.paltaiLocation.chamber &&
-        b.paltaiLocation.floor &&
-        b.paltaiLocation.row
-          ? b.paltaiLocation
-          : b.location;
-      return {
-        name: b.name,
+        bag.paltaiLocation &&
+        bag.paltaiLocation.chamber &&
+        bag.paltaiLocation.floor &&
+        bag.paltaiLocation.row
+          ? bag.paltaiLocation
+          : bag.location;
+
+      bagSizes.push({
+        name: bag.name,
         currentQuantity: remaining,
-        initialQuantity: b.initialQuantity,
+        initialQuantity: bag.initialQuantity,
         type: GatePassType.DELIVERY,
         location: effectiveLocation,
-      };
-    });
+      });
+    }
+
+    if (bagSizes.length === 0) continue;
 
     snapshots.push({
       _id: ip._id,
       gatePassNo: ip.gatePassNo,
+      variety: item.variety,
       bagSizes,
     });
   }
@@ -579,7 +601,6 @@ export async function createOutgoingGatePass(
           incomingGatePassSnapshots,
           gatePassNo: payload.gatePassNo,
           date: payload.date,
-          variety: payload.variety,
           from: payload.from,
           to: payload.to,
           truckNumber: payload.truckNumber ?? "",

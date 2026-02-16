@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-02-16
+
+### Changed
+
+- **Outgoing Gate Pass**
+  - `incomingGatePassSnapshots` now stores only the snapshot of bag sizes that were updated (sizes from which quantities were removed in the current outgoing gate pass), instead of all bag sizes from each linked incoming gate pass.
+- **Analytics**
+  - Stock summary aggregation is documented to use IncomingGatePass only; route description updated to clarify that quantities are aggregated from IncomingGatePass and outgoing gate pass snapshots are not used.
+
 ## [1.8.0] - 2026-02-15
 
 ### Changed

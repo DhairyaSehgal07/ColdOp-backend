@@ -20,7 +20,6 @@ export async function createOutgoingGatePassHandler(
     request.log.info(
       {
         incomingGatePassCount: request.body.incomingGatePasses?.length ?? 0,
-        variety: request.body.variety,
         date: request.body.date,
       },
       "Create outgoing gate pass request",
