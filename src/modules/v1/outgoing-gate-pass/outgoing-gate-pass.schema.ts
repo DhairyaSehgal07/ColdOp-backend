@@ -5,12 +5,21 @@ import mongoose from "mongoose";
    Create (from incoming gate passes)
 ======================= */
 
+const allocationLocationSchema = z
+  .object({
+    chamber: z.string().trim().min(1, "Chamber is required when location is provided"),
+    floor: z.string().trim().min(1, "Floor is required when location is provided"),
+    row: z.string().trim().min(1, "Row is required when location is provided"),
+  })
+  .strict();
+
 const outgoingAllocationSchema = z.object({
   size: z.string().trim().min(1, "Size is required"),
   quantityToAllocate: z.coerce
     .number()
     .int()
     .min(0, "Quantity to allocate must be non-negative"),
+  location: allocationLocationSchema.optional(),
 });
 
 const outgoingIncomingGatePassAllocationSchema = z.object({

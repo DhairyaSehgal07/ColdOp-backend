@@ -13,6 +13,7 @@ import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-mo
 import type {
   IIncomingGatePass,
   IBagSize,
+  ILocation,
 } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import {
   recordEditHistory,
@@ -29,6 +30,7 @@ interface OutgoingValidatedAllocation {
   incomingGatePassId: string;
   size: string;
   quantityToAllocate: number;
+  location?: { chamber: string; floor: string; row: string };
 }
 
 interface OutgoingIncomingPassWithFilteredAllocations {
@@ -46,6 +48,44 @@ function normalizeSize(s: string): string {
     .trim()
     .replace(/[\u2010-\u2015\u2212]/g, "-")
     .replace(/\s+/g, " ");
+}
+
+/**
+ * Effective location for a bag (paltai if set, else original location).
+ */
+function getEffectiveLocation(bag: IBagSize): ILocation {
+  const p = bag.paltaiLocation;
+  if (p?.chamber && p?.floor && p?.row) return p;
+  return bag.location;
+}
+
+function locationMatches(
+  a: { chamber: string; floor: string; row: string },
+  b: { chamber: string; floor: string; row: string },
+): boolean {
+  return (
+    (a.chamber ?? "").trim() === (b.chamber ?? "").trim() &&
+    (a.floor ?? "").trim() === (b.floor ?? "").trim() &&
+    (a.row ?? "").trim() === (b.row ?? "").trim()
+  );
+}
+
+/**
+ * Finds the bag in bagSizes for the given allocation. When location is provided,
+ * matches by size and location (same bag size can exist at multiple locations).
+ */
+function getBagForAllocation(
+  bagSizes: IBagSize[],
+  alloc: OutgoingValidatedAllocation,
+): IBagSize | undefined {
+  const normSize = normalizeSize(alloc.size);
+  for (const b of bagSizes) {
+    if (normalizeSize(b.name) !== normSize) continue;
+    if (!alloc.location) return b;
+    const effective = getEffectiveLocation(b);
+    if (locationMatches(effective, alloc.location)) return b;
+  }
+  return undefined;
 }
 
 /* =======================
@@ -81,6 +121,7 @@ function validateOutgoingGatePassInput(
         incomingGatePassId: ip.incomingGatePassId,
         size: a.size,
         quantityToAllocate: a.quantityToAllocate,
+        ...(a.location && { location: a.location }),
       })),
     });
   }
@@ -143,21 +184,24 @@ async function fetchAndValidateIncomingGatePasses(
     }
 
     const bagSizes = (incomingPass as { bagSizes: IBagSize[] }).bagSizes ?? [];
-    const detailBySize = new Map(
-      bagSizes.map((b) => [normalizeSize(b.name), b]),
-    );
 
     for (const alloc of item.allocations) {
-      const bag = detailBySize.get(normalizeSize(alloc.size));
+      const bag = getBagForAllocation(bagSizes, alloc);
       if (!bag) {
+        const locationHint = alloc.location
+          ? ` at location ${alloc.location.chamber}/${alloc.location.floor}/${alloc.location.row}`
+          : "";
         throw new ValidationError(
-          `Size "${alloc.size}" not found in incoming gate pass ${item.incomingGatePassId}`,
+          `Size "${alloc.size}"${locationHint} not found in incoming gate pass ${item.incomingGatePassId}`,
           "SIZE_NOT_FOUND",
         );
       }
       if (bag.currentQuantity < alloc.quantityToAllocate) {
+        const locationHint = alloc.location
+          ? ` at location ${alloc.location.chamber}/${alloc.location.floor}/${alloc.location.row}`
+          : "";
         throw new ValidationError(
-          `Insufficient quantity for size "${alloc.size}" in incoming gate pass ${item.incomingGatePassId}: available ${bag.currentQuantity}, requested ${alloc.quantityToAllocate}`,
+          `Insufficient quantity for size "${alloc.size}"${locationHint} in incoming gate pass ${item.incomingGatePassId}: available ${bag.currentQuantity}, requested ${alloc.quantityToAllocate}`,
           "INSUFFICIENT_STOCK",
         );
       }
@@ -183,13 +227,32 @@ function prepareBulkOperationsForOutgoing(
     };
     if (!ip?.bagSizes) continue;
 
-    const detailBySize = new Map(
-      ip.bagSizes.map((b) => [normalizeSize(b.name), b]),
-    );
-
     for (const alloc of item.allocations) {
-      const bag = detailBySize.get(normalizeSize(alloc.size));
+      const bag = getBagForAllocation(ip.bagSizes, alloc);
       if (!bag) continue;
+      const baseFilter: Record<string, unknown> = {
+        "elem.name": bag.name,
+        "elem.currentQuantity": { $gte: alloc.quantityToAllocate },
+      };
+      const locationFilter =
+        alloc.location &&
+        (() => {
+          const loc = alloc.location;
+          return {
+            $or: [
+              {
+                "elem.location.chamber": loc.chamber,
+                "elem.location.floor": loc.floor,
+                "elem.location.row": loc.row,
+              },
+              {
+                "elem.paltaiLocation.chamber": loc.chamber,
+                "elem.paltaiLocation.floor": loc.floor,
+                "elem.paltaiLocation.row": loc.row,
+              },
+            ],
+          };
+        })();
       bulkOps.push({
         updateOne: {
           filter: { _id: new Types.ObjectId(item.incomingGatePassId) },
@@ -198,12 +261,7 @@ function prepareBulkOperationsForOutgoing(
               "bagSizes.$[elem].currentQuantity": -alloc.quantityToAllocate,
             },
           },
-          arrayFilters: [
-            {
-              "elem.name": bag.name,
-              "elem.currentQuantity": { $gte: alloc.quantityToAllocate },
-            },
-          ],
+          arrayFilters: [{ ...baseFilter, ...locationFilter }],
         },
       });
     }
@@ -234,7 +292,10 @@ function buildIncomingGatePassSnapshots(
   const allocatedBySize = new Map<string, number>();
   for (const item of validated) {
     for (const alloc of item.allocations) {
-      const key = `${item.incomingGatePassId}|${normalizeSize(alloc.size)}`;
+      const locPart = alloc.location
+        ? `|${alloc.location.chamber}|${alloc.location.floor}|${alloc.location.row}`
+        : "";
+      const key = `${item.incomingGatePassId}|${normalizeSize(alloc.size)}${locPart}`;
       allocatedBySize.set(
         key,
         (allocatedBySize.get(key) ?? 0) + alloc.quantityToAllocate,
@@ -263,10 +324,6 @@ function buildIncomingGatePassSnapshots(
     };
     if (!ip?.bagSizes) continue;
 
-    const detailBySize = new Map(
-      ip.bagSizes.map((b) => [normalizeSize(b.name), b]),
-    );
-
     // Only include bag sizes that were updated (had quantities removed in this outgoing gate pass)
     const bagSizes: Array<{
       name: string;
@@ -277,10 +334,13 @@ function buildIncomingGatePassSnapshots(
     }> = [];
 
     for (const alloc of item.allocations) {
-      const bag = detailBySize.get(normalizeSize(alloc.size));
+      const bag = getBagForAllocation(ip.bagSizes, alloc);
       if (!bag) continue;
 
-      const key = `${item.incomingGatePassId}|${normalizeSize(alloc.size)}`;
+      const locPart = alloc.location
+        ? `|${alloc.location.chamber}|${alloc.location.floor}|${alloc.location.row}`
+        : "";
+      const key = `${item.incomingGatePassId}|${normalizeSize(alloc.size)}${locPart}`;
       const allocated = allocatedBySize.get(key) ?? 0;
       const remaining = Math.max(0, bag.currentQuantity - allocated);
       // Use paltai location as latest location when present (bags moved in cold storage)
@@ -315,16 +375,23 @@ function buildIncomingGatePassSnapshots(
 }
 
 /* =======================
-   BUILD ORDER DETAILS (aggregate by size)
+   BUILD ORDER DETAILS (aggregate by size, and by location when same size at multiple locations)
 ======================= */
+
+type OrderDetailEntry = {
+  size: string;
+  quantityAvailable: number;
+  quantityIssued: number;
+  location?: { chamber: string; floor: string; row: string };
+};
 
 function buildOrderDetails(
   validated: OutgoingIncomingPassWithFilteredAllocations[],
   incomingPassMap: Map<string, IIncomingGatePass & { _id: Types.ObjectId }>,
-): Array<{ size: string; quantityAvailable: number; quantityIssued: number }> {
-  const bySize = new Map<
+): OrderDetailEntry[] {
+  const byKey = new Map<
     string,
-    { quantityIssued: number; quantityAvailable: number }
+    { quantityIssued: number; quantityAvailable: number; location?: { chamber: string; floor: string; row: string } }
   >();
 
   for (const item of validated) {
@@ -333,34 +400,47 @@ function buildOrderDetails(
     };
     if (!ip?.bagSizes) continue;
 
-    const detailBySize = new Map(
-      ip.bagSizes.map((b) => [normalizeSize(b.name), b]),
-    );
-
     for (const alloc of item.allocations) {
-      const bag = detailBySize.get(normalizeSize(alloc.size));
+      const bag = getBagForAllocation(ip.bagSizes, alloc);
       if (!bag) continue;
       const remaining = Math.max(
         0,
         bag.currentQuantity - alloc.quantityToAllocate,
       );
 
-      const existing = bySize.get(alloc.size) ?? {
-        quantityIssued: 0,
-        quantityAvailable: 0,
-      };
-      bySize.set(alloc.size, {
-        quantityIssued: existing.quantityIssued + alloc.quantityToAllocate,
-        quantityAvailable: existing.quantityAvailable + remaining,
-      });
+      const locPart = alloc.location
+        ? `|${alloc.location.chamber}|${alloc.location.floor}|${alloc.location.row}`
+        : "";
+      const key = `${alloc.size}${locPart}`;
+
+      const existing = byKey.get(key);
+      const location = alloc.location;
+      if (existing) {
+        byKey.set(key, {
+          quantityIssued: existing.quantityIssued + alloc.quantityToAllocate,
+          quantityAvailable: existing.quantityAvailable + remaining,
+          location: existing.location ?? location,
+        });
+      } else {
+        byKey.set(key, {
+          quantityIssued: alloc.quantityToAllocate,
+          quantityAvailable: remaining,
+          location,
+        });
+      }
     }
   }
 
-  return Array.from(bySize.entries()).map(([size, v]) => ({
-    size,
-    quantityAvailable: v.quantityAvailable,
-    quantityIssued: v.quantityIssued,
-  }));
+  return Array.from(byKey.entries()).map(([key, v]) => {
+    const size = key.includes("|") ? key.slice(0, key.indexOf("|")) : key;
+    const entry: OrderDetailEntry = {
+      size,
+      quantityAvailable: v.quantityAvailable,
+      quantityIssued: v.quantityIssued,
+    };
+    if (v.location) entry.location = v.location;
+    return entry;
+  });
 }
 
 /* =======================

@@ -8,6 +8,12 @@ interface IOutgoingOrderDetail {
   size: string;
   quantityAvailable: number;
   quantityIssued: number;
+  /** When same size exists at multiple locations, breakdown per location */
+  location?: {
+    chamber: string;
+    floor: string;
+    row: string;
+  };
 }
 
 /** Snapshot of an incoming gate pass at creation time */
@@ -72,6 +78,15 @@ export interface IOutgoingGatePass extends mongoose.Document {
    SUB SCHEMAS
 ======================= */
 
+const OutgoingOrderDetailLocationSchema = new Schema(
+  {
+    chamber: { type: String, required: true },
+    floor: { type: String, required: true },
+    row: { type: String, required: true },
+  },
+  { _id: false },
+);
+
 const OutgoingOrderDetailSchema = new Schema<IOutgoingOrderDetail>(
   {
     size: {
@@ -90,6 +105,11 @@ const OutgoingOrderDetailSchema = new Schema<IOutgoingOrderDetail>(
       type: Number,
       required: true,
       min: 0,
+    },
+
+    location: {
+      type: OutgoingOrderDetailLocationSchema,
+      required: false,
     },
   },
   { _id: false },
