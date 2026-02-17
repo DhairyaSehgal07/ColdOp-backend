@@ -93,7 +93,7 @@ function validateOutgoingGatePassInput(
 ======================= */
 
 async function fetchAndValidateIncomingGatePasses(
-  payload: CreateOutgoingGatePassInput,
+  _payload: CreateOutgoingGatePassInput,
   validated: OutgoingIncomingPassWithFilteredAllocations[],
   session: ClientSession,
   _logger?: FastifyBaseLogger,
