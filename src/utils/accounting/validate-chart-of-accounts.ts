@@ -1,5 +1,8 @@
-import { LedgerType } from "../../modules/v1/ledger/ledger.model";
-import { chartOfAccounts } from "./chart-of-accounts.js";
+import { LedgerType } from "../../modules/v1/ledger/ledger.model.js";
+import {
+  chartOfAccounts,
+  type ChartOfAccounts,
+} from "./chart-of-accounts.js";
 
 /**
  * Try to resolve subType to a key in the typeMap (accepts singular/plural variants).
@@ -32,7 +35,7 @@ export function validateChartOfAccounts(
   subType: string,
   category: string,
 ): boolean {
-  const typeMap = chartOfAccounts[type as LedgerType];
+  const typeMap = (chartOfAccounts as ChartOfAccounts)[type as LedgerType];
   if (!typeMap) return false;
 
   const categories = resolveSubType(typeMap, subType.trim());
