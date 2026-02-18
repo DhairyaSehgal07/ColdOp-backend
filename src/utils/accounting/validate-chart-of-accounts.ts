@@ -1,8 +1,5 @@
 import { LedgerType } from "../../modules/v1/ledger/ledger.model.js";
-import {
-  chartOfAccounts,
-  type ChartOfAccounts,
-} from "./chart-of-accounts.js";
+import { chartOfAccounts, type ChartOfAccounts } from "./chart-of-accounts.js";
 
 /**
  * Try to resolve subType to a key in the typeMap (accepts singular/plural variants).

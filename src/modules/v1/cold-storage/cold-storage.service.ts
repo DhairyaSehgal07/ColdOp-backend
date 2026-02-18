@@ -84,9 +84,8 @@ export async function createColdStorage(
             ],
             reportFormat: "default",
             showFinances: true,
-            customFields: {
-              labourCost: 0,
-            },
+            labourCost: 0,
+            customFields: {},
           },
         ],
         { session },

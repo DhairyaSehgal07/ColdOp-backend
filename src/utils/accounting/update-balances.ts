@@ -33,7 +33,7 @@ export async function applyVoucherBalances(
     ),
     Ledger.findByIdAndUpdate(
       creditLedgerId,
-      { $inc: { balance: -amount } },
+      { $inc: { balance: amount } },
       opts,
     ),
   ]);
@@ -68,7 +68,7 @@ export async function reverseVoucherBalances(
     ),
     Ledger.findByIdAndUpdate(
       creditLedgerId,
-      { $inc: { balance: amount } },
+      { $inc: { balance: -amount } },
       opts,
     ),
   ]);

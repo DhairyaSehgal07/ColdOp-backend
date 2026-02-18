@@ -292,23 +292,35 @@ export async function createIncomingGatePass(
           },
           "Rent entry voucher created before gate pass",
         );
+      }
 
-        // Labour voucher: if preferences.customFields.labourCost exists and > 0, create voucher (Labour debit, Labour Contractor credit)
-        const labourCostRaw =
-          preferences?.customFields &&
-          typeof preferences.customFields === "object" &&
-          "labourCost" in preferences.customFields
-            ? (preferences.customFields as { labourCost?: unknown }).labourCost
-            : undefined;
-        const labourCost =
-          typeof labourCostRaw === "number"
-            ? labourCostRaw
-            : typeof labourCostRaw === "string"
-              ? Number(labourCostRaw)
+      // Labour cost voucher: debit Labour, credit Labour Contractor when preferences.labourCost > 0
+      const labourCost =
+        preferences?.labourCost != null ? Number(preferences.labourCost) : 0;
+      if (labourCost > 0 && Array.isArray(payload.bagSizes)) {
+        const totalBags = payload.bagSizes.reduce(
+          (sum, b) => sum + (b.initialQuantity ?? 0),
+          0,
+        );
+        if (totalBags > 0) {
+          const labourAmount = labourCost * totalBags;
+          const createdByObjId = payload.createdById
+            ? new mongoose.Types.ObjectId(payload.createdById)
+            : createdById
+              ? new mongoose.Types.ObjectId(createdById)
               : undefined;
-        if (labourCost != null && labourCost > 0 && createdByObjId) {
+          if (!createdByObjId) {
+            throw new ValidationError(
+              "Created by (store admin) is required to create labour voucher",
+              "CREATED_BY_REQUIRED",
+            );
+          }
+          const loggedInColdStorageObj = new mongoose.Types.ObjectId(
+            loggedInUserColdStorageId,
+          );
           const labourLedger = await Ledger.findOne({
             coldStorageId: loggedInColdStorageObj,
+            createdBy: createdByObjId,
             name: "Labour",
             farmerStorageLinkId: null,
             isSystemLedger: true,
@@ -317,6 +329,7 @@ export async function createIncomingGatePass(
             .lean();
           const labourContractorLedger = await Ledger.findOne({
             coldStorageId: loggedInColdStorageObj,
+            createdBy: createdByObjId,
             name: "Labour Contractor",
             farmerStorageLinkId: null,
             isSystemLedger: true,
@@ -325,39 +338,38 @@ export async function createIncomingGatePass(
             .lean();
           if (!labourLedger) {
             throw new NotFoundError(
-              "Labour ledger not found for the current cold storage",
+              "Labour ledger not found for the current store",
               "LABOUR_LEDGER_NOT_FOUND",
             );
           }
           if (!labourContractorLedger) {
             throw new NotFoundError(
-              "Labour Contractor ledger not found for the current cold storage",
+              "Labour Contractor ledger not found for the current store",
               "LABOUR_CONTRACTOR_LEDGER_NOT_FOUND",
             );
           }
-          const labourNarration = manualParchi
-            ? `Labour entry for gate pass no. ${gatePassNo}, manual parchi no. ${manualParchi}`
-            : `Labour entry for gate pass no. ${gatePassNo}`;
+          const coldIdObj = new mongoose.Types.ObjectId(coldStorageId);
+          const labourNarration = `Labour cost for gate pass no. ${gatePassNo} (${totalBags} bags @ ${labourCost})`;
           const labourVoucherParams: CreateVoucherParams = {
             debitLedgerId: new mongoose.Types.ObjectId(labourLedger._id),
             creditLedgerId: new mongoose.Types.ObjectId(
               labourContractorLedger._id,
             ),
-            amount: labourCost,
+            amount: labourAmount,
             narration: labourNarration,
             coldStorageId: coldIdObj,
-            farmerStorageLinkId: linkIdObj,
+            farmerStorageLinkId: null,
             createdBy: createdByObjId,
             date: payload.date,
           };
-          const labourVoucher = await createVoucher(labourVoucherParams);
+          await createVoucher(labourVoucherParams);
           logger?.info(
             {
-              voucherId: labourVoucher._id,
               gatePassNo,
-              amount: labourCost,
+              labourAmount,
+              totalBags,
             },
-            "Labour entry voucher created before gate pass",
+            "Labour cost voucher created before gate pass",
           );
         }
       }
@@ -802,6 +814,20 @@ export async function updateIncomingGatePass(
     }
     if (error instanceof mongoose.Error.ValidationError) {
       const messages = Object.values(error.errors).map((err) => err.message);
+      throw new ValidationError(
+        messages.join(", "),
+        "MONGOOSE_VALIDATION_ERROR",
+      );
+    }
+    const errObj = error as Record<string, unknown>;
+    if (
+      errObj?.name === "ValidationError" &&
+      errObj.errors &&
+      typeof errObj.errors === "object"
+    ) {
+      const messages = Object.values(
+        errObj.errors as Record<string, { message?: string }>,
+      ).map((err) => err?.message ?? "Validation failed");
       throw new ValidationError(
         messages.join(", "),
         "MONGOOSE_VALIDATION_ERROR",

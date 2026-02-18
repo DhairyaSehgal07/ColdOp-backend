@@ -21,6 +21,13 @@ import {
   EditHistoryEntityType,
   EditHistoryAction,
 } from "../edit-history/edit-history.service.js";
+import { ColdStorage } from "../cold-storage/cold-storage.model.js";
+import { Preferences } from "../preferences/preferences.model.js";
+import Ledger from "../ledger/ledger.model.js";
+import {
+  createVoucher,
+  type CreateVoucherParams,
+} from "../../../utils/accounting/helper-fns.js";
 
 /* =======================
    TYPES (internal)
@@ -391,7 +398,11 @@ function buildOrderDetails(
 ): OrderDetailEntry[] {
   const byKey = new Map<
     string,
-    { quantityIssued: number; quantityAvailable: number; location?: { chamber: string; floor: string; row: string } }
+    {
+      quantityIssued: number;
+      quantityAvailable: number;
+      location?: { chamber: string; floor: string; row: string };
+    }
   >();
 
   for (const item of validated) {
@@ -626,6 +637,80 @@ export async function createOutgoingGatePass(
       logger,
     );
 
+    // Labour cost voucher: debit Labour, credit Labour Contractor when preferences.labourCost > 0
+    let labourVoucherParams: CreateVoucherParams | null = null;
+    const totalBags = validated.reduce(
+      (sum, item) =>
+        sum + item.allocations.reduce((s, a) => s + a.quantityToAllocate, 0),
+      0,
+    );
+    const coldStorage = await ColdStorage.findById(coldStorageId)
+      .select("preferencesId")
+      .session(session)
+      .lean();
+    const preferences = coldStorage?.preferencesId
+      ? await Preferences.findById(coldStorage.preferencesId)
+          .session(session)
+          .lean()
+      : null;
+    const labourCost =
+      preferences?.labourCost != null ? Number(preferences.labourCost) : 0;
+    if (labourCost > 0 && totalBags > 0) {
+      const createdByObjId = createdById
+        ? new Types.ObjectId(createdById)
+        : undefined;
+      if (!createdByObjId) {
+        throw new ValidationError(
+          "Created by (store admin) is required to create labour voucher",
+          "CREATED_BY_REQUIRED",
+        );
+      }
+      const labourLedger = await Ledger.findOne({
+        coldStorageId,
+        createdBy: createdByObjId,
+        name: "Labour",
+        farmerStorageLinkId: null,
+        isSystemLedger: true,
+      })
+        .select("_id")
+        .session(session)
+        .lean();
+      const labourContractorLedger = await Ledger.findOne({
+        coldStorageId,
+        createdBy: createdByObjId,
+        name: "Labour Contractor",
+        farmerStorageLinkId: null,
+        isSystemLedger: true,
+      })
+        .select("_id")
+        .session(session)
+        .lean();
+      if (!labourLedger) {
+        throw new NotFoundError(
+          "Labour ledger not found for the current store",
+          "LABOUR_LEDGER_NOT_FOUND",
+        );
+      }
+      if (!labourContractorLedger) {
+        throw new NotFoundError(
+          "Labour Contractor ledger not found for the current store",
+          "LABOUR_CONTRACTOR_LEDGER_NOT_FOUND",
+        );
+      }
+      const labourAmount = labourCost * totalBags;
+      const labourNarration = `Labour cost for gate pass no. ${payload.gatePassNo} (${totalBags} bags @ ${labourCost})`;
+      labourVoucherParams = {
+        debitLedgerId: new Types.ObjectId(labourLedger._id),
+        creditLedgerId: new Types.ObjectId(labourContractorLedger._id),
+        amount: labourAmount,
+        narration: labourNarration,
+        coldStorageId,
+        farmerStorageLinkId: null,
+        createdBy: createdByObjId,
+        date: payload.date,
+      };
+    }
+
     const bulkOps = prepareBulkOperationsForOutgoing(
       validated,
       incomingPassMap,
@@ -696,6 +781,18 @@ export async function createOutgoingGatePass(
     ).then((arr) => arr[0]);
 
     await session.commitTransaction();
+
+    if (labourVoucherParams) {
+      await createVoucher(labourVoucherParams);
+      logger?.info(
+        {
+          gatePassNo: payload.gatePassNo,
+          labourAmount: labourVoucherParams.amount,
+          totalBags,
+        },
+        "Labour cost voucher created for outgoing gate pass",
+      );
+    }
 
     logger?.info(
       {

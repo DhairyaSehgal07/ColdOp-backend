@@ -21,6 +21,9 @@ export interface IPreferences extends Document {
   /** Whether financial data should be visible */
   showFinances: boolean;
 
+  /** Labour cost (default 0) */
+  labourCost: number;
+
   /** Custom, user-defined fields for future customisations */
   customFields?: Record<string, unknown>;
 
@@ -63,6 +66,11 @@ const PreferencesSchema = new Schema<IPreferences>(
     showFinances: {
       type: Boolean,
       default: true,
+    },
+
+    labourCost: {
+      type: Number,
+      default: 0,
     },
 
     customFields: {
