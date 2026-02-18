@@ -604,12 +604,17 @@ export async function getVarietyBreakdown(
 function sortOrderDetailsForReport(
   orders: Array<
     | { bagSizes?: { name: string }[]; orderDetails?: { size: string }[] }
-    | { toObject: () => Record<string, unknown>; bagSizes?: unknown; orderDetails?: unknown }
+    | {
+        toObject: () => Record<string, unknown>;
+        bagSizes?: unknown;
+        orderDetails?: unknown;
+      }
   >,
 ): Record<string, unknown>[] {
   return orders.map((order) => {
     const hasToObject =
-      typeof (order as { toObject?: () => Record<string, unknown> }).toObject === "function";
+      typeof (order as { toObject?: () => Record<string, unknown> })
+        .toObject === "function";
     const obj = hasToObject
       ? (order as { toObject: () => Record<string, unknown> }).toObject()
       : { ...(order as Record<string, unknown>) };
@@ -661,6 +666,67 @@ export interface ReportsDataGroupedByFarmer {
 export type GetReportsResult = ReportsDataFlat | ReportsDataGroupedByFarmer;
 
 /**
+ * Get all incoming gate passes for the logged-in cold storage.
+ * Returns documents with populated farmerStorageLinkId (farmerId, accountNumber) and farmer details.
+ */
+export async function getIncomingGatePassesForStorage(
+  coldStorageId: string,
+  logger?: FastifyBaseLogger,
+): Promise<Record<string, unknown>[]> {
+  if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+    throw new ValidationError(
+      "Invalid cold storage ID format",
+      "INVALID_COLD_STORAGE_ID",
+    );
+  }
+
+  const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+  const links = await FarmerStorageLink.find(
+    { coldStorageId: coldStorageObjectId },
+    { _id: 1 },
+  )
+    .lean()
+    .then((list) => list.map((l) => l._id));
+
+  if (links.length === 0) {
+    logger?.info(
+      { coldStorageId },
+      "Incoming gate passes: no farmer-storage links",
+    );
+    return [];
+  }
+
+  const select =
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber rentEntryVoucherId createdAt updatedAt";
+  const populateLink = [
+    {
+      path: "farmerStorageLinkId",
+      select: "farmerId accountNumber",
+      populate: {
+        path: "farmerId",
+        model: Farmer,
+        select: "name mobileNumber address",
+      },
+    },
+    {
+      path: "createdBy",
+      model: StoreAdmin,
+      select: "name",
+    },
+  ];
+
+  const list = await IncomingGatePass.find({
+    farmerStorageLinkId: { $in: links },
+  })
+    .sort({ date: -1, gatePassNo: -1 })
+    .select(select)
+    .populate(populateLink)
+    .lean();
+
+  return list as unknown as Record<string, unknown>[];
+}
+
+/**
  * Get reports: all incoming and outgoing orders for the storage in a date range.
  * Response is daybook-style (same document shape as daybook) for use in react-pdf.
  * Optional groupByFarmers: when true, groups documents by farmer (incoming/outgoing per farmer).
@@ -700,7 +766,10 @@ export async function getReports(
     .then((links) => links.map((l) => l._id));
 
   if (farmerStorageLinkIds.length === 0) {
-    logger?.info({ coldStorageId, from, to }, "Reports: no farmer-storage links");
+    logger?.info(
+      { coldStorageId, from, to },
+      "Reports: no farmer-storage links",
+    );
     return groupByFarmers
       ? { from, to, groupedByFarmer: true, farmers: [] }
       : { from, to, incoming: [], outgoing: [] };
@@ -756,7 +825,13 @@ export async function getReports(
 
   if (!groupByFarmers) {
     logger?.info(
-      { coldStorageId, from, to, incomingCount: incomingSorted.length, outgoingCount: outgoingSorted.length },
+      {
+        coldStorageId,
+        from,
+        to,
+        incomingCount: incomingSorted.length,
+        outgoingCount: outgoingSorted.length,
+      },
       "Reports (flat) retrieved",
     );
     return { from, to, incoming: incomingSorted, outgoing: outgoingSorted };
@@ -770,7 +845,11 @@ export async function getReports(
 
   const farmerBlocks = new Map<
     string,
-    { farmer: ReportFarmerInfo; incoming: Record<string, unknown>[]; outgoing: Record<string, unknown>[] }
+    {
+      farmer: ReportFarmerInfo;
+      incoming: Record<string, unknown>[];
+      outgoing: Record<string, unknown>[];
+    }
   >();
 
   function getLinkKey(doc: Record<string, unknown>): string | null {
@@ -794,7 +873,11 @@ export async function getReports(
     const key = getLinkKey(doc);
     if (!key) continue;
     if (!farmerBlocks.has(key)) {
-      farmerBlocks.set(key, { farmer: farmerFromDoc(doc), incoming: [], outgoing: [] });
+      farmerBlocks.set(key, {
+        farmer: farmerFromDoc(doc),
+        incoming: [],
+        outgoing: [],
+      });
     }
     farmerBlocks.get(key)!.incoming.push(doc);
   }
@@ -802,7 +885,11 @@ export async function getReports(
     const key = getLinkKey(doc);
     if (!key) continue;
     if (!farmerBlocks.has(key)) {
-      farmerBlocks.set(key, { farmer: farmerFromDoc(doc), incoming: [], outgoing: [] });
+      farmerBlocks.set(key, {
+        farmer: farmerFromDoc(doc),
+        incoming: [],
+        outgoing: [],
+      });
     }
     farmerBlocks.get(key)!.outgoing.push(doc);
   }

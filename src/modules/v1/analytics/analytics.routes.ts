@@ -4,6 +4,7 @@ import {
   getTopFarmersHandler,
   getVarietyBreakdownHandler,
   getReportsHandler,
+  getIncomingGatePassesHandler,
 } from "./analytics.controller.js";
 import { authenticate } from "../../../utils/auth.js";
 
@@ -301,6 +302,59 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
       },
     },
     getTopFarmersHandler as never,
+  );
+
+  // GET /incoming-gate-passes – all incoming gate passes for the logged-in storage
+  fastify.get(
+    "/incoming-gate-passes",
+    {
+      schema: {
+        description:
+          "Get all incoming gate passes for the authenticated cold storage. Documents include populated farmer and createdBy.",
+        tags: ["Analytics"],
+        summary: "Get all incoming gate passes for storage",
+        response: {
+          200: {
+            description: "List of incoming gate passes",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  incomingGatePasses: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      additionalProperties: true,
+                    },
+                  },
+                },
+                required: ["incomingGatePasses"],
+              },
+              message: { type: "string" },
+            },
+            required: ["success", "data", "message"],
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            ...errorResponse,
+          },
+          500: {
+            description: "Server error",
+            ...errorResponse,
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getIncomingGatePassesHandler as never,
   );
 
   // GET /variety-breakdown?variety=... – sizes and per-farmer contribution for a variety

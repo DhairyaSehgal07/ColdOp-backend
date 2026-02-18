@@ -4,6 +4,7 @@ import {
   getTopFarmersForStore,
   getVarietyBreakdown,
   getReports,
+  getIncomingGatePassesForStorage,
 } from "./analytics.service.js";
 import { AppError, ValidationError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
@@ -179,6 +180,54 @@ export async function getVarietyBreakdownHandler(
     });
   } catch (error) {
     request.log.error({ error }, "Error in getVarietyBreakdownHandler");
+    if (error instanceof ValidationError) {
+      return reply.code(error.statusCode).send({
+        success: false,
+        error: { code: error.code, message: error.message },
+      });
+    }
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * GET /incoming-gate-passes – all incoming gate passes for the logged-in cold storage.
+ */
+export async function getIncomingGatePassesHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  try {
+    const req = request as AuthenticatedRequest;
+    const coldStorageId =
+      typeof req.user?.coldStorageId === "object" &&
+      req.user.coldStorageId !== null &&
+      "_id" in req.user.coldStorageId
+        ? (req.user.coldStorageId as { _id: string })._id
+        : (req.user?.coldStorageId as string);
+
+    if (!coldStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    const incomingGatePasses = await getIncomingGatePassesForStorage(
+      coldStorageId,
+      request.log,
+    );
+
+    return reply.code(200).send({
+      success: true,
+      data: { incomingGatePasses },
+      message: "Incoming gate passes retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error({ error }, "Error in getIncomingGatePassesHandler");
     if (error instanceof ValidationError) {
       return reply.code(error.statusCode).send({
         success: false,
