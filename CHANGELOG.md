@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-02-18
+
+### Added
+
+- **Analytics – Get reports**
+  - `GET /api/v1/analytics/get-reports` — incoming and outgoing orders for the cold storage in a date range (JWT required). Query: `from`, `to` (YYYY-MM-DD), optional `groupByFarmers=true`. Response is daybook-style (same document shape as daybook) for use in react-pdf. When `groupByFarmers=true`, documents are grouped by farmer with incoming/outgoing arrays per farmer.
+
 ## [1.11.0] - 2026-02-18
 
 ### Added

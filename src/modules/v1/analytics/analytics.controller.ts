@@ -3,6 +3,7 @@ import {
   getStockSummary,
   getTopFarmersForStore,
   getVarietyBreakdown,
+  getReports,
 } from "./analytics.service.js";
 import { AppError, ValidationError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
@@ -178,6 +179,63 @@ export async function getVarietyBreakdownHandler(
     });
   } catch (error) {
     request.log.error({ error }, "Error in getVarietyBreakdownHandler");
+    if (error instanceof ValidationError) {
+      return reply.code(error.statusCode).send({
+        success: false,
+        error: { code: error.code, message: error.message },
+      });
+    }
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * GET /get-reports – incoming and outgoing orders for the storage in a date range.
+ * Same document shape as daybook for react-pdf. Optional groupByFarmers groups by farmer.
+ */
+export async function getReportsHandler(
+  request: FastifyRequest<{
+    Querystring: { from: string; to: string; groupByFarmers?: string };
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const req = request as AuthenticatedRequest;
+    const coldStorageId =
+      typeof req.user?.coldStorageId === "object" &&
+      req.user.coldStorageId !== null &&
+      "_id" in req.user.coldStorageId
+        ? (req.user.coldStorageId as { _id: string })._id
+        : (req.user?.coldStorageId as string);
+
+    if (!coldStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    const from = (request.query as { from?: string }).from;
+    const to = (request.query as { to?: string }).to;
+    const groupByFarmers =
+      (request.query as { groupByFarmers?: string }).groupByFarmers === "true";
+
+    const result = await getReports(
+      coldStorageId,
+      { from: from ?? "", to: to ?? "", groupByFarmers },
+      request.log,
+    );
+
+    return reply.code(200).send({
+      success: true,
+      data: result,
+      message: "Reports retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error({ error }, "Error in getReportsHandler");
     if (error instanceof ValidationError) {
       return reply.code(error.statusCode).send({
         success: false,

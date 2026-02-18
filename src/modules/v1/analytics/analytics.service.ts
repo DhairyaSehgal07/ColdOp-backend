@@ -3,6 +3,8 @@ import type { FastifyBaseLogger } from "fastify";
 import { Farmer } from "../farmer/farmer-model.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
 import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
+import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
+import { StoreAdmin } from "../store-admin/store-admin.model.js";
 import { ValidationError } from "../../../utils/errors.js";
 
 const col = {
@@ -596,4 +598,221 @@ export async function getVarietyBreakdown(
     variety: trimmedVariety,
     sizes,
   };
+}
+
+/** Sort bagSizes by name on incoming docs; sort orderDetails by size on outgoing docs (report/daybook style). */
+function sortOrderDetailsForReport(
+  orders: Array<
+    | { bagSizes?: { name: string }[]; orderDetails?: { size: string }[] }
+    | { toObject: () => Record<string, unknown>; bagSizes?: unknown; orderDetails?: unknown }
+  >,
+): Record<string, unknown>[] {
+  return orders.map((order) => {
+    const hasToObject =
+      typeof (order as { toObject?: () => Record<string, unknown> }).toObject === "function";
+    const obj = hasToObject
+      ? (order as { toObject: () => Record<string, unknown> }).toObject()
+      : { ...(order as Record<string, unknown>) };
+    if (Array.isArray(obj.bagSizes)) {
+      (obj as { bagSizes: { name: string }[] }).bagSizes = [
+        ...(obj.bagSizes as { name: string }[]),
+      ].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    if (Array.isArray(obj.orderDetails)) {
+      (obj as { orderDetails: { size: string }[] }).orderDetails = [
+        ...(obj.orderDetails as { size: string }[]),
+      ].sort((a, b) => a.size.localeCompare(b.size));
+    }
+    return obj as Record<string, unknown>;
+  });
+}
+
+/** Report response when groupByFarmers is false: flat incoming/outgoing arrays (daybook-style for react-pdf). */
+export interface ReportsDataFlat {
+  from: string;
+  to: string;
+  incoming: Record<string, unknown>[];
+  outgoing: Record<string, unknown>[];
+}
+
+/** Farmer info for grouped report (minimal for PDF display). */
+export interface ReportFarmerInfo {
+  name: string;
+  mobileNumber?: string;
+  address?: string;
+  accountNumber?: number;
+}
+
+/** One farmer's block when groupByFarmers is true. */
+export interface ReportFarmerBlock {
+  farmer: ReportFarmerInfo;
+  incoming: Record<string, unknown>[];
+  outgoing: Record<string, unknown>[];
+}
+
+/** Report response when groupByFarmers is true: grouped by farmer for react-pdf. */
+export interface ReportsDataGroupedByFarmer {
+  from: string;
+  to: string;
+  groupedByFarmer: true;
+  farmers: ReportFarmerBlock[];
+}
+
+export type GetReportsResult = ReportsDataFlat | ReportsDataGroupedByFarmer;
+
+/**
+ * Get reports: all incoming and outgoing orders for the storage in a date range.
+ * Response is daybook-style (same document shape as daybook) for use in react-pdf.
+ * Optional groupByFarmers: when true, groups documents by farmer (incoming/outgoing per farmer).
+ */
+export async function getReports(
+  coldStorageId: string,
+  options: { from: string; to: string; groupByFarmers?: boolean },
+  logger?: FastifyBaseLogger,
+): Promise<GetReportsResult> {
+  if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+    throw new ValidationError(
+      "Invalid cold storage ID format",
+      "INVALID_COLD_STORAGE_ID",
+    );
+  }
+
+  const { from, to, groupByFarmers = false } = options;
+  const fromRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!from?.trim() || !fromRegex.test(from)) {
+    throw new ValidationError("from must be YYYY-MM-DD", "INVALID_FROM_DATE");
+  }
+  if (!to?.trim() || !fromRegex.test(to)) {
+    throw new ValidationError("to must be YYYY-MM-DD", "INVALID_TO_DATE");
+  }
+
+  const fromDate = new Date(from);
+  const toEnd = new Date(to);
+  toEnd.setHours(23, 59, 59, 999);
+  const dateFilter = { date: { $gte: fromDate, $lte: toEnd } };
+
+  const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+  const farmerStorageLinkIds = await FarmerStorageLink.find(
+    { coldStorageId: coldStorageObjectId },
+    { _id: 1, farmerId: 1, accountNumber: 1 },
+  )
+    .lean()
+    .then((links) => links.map((l) => l._id));
+
+  if (farmerStorageLinkIds.length === 0) {
+    logger?.info({ coldStorageId, from, to }, "Reports: no farmer-storage links");
+    return groupByFarmers
+      ? { from, to, groupedByFarmer: true, farmers: [] }
+      : { from, to, incoming: [], outgoing: [] };
+  }
+
+  const incomingSelect =
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber createdAt";
+  const outgoingSelect =
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots createdAt";
+
+  const populateLink = [
+    {
+      path: "farmerStorageLinkId",
+      select: "farmerId accountNumber",
+      populate: {
+        path: "farmerId",
+        model: Farmer,
+        select: "name mobileNumber address",
+      },
+    },
+    {
+      path: "createdBy",
+      model: StoreAdmin,
+      select: "name",
+    },
+  ];
+
+  const [incomingList, outgoingList] = await Promise.all([
+    IncomingGatePass.find({
+      farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      ...dateFilter,
+    })
+      .sort({ createdAt: 1 })
+      .select(incomingSelect)
+      .populate(populateLink)
+      .lean(),
+    OutgoingGatePass.find({
+      farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      ...dateFilter,
+    })
+      .sort({ createdAt: 1 })
+      .select(outgoingSelect)
+      .populate(populateLink)
+      .lean(),
+  ]);
+
+  const incomingSorted = sortOrderDetailsForReport(
+    incomingList as { bagSizes?: { name: string }[] }[],
+  );
+  const outgoingSorted = sortOrderDetailsForReport(
+    outgoingList as { orderDetails?: { size: string }[] }[],
+  );
+
+  if (!groupByFarmers) {
+    logger?.info(
+      { coldStorageId, from, to, incomingCount: incomingSorted.length, outgoingCount: outgoingSorted.length },
+      "Reports (flat) retrieved",
+    );
+    return { from, to, incoming: incomingSorted, outgoing: outgoingSorted };
+  }
+
+  type PopulatedLink = {
+    _id: mongoose.Types.ObjectId;
+    farmerId: { name: string; mobileNumber?: string; address?: string };
+    accountNumber: number;
+  };
+
+  const farmerBlocks = new Map<
+    string,
+    { farmer: ReportFarmerInfo; incoming: Record<string, unknown>[]; outgoing: Record<string, unknown>[] }
+  >();
+
+  function getLinkKey(doc: Record<string, unknown>): string | null {
+    const link = doc.farmerStorageLinkId as PopulatedLink | undefined;
+    if (!link?._id) return null;
+    return link._id.toString();
+  }
+
+  function farmerFromDoc(doc: Record<string, unknown>): ReportFarmerInfo {
+    const link = doc.farmerStorageLinkId as PopulatedLink | undefined;
+    const f = link?.farmerId;
+    return {
+      name: f?.name ?? "—",
+      mobileNumber: f?.mobileNumber,
+      address: f?.address,
+      accountNumber: (link as { accountNumber?: number })?.accountNumber,
+    };
+  }
+
+  for (const doc of incomingSorted) {
+    const key = getLinkKey(doc);
+    if (!key) continue;
+    if (!farmerBlocks.has(key)) {
+      farmerBlocks.set(key, { farmer: farmerFromDoc(doc), incoming: [], outgoing: [] });
+    }
+    farmerBlocks.get(key)!.incoming.push(doc);
+  }
+  for (const doc of outgoingSorted) {
+    const key = getLinkKey(doc);
+    if (!key) continue;
+    if (!farmerBlocks.has(key)) {
+      farmerBlocks.set(key, { farmer: farmerFromDoc(doc), incoming: [], outgoing: [] });
+    }
+    farmerBlocks.get(key)!.outgoing.push(doc);
+  }
+
+  const farmers = Array.from(farmerBlocks.values());
+
+  logger?.info(
+    { coldStorageId, from, to, farmerCount: farmers.length },
+    "Reports (grouped by farmer) retrieved",
+  );
+
+  return { from, to, groupedByFarmer: true, farmers };
 }
