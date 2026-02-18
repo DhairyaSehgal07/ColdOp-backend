@@ -18,6 +18,7 @@ import { editHistoryRoutes } from "./modules/v1/edit-history/edit-history.routes
 import { ledgerRoutes } from "./modules/v1/ledger/ledger.routes.js";
 import { voucherRoutes } from "./modules/v1/voucher/voucher.routes.js";
 import { analyticsRoutes } from "./modules/v1/analytics/analytics.routes.js";
+import { farmerStorageLinkRoutes } from "./modules/v1/farmer-storage-link/farmer-storage-link.routes.js";
 config();
 
 export const buildApp = async (): Promise<FastifyInstance> => {
@@ -107,6 +108,10 @@ export const buildApp = async (): Promise<FastifyInstance> => {
 
   await fastify.register(analyticsRoutes, {
     prefix: "/api/v1/analytics",
+  });
+
+  await fastify.register(farmerStorageLinkRoutes, {
+    prefix: "/api/v1/farmer-storage-link",
   });
 
   // Health check endpoint

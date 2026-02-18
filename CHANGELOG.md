@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-02-18
+
+### Added
+
+- **Farmer Storage Link Module**
+  - Dedicated module at `src/modules/v1/farmer-storage-link/` with controller, routes, schema, and service.
+  - Routes registered at `/api/v1/farmer-storage-link` (JWT required):
+    - `POST /check` — check if a farmer exists by mobile number; returns farmer document if found, otherwise confirms number is available. Body: `{ mobileNumber }` (10-digit Indian mobile).
+    - `POST /link-farmer-to-store` — link an existing farmer to the current cold storage. Body: `{ farmerId, accountNumber, costPerBag, openingBalance? }`.
+
+### Changed
+
+- **Application**
+  - Registered `farmerStorageLinkRoutes` in `app.ts` with prefix `/api/v1/farmer-storage-link`.
+
 ## [1.9.0] - 2026-02-16
 
 ### Changed
