@@ -1,4 +1,8 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import cookie from "@fastify/cookie";
@@ -113,19 +117,21 @@ export const buildApp = async (): Promise<FastifyInstance> => {
   }));
 
   // Global error handler
-  fastify.setErrorHandler((error: Error, _request, reply) => {
-    fastify.log.error(error, "Unhandled error");
-    void reply.code(500).send({
-      success: false,
-      error: {
-        code: "INTERNAL_SERVER_ERROR",
-        message:
-          process.env.NODE_ENV === "development"
-            ? error.message
-            : "An unexpected error occurred",
-      },
-    });
-  });
+  fastify.setErrorHandler(
+    (error: Error, _request: FastifyRequest, reply: FastifyReply) => {
+      fastify.log.error(error, "Unhandled error");
+      void reply.code(500).send({
+        success: false,
+        error: {
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            process.env.NODE_ENV === "development"
+              ? error.message
+              : "An unexpected error occurred",
+        },
+      });
+    },
+  );
 
   return fastify;
 };
