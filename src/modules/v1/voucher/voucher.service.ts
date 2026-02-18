@@ -62,7 +62,16 @@ export async function createVoucher(
   const c = creditLedger as LedgerScope;
   const linkD = d.farmerStorageLinkId?.toString() ?? null;
   const linkC = c.farmerStorageLinkId?.toString() ?? null;
-  const linkV = farmerStorageLinkId?.toString() ?? null;
+  // Infer voucher's farmerStorageLinkId when one ledger is storage-level and the other is farmer-scoped (e.g. Store Rent)
+  let resolvedFarmerStorageLinkId = farmerStorageLinkId;
+  if (resolvedFarmerStorageLinkId == null || resolvedFarmerStorageLinkId.toString() === "") {
+    if (linkD != null && linkC === null) {
+      resolvedFarmerStorageLinkId = d.farmerStorageLinkId ?? null;
+    } else if (linkC != null && linkD === null) {
+      resolvedFarmerStorageLinkId = c.farmerStorageLinkId ?? null;
+    }
+  }
+  const linkV = resolvedFarmerStorageLinkId?.toString() ?? null;
   // Same scope: both same link as voucher, OR one ledger is storage-level (null) and the other matches voucher's link (e.g. rent: Store Rent credit + farmer debit)
   const sameScope =
     (linkD === linkC && linkD === linkV) ||
@@ -94,7 +103,7 @@ export async function createVoucher(
           amount: payload.amount,
           narration: payload.narration,
           coldStorageId: coldId,
-          farmerStorageLinkId,
+          farmerStorageLinkId: resolvedFarmerStorageLinkId,
           createdBy: createdByObjId,
         },
       ],
