@@ -292,6 +292,74 @@ export async function createIncomingGatePass(
           },
           "Rent entry voucher created before gate pass",
         );
+
+        // Labour voucher: if preferences.customFields.labourCost exists and > 0, create voucher (Labour debit, Labour Contractor credit)
+        const labourCostRaw =
+          preferences?.customFields &&
+          typeof preferences.customFields === "object" &&
+          "labourCost" in preferences.customFields
+            ? (preferences.customFields as { labourCost?: unknown }).labourCost
+            : undefined;
+        const labourCost =
+          typeof labourCostRaw === "number"
+            ? labourCostRaw
+            : typeof labourCostRaw === "string"
+              ? Number(labourCostRaw)
+              : undefined;
+        if (labourCost != null && labourCost > 0 && createdByObjId) {
+          const labourLedger = await Ledger.findOne({
+            coldStorageId: loggedInColdStorageObj,
+            name: "Labour",
+            farmerStorageLinkId: null,
+            isSystemLedger: true,
+          })
+            .select("_id")
+            .lean();
+          const labourContractorLedger = await Ledger.findOne({
+            coldStorageId: loggedInColdStorageObj,
+            name: "Labour Contractor",
+            farmerStorageLinkId: null,
+            isSystemLedger: true,
+          })
+            .select("_id")
+            .lean();
+          if (!labourLedger) {
+            throw new NotFoundError(
+              "Labour ledger not found for the current cold storage",
+              "LABOUR_LEDGER_NOT_FOUND",
+            );
+          }
+          if (!labourContractorLedger) {
+            throw new NotFoundError(
+              "Labour Contractor ledger not found for the current cold storage",
+              "LABOUR_CONTRACTOR_LEDGER_NOT_FOUND",
+            );
+          }
+          const labourNarration = manualParchi
+            ? `Labour entry for gate pass no. ${gatePassNo}, manual parchi no. ${manualParchi}`
+            : `Labour entry for gate pass no. ${gatePassNo}`;
+          const labourVoucherParams: CreateVoucherParams = {
+            debitLedgerId: new mongoose.Types.ObjectId(labourLedger._id),
+            creditLedgerId: new mongoose.Types.ObjectId(
+              labourContractorLedger._id,
+            ),
+            amount: labourCost,
+            narration: labourNarration,
+            coldStorageId: coldIdObj,
+            farmerStorageLinkId: linkIdObj,
+            createdBy: createdByObjId,
+            date: payload.date,
+          };
+          const labourVoucher = await createVoucher(labourVoucherParams);
+          logger?.info(
+            {
+              voucherId: labourVoucher._id,
+              gatePassNo,
+              amount: labourCost,
+            },
+            "Labour entry voucher created before gate pass",
+          );
+        }
       }
     }
 
