@@ -1,5 +1,9 @@
 import { FastifyInstance } from "fastify";
-import { getSummaryHandler } from "./analytics.controller.js";
+import {
+  getSummaryHandler,
+  getTopFarmersHandler,
+  getVarietyBreakdownHandler,
+} from "./analytics.controller.js";
 import { authenticate } from "../../../utils/auth.js";
 
 /** Reusable error response schema for OpenAPI */
@@ -78,6 +82,83 @@ const topSizeSchema = {
     currentQuantity: { type: "number" },
   },
   required: ["size", "currentQuantity"],
+};
+
+const topFarmerChartPointSchema = {
+  type: "object" as const,
+  properties: {
+    name: { type: "string" },
+    value: { type: "number" },
+  },
+  required: ["name", "value"],
+};
+
+const topFarmersChartDataSchema = {
+  type: "object" as const,
+  properties: {
+    byCurrentQuantity: {
+      type: "array" as const,
+      items: topFarmerChartPointSchema,
+    },
+    byInitialQuantity: {
+      type: "array" as const,
+      items: topFarmerChartPointSchema,
+    },
+    byQuantityRemoved: {
+      type: "array" as const,
+      items: topFarmerChartPointSchema,
+    },
+  },
+  required: ["byCurrentQuantity", "byInitialQuantity", "byQuantityRemoved"],
+};
+
+const varietyBreakdownFarmerContributionSchema = {
+  type: "object" as const,
+  properties: {
+    farmerName: { type: "string" },
+    initialQuantity: { type: "number" },
+    currentQuantity: { type: "number" },
+    quantityRemoved: { type: "number" },
+  },
+  required: [
+    "farmerName",
+    "initialQuantity",
+    "currentQuantity",
+    "quantityRemoved",
+  ],
+};
+
+const varietyBreakdownSizeSchema = {
+  type: "object" as const,
+  properties: {
+    size: { type: "string" },
+    initialQuantity: { type: "number" },
+    currentQuantity: { type: "number" },
+    quantityRemoved: { type: "number" },
+    farmerBreakdown: {
+      type: "array" as const,
+      items: varietyBreakdownFarmerContributionSchema,
+    },
+  },
+  required: [
+    "size",
+    "initialQuantity",
+    "currentQuantity",
+    "quantityRemoved",
+    "farmerBreakdown",
+  ],
+};
+
+const varietyBreakdownResultSchema = {
+  type: "object" as const,
+  properties: {
+    variety: { type: "string" },
+    sizes: {
+      type: "array" as const,
+      items: varietyBreakdownSizeSchema,
+    },
+  },
+  required: ["variety", "sizes"],
 };
 
 /**
@@ -172,5 +253,108 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
       },
     },
     getSummaryHandler as never,
+  );
+
+  // GET /top-farmers – top 5 farmers by current/initial/quantityRemoved for Recharts
+  fastify.get(
+    "/top-farmers",
+    {
+      schema: {
+        description:
+          "Get top 5 farmers by current quantity, initial quantity, and quantity removed for the authenticated store. Response is formatted for Recharts: each series is an array of { name, value }.",
+        tags: ["Analytics"],
+        summary: "Get top 5 farmers (chart-ready)",
+        response: {
+          200: {
+            description: "Top farmers chart data",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  chartData: topFarmersChartDataSchema,
+                },
+                required: ["chartData"],
+              },
+              message: { type: "string" },
+            },
+            required: ["success", "data", "message"],
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            ...errorResponse,
+          },
+          500: {
+            description: "Server error",
+            ...errorResponse,
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getTopFarmersHandler as never,
+  );
+
+  // GET /variety-breakdown?variety=... – sizes and per-farmer contribution for a variety
+  fastify.get(
+    "/variety-breakdown",
+    {
+      schema: {
+        description:
+          "Get breakdown for a variety: all sizes with initial/current/quantityRemoved and per-farmer contribution per size. Scoped to authenticated store.",
+        tags: ["Analytics"],
+        summary: "Get variety breakdown by size and farmer",
+        querystring: {
+          type: "object",
+          required: ["variety"],
+          properties: {
+            variety: {
+              type: "string",
+              description: "Variety name (e.g. Potato)",
+            },
+          },
+        },
+        response: {
+          200: {
+            description:
+              "Variety breakdown with sizes and farmer contributions",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: varietyBreakdownResultSchema,
+              message: { type: "string" },
+            },
+            required: ["success", "data", "message"],
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            ...errorResponse,
+          },
+          400: {
+            description: "Variety name missing or invalid",
+            ...errorResponse,
+          },
+          500: {
+            description: "Server error",
+            ...errorResponse,
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getVarietyBreakdownHandler as never,
   );
 }

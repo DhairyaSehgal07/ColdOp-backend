@@ -1,5 +1,9 @@
 import { FastifyReply, FastifyRequest } from "fastify";
-import { getStockSummary } from "./analytics.service.js";
+import {
+  getStockSummary,
+  getTopFarmersForStore,
+  getVarietyBreakdown,
+} from "./analytics.service.js";
 import { AppError, ValidationError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
 
@@ -71,6 +75,109 @@ export async function getSummaryHandler(
     });
   } catch (error) {
     request.log.error({ error }, "Error in getSummaryHandler");
+    if (error instanceof ValidationError) {
+      return reply.code(error.statusCode).send({
+        success: false,
+        error: { code: error.code, message: error.message },
+      });
+    }
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * GET /top-farmers – top 5 farmers by current quantity, initial quantity,
+ * and quantity removed for the authenticated user's cold storage.
+ * Response is chart-ready for Recharts (name + value per series).
+ */
+export async function getTopFarmersHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  try {
+    const req = request as AuthenticatedRequest;
+    const coldStorageId =
+      typeof req.user?.coldStorageId === "object" &&
+      req.user.coldStorageId !== null &&
+      "_id" in req.user.coldStorageId
+        ? (req.user.coldStorageId as { _id: string })._id
+        : (req.user?.coldStorageId as string);
+
+    if (!coldStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    const chartData = await getTopFarmersForStore(coldStorageId, request.log);
+
+    return reply.code(200).send({
+      success: true,
+      data: { chartData },
+      message: "Top farmers retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error({ error }, "Error in getTopFarmersHandler");
+    if (error instanceof ValidationError) {
+      return reply.code(error.statusCode).send({
+        success: false,
+        error: { code: error.code, message: error.message },
+      });
+    }
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * GET /variety-breakdown – for a given variety (query param), returns all sizes
+ * with their quantities (initial, current, quantityRemoved) and per-farmer
+ * contribution for each size. Scoped to authenticated user's cold storage.
+ */
+export async function getVarietyBreakdownHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  try {
+    const req = request as AuthenticatedRequest;
+    const coldStorageId =
+      typeof req.user?.coldStorageId === "object" &&
+      req.user.coldStorageId !== null &&
+      "_id" in req.user.coldStorageId
+        ? (req.user.coldStorageId as { _id: string })._id
+        : (req.user?.coldStorageId as string);
+
+    if (!coldStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    const variety =
+      typeof (request.query as { variety?: string }).variety === "string"
+        ? (request.query as { variety: string }).variety
+        : "";
+
+    const result = await getVarietyBreakdown(
+      coldStorageId,
+      variety,
+      request.log,
+    );
+
+    return reply.code(200).send({
+      success: true,
+      data: result,
+      message: "Variety breakdown retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error({ error }, "Error in getVarietyBreakdownHandler");
     if (error instanceof ValidationError) {
       return reply.code(error.statusCode).send({
         success: false,
