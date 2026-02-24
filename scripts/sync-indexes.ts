@@ -41,18 +41,9 @@ const MODELS = [
 
 /** Index names to drop per collection (obsolete indexes removed from schemas). Do not drop _id_. */
 const OBSOLETE_INDEXES: Record<string, string[]> = {
-  outgoinggatepasses: [
-    "date_-1",
-    "farmerStorageLinkId_1_date_-1",
-  ],
-  farmerstoragelinks: [
-    "farmerId_1",
-    "createdAt_1",
-  ],
-  coldstorages: [
-    "createdAt_1",
-    "preferencesId_1",
-  ],
+  outgoinggatepasses: ["date_-1", "farmerStorageLinkId_1_date_-1"],
+  farmerstoragelinks: ["farmerId_1", "createdAt_1"],
+  coldstorages: ["createdAt_1", "preferencesId_1"],
   edithistories: [
     "entityType_1",
     "documentId_1",
@@ -61,9 +52,7 @@ const OBSOLETE_INDEXES: Record<string, string[]> = {
     "editedAt_1",
     "action_1",
   ],
-  farmers: [
-    "name_1",
-  ],
+  farmers: ["name_1"],
   ledgers: [
     "type_1",
     "coldStorageId_1",
@@ -95,12 +84,18 @@ async function dropObsoleteIndexes(conn: mongoose.Connection): Promise<void> {
         }
       }
     } catch (err: unknown) {
-      const code = err && typeof err === "object" && "code" in err ? (err as { code: number }).code : undefined;
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? (err as { code: number }).code
+          : undefined;
       if (code === 26) {
         // NamespaceNotFound – collection doesn't exist yet; skip silently
         return;
       }
-      console.warn(`  Warning listing/dropping indexes on ${collectionName}:`, err);
+      console.warn(
+        `  Warning listing/dropping indexes on ${collectionName}:`,
+        err,
+      );
     }
   }
 }
