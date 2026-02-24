@@ -27,6 +27,7 @@ import Ledger from "../ledger/ledger.model.js";
 import { updateLedger } from "../ledger/ledger.service.js";
 import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
+import { recordFarmerEditHistory } from "../farmer-edit-history/farmer-edit-history.service.js";
 
 /**
  * Get all available resources and actions for Admin permissions
@@ -873,6 +874,7 @@ export async function updateFarmerStorageLink(
   id: string,
   payload: UpdateFarmerStorageLinkInput,
   logger?: FastifyBaseLogger,
+  editedByStoreAdminId?: string,
 ) {
   try {
     // Validate ObjectId format
@@ -900,6 +902,17 @@ export async function updateFarmerStorageLink(
 
     const farmerId = farmerStorageLink.farmerId as mongoose.Types.ObjectId;
     const coldStorageId = farmerStorageLink.coldStorageId;
+
+    // Capture before state for farmer edit history (full snapshots, password excluded)
+    const farmerBefore = await Farmer.findById(farmerId).lean();
+    if (farmerBefore) {
+      delete (farmerBefore as { password?: string }).password;
+    }
+    const linkBefore = await FarmerStorageLink.findById(id).lean();
+    const snapshotBefore = {
+      farmer: (farmerBefore ?? {}) as Record<string, unknown>,
+      farmerStorageLink: (linkBefore ?? {}) as Record<string, unknown>,
+    };
 
     // If accountNumber is being updated, check for uniqueness within the cold storage
     if (payload.accountNumber !== undefined) {
@@ -1074,6 +1087,26 @@ export async function updateFarmerStorageLink(
         delete (updatedFarmer as { password?: string }).password;
       }
     }
+
+    // Record farmer edit history (before/after snapshots and who made the change)
+    const farmerAfter =
+      updatedFarmer ?? (await Farmer.findById(farmerId).lean());
+    if (farmerAfter) {
+      delete (farmerAfter as { password?: string }).password;
+    }
+    const snapshotAfter = {
+      farmer: (farmerAfter ?? {}) as Record<string, unknown>,
+      farmerStorageLink: updatedLink as unknown as Record<string, unknown>,
+    };
+    await recordFarmerEditHistory({
+      farmerId,
+      farmerStorageLinkId: new mongoose.Types.ObjectId(id),
+      coldStorageId: coldStorageId as mongoose.Types.ObjectId,
+      editedById: editedByStoreAdminId,
+      snapshotBefore,
+      snapshotAfter,
+      logger,
+    });
 
     logger?.info(
       {

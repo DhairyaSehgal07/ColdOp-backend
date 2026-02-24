@@ -472,10 +472,12 @@ export async function updateFarmerStorageLinkHandler(
   reply: FastifyReply,
 ) {
   try {
+    const storeAdminId = (request as AuthenticatedRequest).user?.id;
     const result = await updateFarmerStorageLink(
       request.params.id,
       request.body,
       request.log,
+      storeAdminId,
     );
 
     return reply.send({
