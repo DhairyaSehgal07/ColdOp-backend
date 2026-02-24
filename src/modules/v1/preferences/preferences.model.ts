@@ -83,6 +83,8 @@ const PreferencesSchema = new Schema<IPreferences>(
   },
 );
 
+/* No indexes: only accessed by findById (ColdStorage.preferencesId). */
+
 export const Preferences = mongoose.model<IPreferences>(
   "Preferences",
   PreferencesSchema,

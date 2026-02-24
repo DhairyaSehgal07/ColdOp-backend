@@ -17,7 +17,6 @@ const farmerSchema = new Schema<IFarmer>(
     name: {
       type: String,
       required: true,
-      index: true,
       trim: true,
     },
 

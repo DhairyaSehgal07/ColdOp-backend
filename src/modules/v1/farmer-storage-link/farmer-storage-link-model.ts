@@ -56,23 +56,22 @@ const farmerStorageLinkSchema = new Schema<IFarmerStorageLink>(
   },
 );
 
-/* ----------------- Indexes ----------------- */
+/* ----------------- Indexes (only those used by queries) ----------------- */
 
-// one farmer ↔ one cold storage
+// Unique: one farmer per cold storage; findOne(farmerId, coldStorageId)
 farmerStorageLinkSchema.index(
   { farmerId: 1, coldStorageId: 1 },
   { unique: true },
 );
 
-// account number unique inside cold storage
+// Unique: account number per cold storage; findOne(coldStorageId, accountNumber); max accountNumber sort
 farmerStorageLinkSchema.index(
   { coldStorageId: 1, accountNumber: 1 },
   { unique: true },
 );
 
-farmerStorageLinkSchema.index({ farmerId: 1 });
+// find(coldStorageId), distinct; findOne(coldStorageId).sort({ accountNumber: -1 })
 farmerStorageLinkSchema.index({ coldStorageId: 1 });
-farmerStorageLinkSchema.index({ createdAt: 1 });
 
 export const FarmerStorageLink: Model<IFarmerStorageLink> =
   mongoose.models.FarmerStorageLink ||

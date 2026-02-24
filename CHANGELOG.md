@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-02-24
+
+### Added
+
+- **Index sync script**
+  - `scripts/sync-indexes.ts` — syncs MongoDB indexes to match current Mongoose schemas: creates missing indexes and drops obsolete ones. Run with `pnpm run sync-indexes` (requires `MONGO_URI` in env).
+
+### Changed
+
+- **Models (indexes)**
+  - Cold storage, edit-history, farmer, farmer-storage-link, incoming-gate-pass, ledger, outgoing-gate-pass, preferences, store-admin, and voucher models: index definitions simplified to only compound indexes used by queries; removed redundant per-field indexes. Use `pnpm run sync-indexes` after deploy to apply changes and drop old indexes.
+
 ## [1.12.0] - 2026-02-18
 
 ### Added

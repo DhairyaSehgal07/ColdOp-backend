@@ -118,32 +118,27 @@ const IncomingGatePassSchema = new Schema<IIncomingGatePass>(
       type: Schema.Types.ObjectId,
       ref: "FarmerStorageLink",
       required: true,
-      index: true,
     },
 
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "StoreAdmin",
-      index: true,
     },
 
     gatePassNo: {
       type: Number,
       required: true,
-      index: true,
     },
 
     date: {
       type: Date,
       required: true,
-      index: true,
     },
 
     type: {
       type: String,
       enum: Object.values(GatePassType),
       required: true,
-      index: true,
     },
 
     variety: {
@@ -171,7 +166,6 @@ const IncomingGatePassSchema = new Schema<IIncomingGatePass>(
       type: String,
       enum: Object.values(GatePassStatus),
       default: GatePassStatus.OPEN,
-      index: true,
     },
 
     remarks: {
@@ -189,7 +183,6 @@ const IncomingGatePassSchema = new Schema<IIncomingGatePass>(
       type: Schema.Types.ObjectId,
       ref: "Voucher",
       required: false,
-      index: true,
     },
   },
   {
@@ -199,26 +192,20 @@ const IncomingGatePassSchema = new Schema<IIncomingGatePass>(
 );
 
 /* =======================
-   INDEXES
+   INDEXES (only those used by queries)
 ======================= */
 
-// By farmer storage link
-IncomingGatePassSchema.index({ farmerStorageLinkId: 1, date: -1 });
-
-// Daybook queries
+// List by link + analytics: find(farmerStorageLinkId).sort({ date: -1, gatePassNo: -1 })
 IncomingGatePassSchema.index({
   farmerStorageLinkId: 1,
   date: -1,
   gatePassNo: -1,
 });
 
-// Reporting
-IncomingGatePassSchema.index({ date: -1 });
+// Daybook/reports: find(farmerStorageLinkId).sort({ createdAt })
+IncomingGatePassSchema.index({ farmerStorageLinkId: 1, createdAt: -1 });
 
-// Status filter
-IncomingGatePassSchema.index({ status: 1, date: -1 });
-
-// Unique voucher per farmer-storage link
+// Unique gate pass per link; lookup by receipt; getNextVoucherNumber sort({ gatePassNo: -1 })
 IncomingGatePassSchema.index(
   { farmerStorageLinkId: 1, gatePassNo: 1 },
   { unique: true },

@@ -201,13 +201,11 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
       type: Schema.Types.ObjectId,
       ref: "FarmerStorageLink",
       required: true,
-      index: true,
     },
 
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "StoreAdmin",
-      index: true,
     },
 
     incomingGatePassSnapshots: {
@@ -218,7 +216,6 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
     gatePassNo: {
       type: Number,
       required: true,
-      index: true,
     },
 
     manualParchiNumber: {
@@ -228,7 +225,6 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
     date: {
       type: Date,
       required: true,
-      index: true,
     },
 
     type: {
@@ -241,7 +237,6 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
       type: String,
       required: false,
       trim: true,
-      index: true,
     },
 
     from: {
@@ -286,22 +281,23 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
 );
 
 /* =======================
-   INDEXES
+   INDEXES (only those used by queries)
 ======================= */
 
+// Create: idempotency lookup
 OutgoingGatePassSchema.index(
   { idempotencyKey: 1 },
   { unique: true, sparse: true },
 );
 
-OutgoingGatePassSchema.index({ farmerStorageLinkId: 1, date: -1 });
+// Daybook/reports: find(farmerStorageLinkId).sort({ createdAt })
+OutgoingGatePassSchema.index({ farmerStorageLinkId: 1, createdAt: -1 });
 
+// Unique gate pass per link; getNextVoucherNumber sort({ gatePassNo: -1 })
 OutgoingGatePassSchema.index(
   { farmerStorageLinkId: 1, gatePassNo: 1 },
   { unique: true },
 );
-
-OutgoingGatePassSchema.index({ date: -1 });
 
 /* =======================
    MODEL

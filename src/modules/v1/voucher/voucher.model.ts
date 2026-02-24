@@ -61,21 +61,18 @@ const voucherSchema = new Schema<IVoucher>(
     date: {
       type: Date,
       required: [true, "Voucher date is required"],
-      index: true,
     },
 
     debitLedger: {
       type: Schema.Types.ObjectId,
       ref: "Ledger",
       required: [true, "Debit ledger is required"],
-      index: true,
     },
 
     creditLedger: {
       type: Schema.Types.ObjectId,
       ref: "Ledger",
       required: [true, "Credit ledger is required"],
-      index: true,
     },
 
     amount: {
@@ -98,7 +95,6 @@ const voucherSchema = new Schema<IVoucher>(
       type: Schema.Types.ObjectId,
       ref: "ColdStorage",
       required: true,
-      index: true,
     },
 
     farmerStorageLinkId: {
@@ -106,20 +102,17 @@ const voucherSchema = new Schema<IVoucher>(
       ref: "FarmerStorageLink",
       required: false,
       default: null,
-      index: true,
     },
 
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "StoreAdmin",
       required: true,
-      index: true,
     },
 
     updatedBy: {
       type: Schema.Types.ObjectId,
       ref: "StoreAdmin",
-      index: true,
     },
   },
   {
@@ -129,16 +122,21 @@ const voucherSchema = new Schema<IVoucher>(
 );
 
 /* =======================
-   INDEXES
+   INDEXES (only those used by queries)
 ======================= */
 
+// Unique voucher number per scope
 voucherSchema.index(
   { voucherNumber: 1, coldStorageId: 1, farmerStorageLinkId: 1 },
   { unique: true },
 );
 
-voucherSchema.index({ coldStorageId: 1, date: -1 });
-voucherSchema.index({ farmerStorageLinkId: 1, date: -1 });
+// List vouchers: find(coldStorageId, ...).sort({ date: -1, voucherNumber: -1 }); ledger entries: same filter, sort date 1 voucherNumber 1 (index scan backward)
+voucherSchema.index({
+  coldStorageId: 1,
+  date: -1,
+  voucherNumber: -1,
+});
 
 /* =======================
    VALIDATION HOOKS

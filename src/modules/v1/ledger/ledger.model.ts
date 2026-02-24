@@ -55,7 +55,6 @@ const ledgerSchema = new Schema<ILedger>(
       type: String,
       required: [true, "Ledger type is required"],
       enum: Object.values(LedgerType),
-      index: true,
     },
 
     subType: {
@@ -95,7 +94,6 @@ const ledgerSchema = new Schema<ILedger>(
       type: Schema.Types.ObjectId,
       ref: "ColdStorage",
       required: true,
-      index: true,
     },
 
     farmerStorageLinkId: {
@@ -103,14 +101,12 @@ const ledgerSchema = new Schema<ILedger>(
       ref: "FarmerStorageLink",
       required: false,
       default: null,
-      index: true,
     },
 
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "StoreAdmin",
       required: true,
-      index: true,
     },
 
     isSystemLedger: {
@@ -125,13 +121,17 @@ const ledgerSchema = new Schema<ILedger>(
 );
 
 /* =======================
-   INDEXES
+   INDEXES (only those used by queries)
 ======================= */
 
+// Unique name per scope; findOne(coldStorageId, farmerStorageLinkId, name); find(coldStorageId, ...).sort({ name: 1 })
 ledgerSchema.index(
   { coldStorageId: 1, farmerStorageLinkId: 1, name: 1 },
   { unique: true },
 );
+
+// findOne(coldStorageId, createdBy) for labour/contractor ledgers
+ledgerSchema.index({ coldStorageId: 1, createdBy: 1 });
 
 /* =======================
    HOOKS

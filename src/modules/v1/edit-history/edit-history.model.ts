@@ -64,41 +64,35 @@ const EditHistorySchema = new Schema<IEditHistory>(
       type: String,
       enum: Object.values(EditHistoryEntityType),
       required: true,
-      index: true,
     },
 
     documentId: {
       type: Schema.Types.ObjectId,
       required: true,
-      index: true,
     },
 
     coldStorageId: {
       type: Schema.Types.ObjectId,
       ref: "ColdStorage",
       required: true,
-      index: true,
     },
 
     editedBy: {
       type: Schema.Types.ObjectId,
       ref: "StoreAdmin",
       required: true,
-      index: true,
     },
 
     editedAt: {
       type: Date,
       required: true,
       default: () => new Date(),
-      index: true,
     },
 
     action: {
       type: String,
       enum: Object.values(EditHistoryAction),
       required: true,
-      index: true,
     },
 
     changeSummary: {
@@ -121,17 +115,14 @@ const EditHistorySchema = new Schema<IEditHistory>(
 );
 
 /* =======================
-   INDEXES
+   INDEXES (only those used by queries)
 ======================= */
 
-// List history by document (who edited this gate pass, when)
+// find(entityType, documentId).sort({ editedAt: -1 })
 EditHistorySchema.index({ entityType: 1, documentId: 1, editedAt: -1 });
 
-// List all edit history for a storage (e.g. fetch by coldStorageId)
+// find(coldStorageId).sort({ editedAt: -1 })
 EditHistorySchema.index({ coldStorageId: 1, editedAt: -1 });
-
-// List edits by user
-EditHistorySchema.index({ editedBy: 1, editedAt: -1 });
 
 /* =======================
    MODEL EXPORT

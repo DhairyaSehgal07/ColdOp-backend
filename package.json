@@ -1,6 +1,6 @@
 {
   "name": "coldop-base-backend",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "description": "",
   "main": "dist/server.js",
   "type": "module",
@@ -8,6 +8,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "sync-indexes": "tsx scripts/sync-indexes.ts",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write \"src/**/*.{ts,json}\"",

@@ -36,7 +36,6 @@ const ColdStorageSchema = new Schema<IColdStorage>(
     preferencesId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Preferences",
-      index: true,
     },
   },
   {
@@ -44,7 +43,7 @@ const ColdStorageSchema = new Schema<IColdStorage>(
   },
 );
 
-ColdStorageSchema.index({ createdAt: 1 });
+/* Indexes: mobileNumber unique + index in schema above. List/sort is dynamic (name, capacity, createdAt); no extra index. */
 
 // Export model
 export const ColdStorage = mongoose.model<IColdStorage>(
