@@ -3,7 +3,6 @@ import {
   createColdStorageHandler,
   getColdStoragesHandler,
   getColdStorageByIdHandler,
-  deleteColdStorageDataHandler,
 } from "./cold-storage.controller.js";
 import {
   getPreferencesHandler,
@@ -237,74 +236,6 @@ export async function coldStorageRoutes(fastify: FastifyInstance) {
       },
     },
     updatePreferencesHandler,
-  );
-
-  // Delete all data for a cold storage (farmers only if not linked elsewhere; orders, ledgers, vouchers, histories)
-  const deleteDataSchema = {
-    params: {
-      type: "object",
-      properties: { id: { type: "string" } },
-      required: ["id"],
-    },
-    description:
-      "Delete all data associated with this cold storage: farmer documents (only when not linked to another storage), incoming/outgoing orders, ledgers, vouchers, edit histories. Returns farmer documents that were not deleted because they are linked to another cold storage.",
-    tags: ["Cold Storage"],
-    summary: "Delete cold storage data",
-    response: {
-      200: {
-        description: "Data deleted; may include farmers linked elsewhere",
-        type: "object",
-        properties: {
-          success: { type: "boolean" },
-          data: {
-            type: "object",
-            properties: {
-              farmersLinkedElsewhere: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    _id: { type: "string" },
-                    name: { type: "string" },
-                    address: { type: "string" },
-                    mobileNumber: { type: "string" },
-                    imageUrl: { type: "string" },
-                    createdAt: { type: "string", format: "date-time" },
-                    updatedAt: { type: "string", format: "date-time" },
-                  },
-                },
-              },
-            },
-          },
-          message: { type: "string" },
-        },
-      },
-      400: {
-        description: "Bad request – invalid cold storage ID format",
-        ...errorResponse,
-      },
-      404: {
-        description: "Cold storage not found",
-        ...errorResponse,
-      },
-      500: {
-        description: "Server error",
-        ...errorResponse,
-      },
-    },
-  };
-  fastify.delete<{ Params: { id: string } }>(
-    "/:id/data",
-    {
-      schema: deleteDataSchema,
-      config: {
-        rateLimit: {
-          max: 10,
-          timeWindow: "1 minute",
-        },
-      },
-    },
-    deleteColdStorageDataHandler,
   );
 
   // Get cold storage by ID
