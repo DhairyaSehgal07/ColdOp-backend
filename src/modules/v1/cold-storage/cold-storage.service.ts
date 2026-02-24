@@ -12,6 +12,14 @@ import {
 } from "../../../utils/errors.js";
 import mongoose from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
+import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
+import { Farmer } from "../farmer/farmer-model.js";
+import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
+import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
+import Ledger from "../ledger/ledger.model.js";
+import Voucher from "../voucher/voucher.model.js";
+import { EditHistory } from "../edit-history/edit-history.model.js";
+import { FarmerEditHistory } from "../farmer-edit-history/farmer-edit-history.model.js";
 
 /**
  * Creates a new cold storage
@@ -271,5 +279,118 @@ export async function getColdStorageById(
       500,
       "GET_COLD_STORAGE_BY_ID_ERROR",
     );
+  }
+}
+
+export interface DeleteColdStorageDataResult {
+  farmersLinkedElsewhere: Array<{
+    _id: mongoose.Types.ObjectId;
+    name: string;
+    address: string;
+    mobileNumber: string;
+    imageUrl?: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
+}
+
+/**
+ * Deletes all data associated with a cold storage: farmer documents (only when
+ * the farmer is not linked to any other storage), incoming/outgoing gate passes,
+ * ledgers, vouchers, edit histories, farmer edit histories, and farmer-storage links.
+ * Returns farmer documents that were not deleted because they are linked to another storage.
+ *
+ * @param id - Cold storage ID
+ * @param logger - Optional logger instance
+ * @returns Object with farmersLinkedElsewhere (farmers that could not be deleted)
+ * @throws ValidationError if ID format is invalid
+ * @throws NotFoundError if cold storage does not exist
+ */
+export async function deleteColdStorageData(
+  id: string,
+  logger?: FastifyBaseLogger,
+): Promise<DeleteColdStorageDataResult> {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ValidationError(
+      "The cold storage ID format is invalid",
+      "INVALID_ID",
+    );
+  }
+
+  const coldStorageId = new mongoose.Types.ObjectId(id);
+  const coldStorage = await ColdStorage.findById(coldStorageId);
+  if (!coldStorage) {
+    logger?.warn({ coldStorageId: id }, "Cold storage not found for data delete");
+    throw new NotFoundError(
+      "No cold storage found with the given ID",
+      "COLD_STORAGE_NOT_FOUND",
+    );
+  }
+
+  const links = await FarmerStorageLink.find({ coldStorageId }).lean();
+  const linkIds = links.map((l) => l._id);
+  const farmerIdsFromThisStorage = [...new Set(links.map((l) => l.farmerId.toString()))].map(
+    (fid) => new mongoose.Types.ObjectId(fid),
+  );
+
+  // Farmers that have at least one link to a different cold storage
+  const farmerIdsLinkedElsewhere = await FarmerStorageLink.distinct("farmerId", {
+    farmerId: { $in: farmerIdsFromThisStorage },
+    coldStorageId: { $ne: coldStorageId },
+  });
+
+  const farmersLinkedElsewhere =
+    farmerIdsLinkedElsewhere.length > 0
+      ? await Farmer.find({ _id: { $in: farmerIdsLinkedElsewhere } })
+          .select("-password")
+          .lean()
+      : [];
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    // Delete in dependency order: gate passes → vouchers → ledgers → edit histories → links → farmers
+
+    await IncomingGatePass.deleteMany(
+      { farmerStorageLinkId: { $in: linkIds } },
+      { session },
+    );
+    await OutgoingGatePass.deleteMany(
+      { farmerStorageLinkId: { $in: linkIds } },
+      { session },
+    );
+    await Voucher.deleteMany({ coldStorageId }, { session });
+    await Ledger.deleteMany({ coldStorageId }, { session });
+    await EditHistory.deleteMany({ coldStorageId }, { session });
+    await FarmerEditHistory.deleteMany({ coldStorageId }, { session });
+    await FarmerStorageLink.deleteMany({ coldStorageId }, { session });
+
+    const farmerIdsToDelete = farmerIdsFromThisStorage.filter(
+      (fid) =>
+        !farmerIdsLinkedElsewhere.some((oid) => oid.toString() === fid.toString()),
+    );
+    if (farmerIdsToDelete.length > 0) {
+      await Farmer.deleteMany({ _id: { $in: farmerIdsToDelete } }, { session });
+    }
+
+    await session.commitTransaction();
+    logger?.info(
+      {
+        coldStorageId: id,
+        farmersLinkedElsewhereCount: farmersLinkedElsewhere.length,
+        farmersDeletedCount: farmerIdsToDelete.length,
+      },
+      "Cold storage data deleted successfully",
+    );
+
+    return {
+      farmersLinkedElsewhere: farmersLinkedElsewhere as DeleteColdStorageDataResult["farmersLinkedElsewhere"],
+    };
+  } catch (txError) {
+    await session.abortTransaction();
+    logger?.error({ err: txError, coldStorageId: id }, "Error in deleteColdStorageData transaction");
+    throw txError;
+  } finally {
+    await session.endSession();
   }
 }

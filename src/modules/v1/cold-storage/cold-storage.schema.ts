@@ -69,3 +69,10 @@ export type GetColdStoragesQuery = z.infer<
 export type GetColdStorageByIdParams = z.infer<
   typeof getColdStorageByIdParamsSchema
 >["params"];
+
+/** Params for delete cold storage data (reuses id from getColdStorageById) */
+export const deleteColdStorageDataParamsSchema = getColdStorageByIdParamsSchema;
+
+export type DeleteColdStorageDataParams = z.infer<
+  typeof deleteColdStorageDataParamsSchema
+>["params"];

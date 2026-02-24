@@ -3,11 +3,13 @@ import {
   createColdStorage,
   getColdStorages,
   getColdStorageById,
+  deleteColdStorageData,
 } from "./cold-storage.service.js";
 import {
   CreateColdStorageInput,
   GetColdStoragesQuery,
   GetColdStorageByIdParams,
+  DeleteColdStorageDataParams,
 } from "./cold-storage.schema.js";
 import {
   AppError,
@@ -160,6 +162,43 @@ export async function getColdStorageByIdHandler(
       error,
       reply,
       "We couldn't load this cold storage. Please try again later.",
+    );
+  }
+}
+
+/**
+ * Handler for deleting all data associated with a cold storage (farmers only if not linked elsewhere,
+ * incoming/outgoing orders, ledgers, vouchers, edit histories). Returns farmers linked to another storage.
+ */
+export async function deleteColdStorageDataHandler(
+  request: FastifyRequest<{ Params: DeleteColdStorageDataParams }>,
+  reply: FastifyReply,
+) {
+  try {
+    const result = await deleteColdStorageData(
+      request.params.id,
+      request.log,
+    );
+
+    return reply.send({
+      success: true,
+      data: {
+        farmersLinkedElsewhere: result.farmersLinkedElsewhere,
+      },
+      message:
+        result.farmersLinkedElsewhere.length > 0
+          ? "Cold storage data deleted. Some farmers were not deleted because they are linked to another cold storage."
+          : "Cold storage data deleted successfully.",
+    });
+  } catch (error) {
+    request.log.error(
+      { err: error, params: request.params },
+      "Error in deleteColdStorageDataHandler",
+    );
+    return handleError(
+      error,
+      reply,
+      "We couldn't delete the cold storage data. Please try again later.",
     );
   }
 }
