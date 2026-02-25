@@ -41,6 +41,10 @@ export const createIncomingGatePassSchema = z.object({
 
     manualParchiNumber: z.string().trim().optional(),
 
+    stockFilter: z.string().trim().optional(),
+
+    customMarka: z.string().trim().optional(),
+
     // Voucher amount when cold storage showFinances is true (ledgers resolved on backend)
     amount: z.coerce
       .number()
@@ -99,6 +103,8 @@ export const updateIncomingGatePassSchema = z.object({
         .number()
         .positive("Amount must be greater than 0")
         .optional(),
+      stockFilter: z.string().trim().optional(),
+      customMarka: z.string().trim().optional(),
     })
     .refine(
       (data) =>
@@ -108,7 +114,9 @@ export const updateIncomingGatePassSchema = z.object({
         data.remarks !== undefined ||
         data.manualParchiNumber !== undefined ||
         data.bagSizes !== undefined ||
-        data.amount !== undefined,
+        data.amount !== undefined ||
+        data.stockFilter !== undefined ||
+        data.customMarka !== undefined,
       "At least one field must be provided for update",
     ),
 });

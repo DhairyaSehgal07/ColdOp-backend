@@ -337,6 +337,14 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                       description:
                         "Manual parchi/voucher number (incoming: string, outgoing: number)",
                     },
+                    stockFilter: {
+                      type: "string",
+                      description: "Stock filter (incoming orders only)",
+                    },
+                    customMarka: {
+                      type: "string",
+                      description: "Custom marka (incoming orders only)",
+                    },
                   },
                 },
               },

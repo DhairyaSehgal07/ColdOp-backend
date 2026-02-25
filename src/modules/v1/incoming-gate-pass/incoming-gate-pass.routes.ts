@@ -184,6 +184,8 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
             truckNumber: { type: "string" },
             remarks: { type: "string" },
             manualParchiNumber: { type: "string" },
+            stockFilter: { type: "string" },
+            customMarka: { type: "string" },
             amount: {
               type: "number",
               minimum: 0.01,

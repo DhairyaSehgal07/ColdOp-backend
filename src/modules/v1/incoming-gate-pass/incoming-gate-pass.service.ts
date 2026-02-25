@@ -393,6 +393,12 @@ export async function createIncomingGatePass(
       bagSizes: payload.bagSizes,
       remarks: payload.remarks,
       manualParchiNumber: payload.manualParchiNumber,
+      ...(payload.stockFilter !== undefined && {
+        stockFilter: payload.stockFilter,
+      }),
+      ...(payload.customMarka !== undefined && {
+        customMarka: payload.customMarka,
+      }),
       ...(rentEntryVoucherId ? { rentEntryVoucherId } : {}),
     });
 
@@ -611,6 +617,13 @@ export async function updateIncomingGatePass(
       );
     }
 
+    const coldStorageObj = await ColdStorage.findById(linkColdStorageId)
+      .select("preferencesId")
+      .lean();
+    const preferences = coldStorageObj?.preferencesId
+      ? await Preferences.findById(coldStorageObj.preferencesId).lean()
+      : null;
+
     const rentEntryVoucherId = (
       existing as { rentEntryVoucherId?: mongoose.Types.ObjectId }
     ).rentEntryVoucherId;
@@ -623,6 +636,10 @@ export async function updateIncomingGatePass(
     if (payload.remarks !== undefined) updateFields.remarks = payload.remarks;
     if (payload.manualParchiNumber !== undefined)
       updateFields.manualParchiNumber = payload.manualParchiNumber;
+    if (payload.stockFilter !== undefined)
+      updateFields.stockFilter = payload.stockFilter;
+    if (payload.customMarka !== undefined)
+      updateFields.customMarka = payload.customMarka;
     if (payload.bagSizes !== undefined) {
       updateFields.bagSizes = payload.bagSizes.map((b) => ({
         name: b.name,
@@ -634,6 +651,7 @@ export async function updateIncomingGatePass(
     }
 
     const hasRentAmountUpdate =
+      preferences?.showFinances === true &&
       payload.amount !== undefined &&
       payload.amount > 0 &&
       rentEntryVoucherId != null;
@@ -735,6 +753,8 @@ export async function updateIncomingGatePass(
     if (payload.remarks !== undefined) changeParts.push("remarks");
     if (payload.manualParchiNumber !== undefined)
       changeParts.push("manual parchi number");
+    if (payload.stockFilter !== undefined) changeParts.push("stock filter");
+    if (payload.customMarka !== undefined) changeParts.push("custom marka");
     if (payload.bagSizes !== undefined)
       changeParts.push("quantities (initial & current)");
     if (hasRentAmountUpdate) changeParts.push("rent entry amount");

@@ -56,6 +56,10 @@ export interface IIncomingGatePass {
   /** Reference to the rent entry voucher created when showFinances is enabled */
   rentEntryVoucherId?: Types.ObjectId;
 
+  stockFilter?: string;
+
+  customMarka?: string;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -183,6 +187,18 @@ const IncomingGatePassSchema = new Schema<IIncomingGatePass>(
       type: Schema.Types.ObjectId,
       ref: "Voucher",
       required: false,
+    },
+
+    stockFilter: {
+      type: String,
+      required: false,
+      trim: true,
+    },
+
+    customMarka: {
+      type: String,
+      required: false,
+      trim: true,
     },
   },
   {
