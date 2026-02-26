@@ -460,6 +460,10 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
                         type: "array",
                         items: {
                           type: "object",
+                          properties: {
+                            customMarka: { type: "string" },
+                            stockFilter: { type: "string" },
+                          },
                           additionalProperties: true,
                         },
                       },
@@ -497,6 +501,10 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
                               type: "array",
                               items: {
                                 type: "object",
+                                properties: {
+                                  customMarka: { type: "string" },
+                                  stockFilter: { type: "string" },
+                                },
                                 additionalProperties: true,
                               },
                             },
