@@ -656,18 +656,22 @@ export async function updateIncomingGatePass(
       payload.amount > 0 &&
       rentEntryVoucherId != null;
 
-    if (payload.amount !== undefined && payload.amount <= 0) {
-      throw new ValidationError(
-        "Rent entry amount must be greater than 0",
-        "INVALID_AMOUNT",
-      );
+    // Only validate or update amount/voucher when cold storage has showFinances enabled
+    if (preferences?.showFinances === true) {
+      if (payload.amount !== undefined && payload.amount <= 0) {
+        throw new ValidationError(
+          "Rent entry amount must be greater than 0",
+          "INVALID_AMOUNT",
+        );
+      }
+      if (payload.amount !== undefined && rentEntryVoucherId == null) {
+        throw new ValidationError(
+          "This gate pass has no rent entry voucher; amount cannot be updated",
+          "NO_RENT_ENTRY_VOUCHER",
+        );
+      }
     }
-    if (payload.amount !== undefined && rentEntryVoucherId == null) {
-      throw new ValidationError(
-        "This gate pass has no rent entry voucher; amount cannot be updated",
-        "NO_RENT_ENTRY_VOUCHER",
-      );
-    }
+
     if (hasRentAmountUpdate) {
       const rentVoucher = await Voucher.findById(rentEntryVoucherId)
         .session(session)
