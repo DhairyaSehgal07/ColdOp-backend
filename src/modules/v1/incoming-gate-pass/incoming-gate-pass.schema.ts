@@ -89,6 +89,15 @@ export const updateIncomingGatePassSchema = z.object({
   }),
   body: z
     .object({
+      farmerStorageLinkId: z
+        .string()
+        .trim()
+        .min(1, "Farmer storage link ID cannot be empty")
+        .refine(
+          (val) => mongoose.Types.ObjectId.isValid(val),
+          "Invalid farmer storage link ID format",
+        )
+        .optional(),
       date: z.coerce.date().optional(),
       variety: z.string().trim().min(1, "Variety cannot be empty").optional(),
       truckNumber: z.string().trim().optional(),
@@ -108,6 +117,7 @@ export const updateIncomingGatePassSchema = z.object({
     })
     .refine(
       (data) =>
+        data.farmerStorageLinkId !== undefined ||
         data.date !== undefined ||
         data.variety !== undefined ||
         data.truckNumber !== undefined ||

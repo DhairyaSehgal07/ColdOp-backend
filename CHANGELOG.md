@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-03-05
+
+### Added
+
+- **Incoming Gate Pass**
+  - Update endpoint now accepts optional `farmerStorageLinkId` in the request body to reassign an incoming gate pass to a different farmer-storage link. Validation ensures the link exists and belongs to the same cold storage; edit history records the change.
+
 ## [1.14.0] - 2026-02-25
 
 ### Added

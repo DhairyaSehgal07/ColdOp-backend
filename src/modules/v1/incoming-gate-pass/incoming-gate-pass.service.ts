@@ -629,6 +629,38 @@ export async function updateIncomingGatePass(
     ).rentEntryVoucherId;
 
     const updateFields: Record<string, unknown> = {};
+
+    if (payload.farmerStorageLinkId !== undefined) {
+      const newLinkIdObj = new mongoose.Types.ObjectId(
+        payload.farmerStorageLinkId,
+      );
+      const newLink = await FarmerStorageLink.findById(newLinkIdObj)
+        .session(session)
+        .lean();
+      if (!newLink) {
+        throw new NotFoundError(
+          "Farmer-storage-link not found",
+          "FARMER_STORAGE_LINK_NOT_FOUND",
+        );
+      }
+      const newLinkColdStorageId =
+        typeof newLink.coldStorageId === "object" &&
+        newLink.coldStorageId !== null
+          ? (
+              newLink.coldStorageId as { _id: mongoose.Types.ObjectId }
+            )._id.toString()
+          : (newLink.coldStorageId as string);
+      if (
+        loggedInUserColdStorageId &&
+        newLinkColdStorageId !== loggedInUserColdStorageId
+      ) {
+        throw new NotFoundError(
+          "Farmer-storage-link not found",
+          "FARMER_STORAGE_LINK_NOT_FOUND",
+        );
+      }
+      updateFields.farmerStorageLinkId = newLinkIdObj;
+    }
     if (payload.date !== undefined) updateFields.date = payload.date;
     if (payload.variety !== undefined) updateFields.variety = payload.variety;
     if (payload.truckNumber !== undefined)
@@ -751,6 +783,8 @@ export async function updateIncomingGatePass(
     );
 
     const changeParts: string[] = [];
+    if (payload.farmerStorageLinkId !== undefined)
+      changeParts.push("farmer-storage-link");
     if (payload.date !== undefined) changeParts.push("date");
     if (payload.variety !== undefined) changeParts.push("variety");
     if (payload.truckNumber !== undefined) changeParts.push("truck number");

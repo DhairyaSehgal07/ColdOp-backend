@@ -179,6 +179,11 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
           type: "object",
           minProperties: 1,
           properties: {
+            farmerStorageLinkId: {
+              type: "string",
+              description:
+                "Farmer-storage-link ID to associate the gate pass with (must belong to same cold storage)",
+            },
             date: { type: "string", format: "date-time" },
             variety: { type: "string" },
             truckNumber: { type: "string" },
