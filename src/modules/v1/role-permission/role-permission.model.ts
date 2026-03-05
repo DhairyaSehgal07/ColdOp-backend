@@ -21,12 +21,10 @@ const rolePermissionSchema = new Schema<IRolePermission>(
       type: Schema.Types.ObjectId,
       ref: "ColdStorage",
       required: true,
-      index: true,
     },
     role: {
       type: String,
       required: true,
-      index: true,
     },
     permissions: [
       {
@@ -46,6 +44,7 @@ const rolePermissionSchema = new Schema<IRolePermission>(
   { timestamps: true },
 );
 
+// Unique role per cold storage; findOneAndUpdate(coldStorageId, role); find(coldStorageId) uses prefix
 rolePermissionSchema.index({ coldStorageId: 1, role: 1 }, { unique: true });
 
 export const RolePermission: Model<IRolePermission> =

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-03-05
+
+### Added
+
+- **Analytics – Stock summary by stock filter**
+  - `GET /api/v1/analytics/summary` now accepts optional query param `stockFilter=true`. When set, the summary is grouped by stock filter: **FARMER** and **OWNED**. Response includes `stockSummaryByFilter.FARMER` and `stockSummaryByFilter.OWNED`, each with the same shape as the default summary (stockSummary, chartData, totalInventory, topVariety, topSize). Matching uses case-sensitive values `"FARMER"` and `"OWNED"` on IncomingGatePass documents.
+
 ## [1.15.0] - 2026-03-05
 
 ### Added

@@ -36,7 +36,8 @@ function sendErrorReply(
 /**
  * GET /summary – stock summary by variety and size (initial, current, removed)
  * with chart-ready data for Recharts. Requires authentication.
- * Uses only the current logged-in store admin's cold storage (from JWT); no query/params/body.
+ * Uses only the current logged-in store admin's cold storage (from JWT).
+ * Query param stockFilter=true: group summary by stock filter (FARMER and OWNED).
  */
 export async function getSummaryHandler(
   request: FastifyRequest,
@@ -62,7 +63,23 @@ export async function getSummaryHandler(
       });
     }
 
-    const result = await getStockSummary(coldStorageId, request.log);
+    const stockFilter =
+      (request.query as { stockFilter?: string }).stockFilter === "true";
+
+    const result = await getStockSummary(coldStorageId, request.log, {
+      groupByStockFilter: stockFilter,
+    });
+
+    if ("stockSummaryByFilter" in result) {
+      return reply.code(200).send({
+        success: true,
+        data: {
+          stockSummaryByFilter: result.stockSummaryByFilter,
+        },
+        message:
+          "Stock summary retrieved successfully (grouped by stock filter)",
+      });
+    }
 
     return reply.code(200).send({
       success: true,

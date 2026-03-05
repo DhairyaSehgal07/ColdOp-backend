@@ -27,7 +27,7 @@ const ColdStorageSchema = new Schema<IColdStorage>(
   {
     name: { type: String, required: true },
     address: { type: String, required: true },
-    mobileNumber: { type: String, required: true, unique: true, index: true },
+    mobileNumber: { type: String, required: true, unique: true },
     capacity: { type: Number, required: true },
     imageUrl: { type: String, default: "" },
     isPaid: { type: Boolean, default: false },
@@ -43,7 +43,7 @@ const ColdStorageSchema = new Schema<IColdStorage>(
   },
 );
 
-/* Indexes: mobileNumber unique + index in schema above. List/sort is dynamic (name, capacity, createdAt); no extra index. */
+/* Indexes: mobileNumber unique in schema above (creates unique index). List/sort is dynamic (name, capacity, createdAt); no extra index. */
 
 // Export model
 export const ColdStorage = mongoose.model<IColdStorage>(

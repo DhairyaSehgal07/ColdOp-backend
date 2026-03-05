@@ -182,9 +182,20 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate pass snapshots are not used). Scoped to authenticated user's cold storage.",
+          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate pass snapshots are not used). Scoped to authenticated user's cold storage. If stockFilter=true, summary is grouped by stock filter: FARMER and OWNED.",
         tags: ["Analytics"],
         summary: "Get stock summary",
+        querystring: {
+          type: "object",
+          properties: {
+            stockFilter: {
+              type: "string",
+              description:
+                "If 'true', group summary by stock filter (FARMER and OWNED)",
+              enum: ["true", "false"],
+            },
+          },
+        },
         response: {
           200: {
             description: "Stock summary and chart data",
@@ -197,6 +208,8 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
                   stockSummary: {
                     type: "array",
                     items: varietyItemSchema,
+                    description:
+                      "Present when stockFilter is not true (default)",
                   },
                   chartData: {
                     type: "object",
@@ -223,14 +236,94 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
                   topSize: {
                     oneOf: [topSizeSchema, { type: "null" }],
                   },
+                  stockSummaryByFilter: {
+                    type: "object",
+                    description:
+                      "Present when stockFilter=true: summary grouped by FARMER and OWNED",
+                    properties: {
+                      FARMER: {
+                        type: "object",
+                        properties: {
+                          stockSummary: {
+                            type: "array",
+                            items: varietyItemSchema,
+                          },
+                          chartData: {
+                            type: "object",
+                            properties: {
+                              flatSeries: {
+                                type: "array",
+                                items: chartDataPointSchema,
+                              },
+                              varieties: {
+                                type: "array",
+                                items: { type: "string" },
+                              },
+                              sizes: {
+                                type: "array",
+                                items: { type: "string" },
+                              },
+                            },
+                            required: ["flatSeries", "varieties", "sizes"],
+                          },
+                          totalInventory: totalInventorySchema,
+                          topVariety: {
+                            oneOf: [topVarietySchema, { type: "null" }],
+                          },
+                          topSize: { oneOf: [topSizeSchema, { type: "null" }] },
+                        },
+                        required: [
+                          "stockSummary",
+                          "chartData",
+                          "totalInventory",
+                          "topVariety",
+                          "topSize",
+                        ],
+                      },
+                      OWNED: {
+                        type: "object",
+                        properties: {
+                          stockSummary: {
+                            type: "array",
+                            items: varietyItemSchema,
+                          },
+                          chartData: {
+                            type: "object",
+                            properties: {
+                              flatSeries: {
+                                type: "array",
+                                items: chartDataPointSchema,
+                              },
+                              varieties: {
+                                type: "array",
+                                items: { type: "string" },
+                              },
+                              sizes: {
+                                type: "array",
+                                items: { type: "string" },
+                              },
+                            },
+                            required: ["flatSeries", "varieties", "sizes"],
+                          },
+                          totalInventory: totalInventorySchema,
+                          topVariety: {
+                            oneOf: [topVarietySchema, { type: "null" }],
+                          },
+                          topSize: { oneOf: [topSizeSchema, { type: "null" }] },
+                        },
+                        required: [
+                          "stockSummary",
+                          "chartData",
+                          "totalInventory",
+                          "topVariety",
+                          "topSize",
+                        ],
+                      },
+                    },
+                    required: ["FARMER", "OWNED"],
+                  },
                 },
-                required: [
-                  "stockSummary",
-                  "chartData",
-                  "totalInventory",
-                  "topVariety",
-                  "topSize",
-                ],
+                required: [],
               },
               message: { type: "string" },
             },

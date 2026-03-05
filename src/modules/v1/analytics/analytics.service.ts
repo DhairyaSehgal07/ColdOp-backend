@@ -106,6 +106,17 @@ export interface StockSummaryResult {
   topSize: TopSize | null;
 }
 
+/** Result when groupByStockFilter is true: summary grouped by FARMER and OWNED */
+export interface StockSummaryByFilterResult {
+  stockSummaryByFilter: {
+    FARMER: StockSummaryResult;
+    OWNED: StockSummaryResult;
+  };
+}
+
+const STOCK_FILTER_FARMER = "FARMER";
+const STOCK_FILTER_OWNED = "OWNED";
+
 /**
  * Get stock summary for a cold storage: all bag varieties and sizes with
  * initial quantity, current quantity, and quantity removed (initial - current).
@@ -118,11 +129,16 @@ export interface StockSummaryResult {
  * on IncomingGatePass at creation time, so this summary always reflects the
  * current stock correctly. OutgoingGatePass.incomingGatePassSnapshots (which
  * now only stores sizes that were updated per outgoing pass) is not used here.
+ *
+ * When options.groupByStockFilter is true, returns summary grouped by stock filter
+ * (FARMER and OWNED). Documents with stockFilter "FARMER" go to FARMER; "OWNED" or
+ * missing/null go to OWNED.
  */
 export async function getStockSummary(
   coldStorageId: string,
   logger?: FastifyBaseLogger,
-): Promise<StockSummaryResult> {
+  options?: { groupByStockFilter?: boolean },
+): Promise<StockSummaryResult | StockSummaryByFilterResult> {
   if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
     throw new ValidationError(
       "Invalid cold storage ID format",
@@ -130,7 +146,54 @@ export async function getStockSummary(
     );
   }
 
+  if (options?.groupByStockFilter) {
+    const [farmerResult, ownedResult] = await Promise.all([
+      getStockSummaryForFilter(coldStorageId, STOCK_FILTER_FARMER, logger),
+      getStockSummaryForFilter(coldStorageId, STOCK_FILTER_OWNED, logger),
+    ]);
+    return {
+      stockSummaryByFilter: {
+        FARMER: farmerResult,
+        OWNED: ownedResult,
+      },
+    };
+  }
+
+  return getStockSummaryForFilter(coldStorageId, undefined, logger);
+}
+
+/**
+ * Internal: get stock summary optionally filtered by stockFilter value.
+ * When filterValue is "FARMER", only documents with stockFilter "FARMER" are included.
+ * When filterValue is "OWNED", documents with stockFilter "OWNED" or missing/null are included.
+ * When filterValue is undefined, no stockFilter filter is applied (all documents).
+ */
+async function getStockSummaryForFilter(
+  coldStorageId: string,
+  filterValue:
+    | typeof STOCK_FILTER_FARMER
+    | typeof STOCK_FILTER_OWNED
+    | undefined,
+  logger?: FastifyBaseLogger,
+): Promise<StockSummaryResult> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+
+  const stockFilterMatch: mongoose.PipelineStage[] =
+    filterValue === STOCK_FILTER_FARMER
+      ? [{ $match: { stockFilter: STOCK_FILTER_FARMER } }]
+      : filterValue === STOCK_FILTER_OWNED
+        ? [
+            {
+              $match: {
+                $or: [
+                  { stockFilter: STOCK_FILTER_OWNED },
+                  { stockFilter: { $in: [null, ""] } },
+                  { stockFilter: { $exists: false } },
+                ],
+              },
+            },
+          ]
+        : [];
 
   const pipeline: mongoose.PipelineStage[] = [
     {
@@ -147,6 +210,7 @@ export async function getStockSummary(
         "_link.coldStorageId": coldStorageObjectId,
       },
     },
+    ...stockFilterMatch,
     { $unwind: "$bagSizes" },
     {
       $group: {
