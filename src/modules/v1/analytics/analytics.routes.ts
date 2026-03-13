@@ -1,0 +1,648 @@
+import { FastifyInstance } from "fastify";
+import {
+  getSummaryHandler,
+  getTopFarmersHandler,
+  getVarietyBreakdownHandler,
+  getReportsHandler,
+  getIncomingGatePassesHandler,
+} from "./analytics.controller.js";
+import { authenticate } from "../../../utils/auth.js";
+
+/** Reusable error response schema for OpenAPI */
+const errorResponse = {
+  type: "object" as const,
+  properties: {
+    success: { type: "boolean" as const, const: false },
+    error: {
+      type: "object" as const,
+      properties: {
+        code: { type: "string" },
+        message: { type: "string" },
+      },
+      required: ["code", "message"],
+    },
+  },
+  required: ["success", "error"],
+};
+
+const sizeItemSchema = {
+  type: "object" as const,
+  properties: {
+    size: { type: "string" },
+    initialQuantity: { type: "number" },
+    currentQuantity: { type: "number" },
+  },
+  required: ["size", "initialQuantity", "currentQuantity"],
+};
+
+const varietyItemSchema = {
+  type: "object" as const,
+  properties: {
+    variety: { type: "string" },
+    sizes: {
+      type: "array" as const,
+      items: sizeItemSchema,
+    },
+  },
+  required: ["variety", "sizes"],
+};
+
+const chartDataPointSchema = {
+  type: "object" as const,
+  properties: {
+    name: { type: "string" },
+    variety: { type: "string" },
+    size: { type: "string" },
+    initialQuantity: { type: "number" },
+    currentQuantity: { type: "number" },
+  },
+  required: ["name", "variety", "size", "initialQuantity", "currentQuantity"],
+};
+
+const totalInventorySchema = {
+  type: "object" as const,
+  properties: {
+    initial: { type: "number" },
+    current: { type: "number" },
+  },
+  required: ["initial", "current"],
+};
+
+const topVarietySchema = {
+  type: "object" as const,
+  properties: {
+    variety: { type: "string" },
+    currentQuantity: { type: "number" },
+  },
+  required: ["variety", "currentQuantity"],
+};
+
+const topSizeSchema = {
+  type: "object" as const,
+  properties: {
+    size: { type: "string" },
+    currentQuantity: { type: "number" },
+  },
+  required: ["size", "currentQuantity"],
+};
+
+const topFarmerChartPointSchema = {
+  type: "object" as const,
+  properties: {
+    name: { type: "string" },
+    value: { type: "number" },
+  },
+  required: ["name", "value"],
+};
+
+const topFarmersChartDataSchema = {
+  type: "object" as const,
+  properties: {
+    byCurrentQuantity: {
+      type: "array" as const,
+      items: topFarmerChartPointSchema,
+    },
+    byInitialQuantity: {
+      type: "array" as const,
+      items: topFarmerChartPointSchema,
+    },
+    byQuantityRemoved: {
+      type: "array" as const,
+      items: topFarmerChartPointSchema,
+    },
+  },
+  required: ["byCurrentQuantity", "byInitialQuantity", "byQuantityRemoved"],
+};
+
+const varietyBreakdownFarmerContributionSchema = {
+  type: "object" as const,
+  properties: {
+    farmerName: { type: "string" },
+    initialQuantity: { type: "number" },
+    currentQuantity: { type: "number" },
+    quantityRemoved: { type: "number" },
+  },
+  required: [
+    "farmerName",
+    "initialQuantity",
+    "currentQuantity",
+    "quantityRemoved",
+  ],
+};
+
+const varietyBreakdownSizeSchema = {
+  type: "object" as const,
+  properties: {
+    size: { type: "string" },
+    initialQuantity: { type: "number" },
+    currentQuantity: { type: "number" },
+    quantityRemoved: { type: "number" },
+    farmerBreakdown: {
+      type: "array" as const,
+      items: varietyBreakdownFarmerContributionSchema,
+    },
+  },
+  required: [
+    "size",
+    "initialQuantity",
+    "currentQuantity",
+    "quantityRemoved",
+    "farmerBreakdown",
+  ],
+};
+
+const varietyBreakdownResultSchema = {
+  type: "object" as const,
+  properties: {
+    variety: { type: "string" },
+    sizes: {
+      type: "array" as const,
+      items: varietyBreakdownSizeSchema,
+    },
+  },
+  required: ["variety", "sizes"],
+};
+
+/**
+ * Register analytics routes
+ * @param fastify - Fastify instance
+ */
+export async function analyticsRoutes(fastify: FastifyInstance) {
+  fastify.get("/", (_request, reply) => {
+    return reply.code(200).send({
+      success: true,
+      data: {},
+      message: "Analytics created successfully",
+    });
+  });
+
+  // GET /summary – stock summary by variety and size with chart data for Recharts
+  fastify.get(
+    "/summary",
+    {
+      schema: {
+        description:
+          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate pass snapshots are not used). Scoped to authenticated user's cold storage. If stockFilter=true, summary is grouped by stock filter: FARMER and OWNED.",
+        tags: ["Analytics"],
+        summary: "Get stock summary",
+        querystring: {
+          type: "object",
+          properties: {
+            stockFilter: {
+              type: "string",
+              description:
+                "If 'true', group summary by stock filter (FARMER and OWNED)",
+              enum: ["true", "false"],
+            },
+          },
+        },
+        response: {
+          200: {
+            description: "Stock summary and chart data",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  stockSummary: {
+                    type: "array",
+                    items: varietyItemSchema,
+                    description:
+                      "Present when stockFilter is not true (default)",
+                  },
+                  chartData: {
+                    type: "object",
+                    properties: {
+                      flatSeries: {
+                        type: "array",
+                        items: chartDataPointSchema,
+                      },
+                      varieties: {
+                        type: "array",
+                        items: { type: "string" },
+                      },
+                      sizes: {
+                        type: "array",
+                        items: { type: "string" },
+                      },
+                    },
+                    required: ["flatSeries", "varieties", "sizes"],
+                  },
+                  totalInventory: totalInventorySchema,
+                  topVariety: {
+                    oneOf: [topVarietySchema, { type: "null" }],
+                  },
+                  topSize: {
+                    oneOf: [topSizeSchema, { type: "null" }],
+                  },
+                  stockSummaryByFilter: {
+                    type: "object",
+                    description:
+                      "Present when stockFilter=true: summary grouped by FARMER and OWNED",
+                    properties: {
+                      FARMER: {
+                        type: "object",
+                        properties: {
+                          stockSummary: {
+                            type: "array",
+                            items: varietyItemSchema,
+                          },
+                          chartData: {
+                            type: "object",
+                            properties: {
+                              flatSeries: {
+                                type: "array",
+                                items: chartDataPointSchema,
+                              },
+                              varieties: {
+                                type: "array",
+                                items: { type: "string" },
+                              },
+                              sizes: {
+                                type: "array",
+                                items: { type: "string" },
+                              },
+                            },
+                            required: ["flatSeries", "varieties", "sizes"],
+                          },
+                          totalInventory: totalInventorySchema,
+                          topVariety: {
+                            oneOf: [topVarietySchema, { type: "null" }],
+                          },
+                          topSize: { oneOf: [topSizeSchema, { type: "null" }] },
+                        },
+                        required: [
+                          "stockSummary",
+                          "chartData",
+                          "totalInventory",
+                          "topVariety",
+                          "topSize",
+                        ],
+                      },
+                      OWNED: {
+                        type: "object",
+                        properties: {
+                          stockSummary: {
+                            type: "array",
+                            items: varietyItemSchema,
+                          },
+                          chartData: {
+                            type: "object",
+                            properties: {
+                              flatSeries: {
+                                type: "array",
+                                items: chartDataPointSchema,
+                              },
+                              varieties: {
+                                type: "array",
+                                items: { type: "string" },
+                              },
+                              sizes: {
+                                type: "array",
+                                items: { type: "string" },
+                              },
+                            },
+                            required: ["flatSeries", "varieties", "sizes"],
+                          },
+                          totalInventory: totalInventorySchema,
+                          topVariety: {
+                            oneOf: [topVarietySchema, { type: "null" }],
+                          },
+                          topSize: { oneOf: [topSizeSchema, { type: "null" }] },
+                        },
+                        required: [
+                          "stockSummary",
+                          "chartData",
+                          "totalInventory",
+                          "topVariety",
+                          "topSize",
+                        ],
+                      },
+                    },
+                    required: ["FARMER", "OWNED"],
+                  },
+                },
+                required: [],
+              },
+              message: { type: "string" },
+            },
+            required: ["success", "data", "message"],
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            ...errorResponse,
+          },
+          500: {
+            description: "Server error",
+            ...errorResponse,
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getSummaryHandler as never,
+  );
+
+  // GET /top-farmers – top 5 farmers by current/initial/quantityRemoved for Recharts
+  fastify.get(
+    "/top-farmers",
+    {
+      schema: {
+        description:
+          "Get top 5 farmers by current quantity, initial quantity, and quantity removed for the authenticated store. Response is formatted for Recharts: each series is an array of { name, value }.",
+        tags: ["Analytics"],
+        summary: "Get top 5 farmers (chart-ready)",
+        response: {
+          200: {
+            description: "Top farmers chart data",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  chartData: topFarmersChartDataSchema,
+                },
+                required: ["chartData"],
+              },
+              message: { type: "string" },
+            },
+            required: ["success", "data", "message"],
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            ...errorResponse,
+          },
+          500: {
+            description: "Server error",
+            ...errorResponse,
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getTopFarmersHandler as never,
+  );
+
+  // GET /incoming-gate-passes – all incoming gate passes for the logged-in storage
+  fastify.get(
+    "/incoming-gate-passes",
+    {
+      schema: {
+        description:
+          "Get all incoming gate passes for the authenticated cold storage. Documents include populated farmer and createdBy.",
+        tags: ["Analytics"],
+        summary: "Get all incoming gate passes for storage",
+        response: {
+          200: {
+            description: "List of incoming gate passes",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  incomingGatePasses: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      additionalProperties: true,
+                    },
+                  },
+                },
+                required: ["incomingGatePasses"],
+              },
+              message: { type: "string" },
+            },
+            required: ["success", "data", "message"],
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            ...errorResponse,
+          },
+          500: {
+            description: "Server error",
+            ...errorResponse,
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getIncomingGatePassesHandler as never,
+  );
+
+  // GET /variety-breakdown?variety=... – sizes and per-farmer contribution for a variety
+  fastify.get(
+    "/variety-breakdown",
+    {
+      schema: {
+        description:
+          "Get breakdown for a variety: all sizes with initial/current/quantityRemoved and per-farmer contribution per size. Scoped to authenticated store.",
+        tags: ["Analytics"],
+        summary: "Get variety breakdown by size and farmer",
+        querystring: {
+          type: "object",
+          required: ["variety"],
+          properties: {
+            variety: {
+              type: "string",
+              description: "Variety name (e.g. Potato)",
+            },
+          },
+        },
+        response: {
+          200: {
+            description:
+              "Variety breakdown with sizes and farmer contributions",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: varietyBreakdownResultSchema,
+              message: { type: "string" },
+            },
+            required: ["success", "data", "message"],
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            ...errorResponse,
+          },
+          400: {
+            description: "Variety name missing or invalid",
+            ...errorResponse,
+          },
+          500: {
+            description: "Server error",
+            ...errorResponse,
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getVarietyBreakdownHandler as never,
+  );
+
+  // GET /get-reports – incoming and outgoing orders in date range (daybook-style for react-pdf); optional groupByFarmers
+  fastify.get(
+    "/get-reports",
+    {
+      schema: {
+        description:
+          "Get all incoming and outgoing orders for the storage between from and to dates. Response is daybook-style (same document shape as daybook) for display in react-pdf. If groupByFarmers=true, documents are grouped by farmer with incoming/outgoing arrays per farmer.",
+        tags: ["Analytics"],
+        summary: "Get reports (incoming/outgoing orders by date range)",
+        querystring: {
+          type: "object",
+          required: ["from", "to"],
+          properties: {
+            from: {
+              type: "string",
+              description: "Start date (YYYY-MM-DD)",
+            },
+            to: {
+              type: "string",
+              description: "End date (YYYY-MM-DD)",
+            },
+            groupByFarmers: {
+              type: "string",
+              description:
+                "If 'true', group incoming and outgoing documents by farmer",
+              enum: ["true", "false"],
+            },
+          },
+        },
+        response: {
+          200: {
+            description:
+              "Reports: flat incoming/outgoing arrays or grouped by farmer",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                oneOf: [
+                  {
+                    type: "object",
+                    properties: {
+                      from: { type: "string" },
+                      to: { type: "string" },
+                      incoming: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            customMarka: { type: "string" },
+                            stockFilter: { type: "string" },
+                          },
+                          additionalProperties: true,
+                        },
+                      },
+                      outgoing: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          additionalProperties: true,
+                        },
+                      },
+                    },
+                    required: ["from", "to", "incoming", "outgoing"],
+                  },
+                  {
+                    type: "object",
+                    properties: {
+                      from: { type: "string" },
+                      to: { type: "string" },
+                      groupedByFarmer: { type: "boolean", const: true },
+                      farmers: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            farmer: {
+                              type: "object",
+                              properties: {
+                                name: { type: "string" },
+                                mobileNumber: { type: "string" },
+                                address: { type: "string" },
+                                accountNumber: { type: "number" },
+                              },
+                            },
+                            incoming: {
+                              type: "array",
+                              items: {
+                                type: "object",
+                                properties: {
+                                  customMarka: { type: "string" },
+                                  stockFilter: { type: "string" },
+                                },
+                                additionalProperties: true,
+                              },
+                            },
+                            outgoing: {
+                              type: "array",
+                              items: {
+                                type: "object",
+                                additionalProperties: true,
+                              },
+                            },
+                          },
+                          required: ["farmer", "incoming", "outgoing"],
+                        },
+                      },
+                    },
+                    required: ["from", "to", "groupedByFarmer", "farmers"],
+                  },
+                ],
+              },
+              message: { type: "string" },
+            },
+            required: ["success", "data", "message"],
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            ...errorResponse,
+          },
+          400: {
+            description: "Invalid from/to date format (must be YYYY-MM-DD)",
+            ...errorResponse,
+          },
+          500: {
+            description: "Server error",
+            ...errorResponse,
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getReportsHandler as never,
+  );
+}

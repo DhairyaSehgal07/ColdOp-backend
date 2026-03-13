@@ -1,0 +1,316 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.16.0] - 2026-03-05
+
+### Added
+
+- **Analytics – Stock summary by stock filter**
+  - `GET /api/v1/analytics/summary` now accepts optional query param `stockFilter=true`. When set, the summary is grouped by stock filter: **FARMER** and **OWNED**. Response includes `stockSummaryByFilter.FARMER` and `stockSummaryByFilter.OWNED`, each with the same shape as the default summary (stockSummary, chartData, totalInventory, topVariety, topSize). Matching uses case-sensitive values `"FARMER"` and `"OWNED"` on IncomingGatePass documents.
+
+## [1.15.0] - 2026-03-05
+
+### Added
+
+- **Incoming Gate Pass**
+  - Update endpoint now accepts optional `farmerStorageLinkId` in the request body to reassign an incoming gate pass to a different farmer-storage link. Validation ensures the link exists and belongs to the same cold storage; edit history records the change.
+
+## [1.14.0] - 2026-02-25
+
+### Added
+
+- **Incoming Gate Pass**
+  - Optional fields `stockFilter` and `customMarka` on create and update (model, schema, routes, service). Exposed in store-admin daybook, search-order-by-receipt, and gate passes by farmer-storage-link responses.
+
+### Changed
+
+- **Incoming Gate Pass**
+  - Rent amount update during edit now runs only when cold storage has `showFinances === true` (preferences check added before applying voucher balance updates).
+
+## [1.13.0] - 2026-02-24
+
+### Added
+
+- **Index sync script**
+  - `scripts/sync-indexes.ts` — syncs MongoDB indexes to match current Mongoose schemas: creates missing indexes and drops obsolete ones. Run with `pnpm run sync-indexes` (requires `MONGO_URI` in env).
+
+### Changed
+
+- **Models (indexes)**
+  - Cold storage, edit-history, farmer, farmer-storage-link, incoming-gate-pass, ledger, outgoing-gate-pass, preferences, store-admin, and voucher models: index definitions simplified to only compound indexes used by queries; removed redundant per-field indexes. Use `pnpm run sync-indexes` after deploy to apply changes and drop old indexes.
+
+## [1.12.0] - 2026-02-18
+
+### Added
+
+- **Analytics – Get reports**
+  - `GET /api/v1/analytics/get-reports` — incoming and outgoing orders for the cold storage in a date range (JWT required). Query: `from`, `to` (YYYY-MM-DD), optional `groupByFarmers=true`. Response is daybook-style (same document shape as daybook) for use in react-pdf. When `groupByFarmers=true`, documents are grouped by farmer with incoming/outgoing arrays per farmer.
+
+## [1.11.0] - 2026-02-18
+
+### Added
+
+- **Farmer Storage Link Module**
+  - Dedicated module at `src/modules/v1/farmer-storage-link/` with controller, routes, schema, and service.
+  - Routes registered at `/api/v1/farmer-storage-link` (JWT required):
+    - `POST /check` — check if a farmer exists by mobile number; returns farmer document if found, otherwise confirms number is available. Body: `{ mobileNumber }` (10-digit Indian mobile).
+    - `POST /link-farmer-to-store` — link an existing farmer to the current cold storage. Body: `{ farmerId, accountNumber, costPerBag, openingBalance? }`.
+
+### Changed
+
+- **Application**
+  - Registered `farmerStorageLinkRoutes` in `app.ts` with prefix `/api/v1/farmer-storage-link`.
+
+## [1.9.0] - 2026-02-16
+
+### Changed
+
+- **Outgoing Gate Pass**
+  - `incomingGatePassSnapshots` now stores only the snapshot of bag sizes that were updated (sizes from which quantities were removed in the current outgoing gate pass), instead of all bag sizes from each linked incoming gate pass.
+- **Analytics**
+  - Stock summary aggregation is documented to use IncomingGatePass only; route description updated to clarify that quantities are aggregated from IncomingGatePass and outgoing gate pass snapshots are not used.
+
+## [1.8.0] - 2026-02-15
+
+### Changed
+
+- **Incoming gate pass**
+  - Create rent entry voucher *before* creating the gate pass document so the gate pass is created with `rentEntryVoucherId` in one go (correct ordering, no post-create update).
+- **Voucher**
+  - `createVoucher` uses `getNextGeneralVoucherNumber` from accounting helper-fns (replacing `getNextJournalVoucherNumber` from removed module). Signature: `(coldStorageId, logger?, session?)`.
+
+### Removed
+
+- **Accounting utils**
+  - Removed `src/utils/accounting/generate-voucher-number.ts`; voucher number logic moved into `helper-fns.ts` as `getNextGeneralVoucherNumber`.
+
+## [1.7.0] - 2026-02-13
+
+### Added
+
+- **Ledger – Balance sheet**
+  - `GET /api/v1/ledger/balance-sheet` — balance sheet (Indian standard: Assets, Liabilities, Equity; P&L net profit/loss to equity). Optional query `from`/`to` for period balances (JWT required).
+
+### Changed
+
+- **Ledger**
+  - Create-ledger validation: response now includes first validation error message and flattened Zod details.
+  - Create-ledger body: `farmerStorageLinkId` handling moved into schema (no manual parsing in controller).
+- **Edit history**
+  - List edit-history response and route schema now include `snapshotBefore` and `snapshotAfter` for each item.
+- **Incoming gate pass**
+  - Rent amount update: reverses and reapplies voucher balances via `reverseVoucherBalances`/`applyVoucherBalances` so ledger balances stay correct when rent is edited.
+  - Rent voucher creation no longer passes voucher number; number is generated inside voucher flow.
+- **Voucher**
+  - `createVoucher` accepts optional Mongoose `session`; passes session to `getNextJournalVoucherNumber` and `applyVoucherBalances` for transactional consistency.
+- **Accounting utils**
+  - `getNextJournalVoucherNumber` accepts optional `session` for use inside transactions.
+  - `applyVoucherBalances` and `reverseVoucherBalances` accept optional `session`.
+  - Helper and validate-chart-of-accounts updates for session-aware balance and voucher handling.
+
+## [1.6.0] - 2026-02-12
+
+### Added
+
+- **Store Admin – Daybook**
+  - `GET /api/v1/store-admin/daybook` — list incoming and/or outgoing gate passes with farmer populated, pagination, and sort (JWT required)
+  - Query: `type` (all | incoming | outgoing), `sortBy` (latest | oldest), `page`, `limit` (default 10, max 100)
+  - Response: `status`, `message`, `data` (array of gate passes with bagSizes/orderDetails sorted), `pagination`
+  - Service `getDaybookOrders` with cold-storage scoping and optional merge by type
+- **Store Admin – Search order by receipt**
+  - `POST /api/v1/store-admin/search-order-by-receipt` — search incoming and outgoing gate passes by receipt number (gate pass number or manual receipt number), JWT required
+  - Body: `{ receiptNumber: string }`; returns matching orders or "No orders found" message
+- **Store Admin – Next voucher number**
+  - `GET /api/v1/store-admin/voucher-number?type=incoming|outgoing` — get next voucher (gate pass) number for the cold storage (JWT required)
+- **Docs**
+  - `docs/curl-get-daybook.sh` — curl examples for daybook (type, sortBy, page, limit)
+  - `docs/curl-search-order-by-receipt.sh` — curl example for search-order-by-receipt
+
+### Changed
+
+- **Outgoing Gate Pass**
+  - Model: added `type` (GatePassType: RECEIPT, DELIVERY, RESTORE) to OutgoingGatePass and snapshot bag sizes
+- **Incoming Gate Pass**
+  - Create schema: `type` removed from request body (set server-side to RECEIPT)
+
+## [1.5.0] - 2026-02-11
+
+### Added
+
+- **Incoming Gate Pass**
+  - `GET /api/v1/incoming-gate-pass/farmer-storage-link/:farmerStorageLinkId` — list all incoming gate passes for a farmer-storage-link (JWT required, scoped to cold storage)
+  - Service `getIncomingGatePassesByFarmerStorageLinkId` with validation, auth scope, and populated farmer/link/createdBy
+  - Docs: `docs/curl-get-incoming-gate-passes-by-farmer-storage-link.sh` for testing the endpoint
+
+## [1.4.0] - 2026-02-08
+
+### Added
+
+- **Outgoing Gate Pass Module**
+  - Create outgoing gate pass from incoming gate pass allocations (nikasi-style flow)
+  - Route: `POST /api/v1/outgoing-gate-pass` with JWT authentication
+  - Request: `gatePassNo`, `date`, `variety`, `from`, `to`, `incomingGatePasses` (array of `{ incomingGatePassId, allocations: [{ size, quantityToAllocate }] }`)
+  - Updates IncomingGatePass `currentQuantity` for allocated bags in a transaction
+  - Gate pass number unique per cold storage; optional `manualGatePassNumber`, `truckNumber`, `remarks`, `idempotencyKey`
+  - Response shape: `{ status, message, data }`; errors: `{ status, statusCode, errorCode, message }`
+  - Snapshot uses paltai location as latest bag location when present on incoming gate pass
+
+### Changed
+
+- **Application**
+  - Registered `outgoingGatePassRoutes` in `app.ts` with prefix `/api/v1/outgoing-gate-pass`
+
+## [1.3.0] - 2026-02-07
+
+### Added
+
+- **Incoming Gate Pass Module**
+  - Dedicated module at `src/modules/v1/incoming-gate-pass/` with controller, routes, schema, and service
+  - Routes registered at `/api/v1/incoming-gate-pass` (create, read, update, delete incoming gate passes)
+  - Full CRUD and validation for incoming gate pass with JWT authentication
+
+### Changed
+
+- **Application**
+  - Registered `incomingGatePassRoutes` in `app.ts` with prefix `/api/v1/incoming-gate-pass`
+- **Store Admin**
+  - Incoming gate pass logic moved out of store-admin into the new incoming-gate-pass module
+  - Store admin controller, routes, schema, and service simplified (removed incoming gate pass handlers and schemas)
+- **Incoming Gate Pass Model**
+  - Expanded schema and logic in `incoming-gate-pass.model.ts` to support full CRUD operations
+
+### Removed
+
+- **Gate Pass Models**
+  - Removed `grading-gate-pass.model.ts`, `nikasi-gate-pass.model.ts`, and `storage-gate-pass.model.ts` (consolidation/cleanup)
+
+## [1.2.0] - 2026-02-07
+
+### Added
+
+- **Store Admin Module**
+  - Store admin CRUD, login/logout, and farmer-storage-link management
+  - Routes: create/read/update/delete store admin, check mobile, login, logout, quick-register farmer, update farmer-storage-link
+  - New routes: `GET /daybook` (paginated daybook for cold storage), `GET /farmer-storage-links/:farmerStorageLinkId/vouchers`, `GET /next-voucher-number` (by type)
+  - Schemas and handlers for daybook, vouchers-by-link, and next voucher number
+
+- **Auth & Authorization**
+  - `src/utils/auth.ts`: JWT authentication (`authenticate`), optional auth, cold-storage scoping
+  - `authorize(...roles)` middleware for role-based access (e.g. Admin-only delete store admin)
+  - `JWTPayload` extended with optional `role` for authorization
+
+- **Error Handling**
+  - `src/utils/errors.ts`: `AppError`, `NotFoundError`, `ConflictError`, `ValidationError`, `UnauthorizedError`, `ForbiddenError`
+  - Centralized `sendErrorReply(reply, error)` in store-admin controller for consistent JSON error responses
+
+- **Models**
+  - Role-permission model for Admin permissions
+  - Gate-pass models: IncomingGatePass, GradingGatePass, StorageGatePass, NikasiGatePass, OutgoingGatePass (minimal schemas for daybook/voucher flows)
+  - Farmer and FarmerStorageLink models referenced with correct filenames (`farmer-model`, `farmer-storage-link-model`)
+
+### Changed
+
+- **Store Admin**
+  - Fixed import paths: utils from `../../../utils` (routes, controller, service)
+  - Farmer/FarmerStorageLink imports use `farmer-model.js` and `farmer-storage-link-model.js`
+  - Controller catch blocks refactored to use `sendErrorReply`; removed duplicate error branches
+  - Daybook link IDs: use `FarmerStorageLink.distinct("_id", filter)` for a single DB call
+  - Typed `distinct` result for farmer-storage link IDs in daybook service
+
+- **Application**
+  - Modular v1 structure under `src/modules/v1/` (cold-storage, store-admin, farmer, farmer-storage-link, preferences, role-permission, gate-pass modules)
+  - Removed `src/config/constants.ts`; config lives in database and app setup
+
+### Fixed
+
+- Store admin routes and controller TypeScript/lint errors (unknown error types, missing modules)
+- Unused handler and schema imports in store-admin routes by registering daybook, vouchers, and next-voucher-number routes
+
+## [1.1.0] - 2026-02-02
+
+### Added
+
+- **Application Structure**
+  - Created modular application structure with separate config, types, and utils directories
+  - Added `app.ts` for application initialization
+  - Added `server.ts` for server startup logic
+
+- **Configuration Management**
+  - Created `config/constants.ts` for application constants
+  - Created `config/database.ts` for database configuration
+
+- **Utilities**
+  - Added `logger.ts` utility for consistent logging across the application
+
+- **Type Definitions**
+  - Added `types/colors.d.ts` for color type definitions
+
+### Changed
+
+- Initial project setup completed and committed
+
+## [1.0.0] - 2026-01-25
+
+### Added
+
+- **TypeScript Configuration**
+  - Added `tsconfig.json` with strict type checking enabled
+  - Configured for ES2022 target with ESNext modules
+  - Set up source maps and declaration files for better development experience
+
+- **ESLint Setup**
+  - Configured ESLint 9 with flat config format (`eslint.config.js`)
+  - Integrated TypeScript ESLint plugin for TypeScript-specific linting
+  - Added Prettier integration to ensure consistent code formatting
+  - Configured rules for unused variables with underscore prefix exception
+
+- **Prettier Configuration**
+  - Added `.prettierrc` with consistent formatting rules
+  - Configured single quotes, semicolons, and 80 character line width
+  - Added `.prettierignore` to exclude build artifacts and dependencies
+
+- **Husky Git Hooks**
+  - Set up Husky v9 for Git hooks management
+  - Configured pre-commit hook to run lint-staged
+  - Added lint-staged configuration to format and lint staged files automatically
+
+- **Package Scripts**
+  - `dev`: Development mode with hot reload using tsx
+  - `build`: Compile TypeScript to JavaScript
+  - `start`: Run production build
+  - `lint`: Check for linting errors
+  - `lint:fix`: Auto-fix linting errors
+  - `format`: Format code with Prettier
+  - `format:check`: Check if code is formatted
+  - `type-check`: Type check without building
+
+- **Project Structure**
+  - Created `src/` directory for source code
+  - Added basic `src/index.ts` entry point
+  - Configured build output to `dist/` directory
+
+- **Development Dependencies**
+  - TypeScript 5.7.2
+  - ESLint 9.17.0 with TypeScript support
+  - Prettier 3.4.2
+  - Husky 9.1.7
+  - lint-staged 15.2.11
+  - tsx 4.19.2 for development
+  - @types/node for Node.js type definitions
+
+### Changed
+
+- Updated package.json to use pnpm as package manager
+- Set module type to ES modules
+
+### Technical Details
+
+- All source code is organized in the `src/` directory
+- Build output goes to `dist/` directory
+- Pre-commit hooks ensure code quality before commits
+- Strict TypeScript configuration for type safety
+- Modern ESLint flat config format for better maintainability

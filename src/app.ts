@@ -1,0 +1,142 @@
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from "fastify";
+import cors from "@fastify/cors";
+import jwt from "@fastify/jwt";
+import cookie from "@fastify/cookie";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
+import { config } from "dotenv";
+import { coldStorageRoutes } from "./modules/v1/cold-storage/cold-storage.routes.js";
+import { preferencesRoutes } from "./modules/v1/preferences/preferences.routes.js";
+import { storeAdminRoutes } from "./modules/v1/store-admin/store-admin.routes.js";
+import { incomingGatePassRoutes } from "./modules/v1/incoming-gate-pass/incoming-gate-pass.routes.js";
+import { outgoingGatePassRoutes } from "./modules/v1/outgoing-gate-pass/outgoing-gate-pass.routes.js";
+import { editHistoryRoutes } from "./modules/v1/edit-history/edit-history.routes.js";
+import { ledgerRoutes } from "./modules/v1/ledger/ledger.routes.js";
+import { voucherRoutes } from "./modules/v1/voucher/voucher.routes.js";
+import { analyticsRoutes } from "./modules/v1/analytics/analytics.routes.js";
+import { farmerStorageLinkRoutes } from "./modules/v1/farmer-storage-link/farmer-storage-link.routes.js";
+config();
+
+export const buildApp = async (): Promise<FastifyInstance> => {
+  const fastify: FastifyInstance = Fastify({
+    logger: {
+      level: process.env.LOG_LEVEL || "info",
+      transport:
+        process.env.NODE_ENV === "development"
+          ? {
+              target: "pino-pretty",
+              options: {
+                colorize: true,
+                translateTime: "HH:MM:ss Z", // timestamp
+                ignore: "pid,hostname",
+              },
+            }
+          : undefined,
+    },
+  });
+
+  // Register security headers (helmet)
+  await fastify.register(helmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  });
+
+  // Register CORS
+  await fastify.register(cors, {
+    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    credentials: true, // ✅ allow cookies
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  });
+
+  // Register Cookie plugin
+  await fastify.register(cookie);
+
+  // Register JWT plugin
+  await fastify.register(jwt, {
+    secret: process.env.AUTH_SECRET || "your-secret-key-change-in-production",
+  });
+
+  // Register rate limiter plugin (global: false to apply only where configured)
+  await fastify.register(rateLimit, {
+    global: false,
+  });
+
+  // Register routes
+  await fastify.register(coldStorageRoutes, {
+    prefix: "/api/v1/cold-storage",
+  });
+
+  await fastify.register(preferencesRoutes, {
+    prefix: "/api/v1/preferences",
+  });
+
+  await fastify.register(storeAdminRoutes, {
+    prefix: "/api/v1/store-admin",
+  });
+
+  await fastify.register(incomingGatePassRoutes, {
+    prefix: "/api/v1/incoming-gate-pass",
+  });
+
+  await fastify.register(outgoingGatePassRoutes, {
+    prefix: "/api/v1/outgoing-gate-pass",
+  });
+
+  await fastify.register(editHistoryRoutes, {
+    prefix: "/api/v1/edit-history",
+  });
+
+  await fastify.register(ledgerRoutes, {
+    prefix: "/api/v1/ledgers",
+  });
+
+  await fastify.register(voucherRoutes, {
+    prefix: "/api/v1/vouchers",
+  });
+
+  await fastify.register(analyticsRoutes, {
+    prefix: "/api/v1/analytics",
+  });
+
+  await fastify.register(farmerStorageLinkRoutes, {
+    prefix: "/api/v1/farmer-storage-link",
+  });
+
+  // Health check endpoint
+  fastify.get("/health", () => ({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    service: "Bhatti-backend",
+  }));
+
+  // Global error handler
+  fastify.setErrorHandler(
+    (error: Error, _request: FastifyRequest, reply: FastifyReply) => {
+      fastify.log.error(error, "Unhandled error");
+      void reply.code(500).send({
+        success: false,
+        error: {
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            process.env.NODE_ENV === "development"
+              ? error.message
+              : "An unexpected error occurred",
+        },
+      });
+    },
+  );
+
+  return fastify;
+};
