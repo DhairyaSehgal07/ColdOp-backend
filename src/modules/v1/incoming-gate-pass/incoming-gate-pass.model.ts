@@ -207,10 +207,6 @@ const IncomingGatePassSchema = new Schema<IIncomingGatePass>(
   },
 );
 
-/* =======================
-   INDEXES (only those used by queries)
-======================= */
-
 // List by link + analytics: find(farmerStorageLinkId).sort({ date: -1, gatePassNo: -1 })
 IncomingGatePassSchema.index({
   farmerStorageLinkId: 1,
