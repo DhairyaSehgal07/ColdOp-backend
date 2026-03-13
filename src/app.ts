@@ -118,7 +118,7 @@ export const buildApp = async (): Promise<FastifyInstance> => {
   fastify.get("/health", () => ({
     status: "ok",
     timestamp: new Date().toISOString(),
-    service: "Bhatti-backend",
+    service: "Coldop-base-backend",
   }));
 
   // Global error handler
