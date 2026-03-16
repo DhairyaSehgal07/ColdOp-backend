@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-03-16
+
+### Added
+
+- **Transfer Stock – Gate pass between farmers**
+  - New module at `src/modules/v1/transfer-stock/` with controller, routes, schema, service, and model for transferring stock between two farmer-storage links within a cold storage. Routes are registered under `POST /api/v1/transfer-stock` (create transfer stock gate pass) and `GET /api/v1/transfer-stock` (list transfer stock gate passes for the current cold storage), both behind JWT auth and cold-storage scoping.
+  - `IncomingGatePass` model now supports a new `GatePassType.TRANSFER` type, and the create incoming gate pass schema clarifies that type is always set server-side (`RECEIPT` for regular incoming, `TRANSFER` for transfer stock flows).
+
 ## [1.16.0] - 2026-03-05
 
 ### Added

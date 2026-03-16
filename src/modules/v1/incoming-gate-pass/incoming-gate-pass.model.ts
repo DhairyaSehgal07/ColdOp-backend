@@ -13,6 +13,7 @@ export enum GatePassType {
   RECEIPT = "RECEIPT",
   DELIVERY = "DELIVERY",
   RESTORE = "RESTORE",
+  TRANSFER = "TRANSFER",
 }
 
 /* =======================

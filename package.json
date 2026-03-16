@@ -36,7 +36,7 @@
 }
 =======
   "name": "coldop-base-backend",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "description": "",
   "main": "dist/server.js",
   "type": "module",
