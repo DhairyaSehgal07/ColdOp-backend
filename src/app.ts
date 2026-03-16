@@ -14,6 +14,7 @@ import { preferencesRoutes } from "./modules/v1/preferences/preferences.routes.j
 import { storeAdminRoutes } from "./modules/v1/store-admin/store-admin.routes.js";
 import { incomingGatePassRoutes } from "./modules/v1/incoming-gate-pass/incoming-gate-pass.routes.js";
 import { outgoingGatePassRoutes } from "./modules/v1/outgoing-gate-pass/outgoing-gate-pass.routes.js";
+import { transferStockRoutes } from "./modules/v1/transfer-stock/transfer-stock.routes.js";
 import { editHistoryRoutes } from "./modules/v1/edit-history/edit-history.routes.js";
 import { ledgerRoutes } from "./modules/v1/ledger/ledger.routes.js";
 import { voucherRoutes } from "./modules/v1/voucher/voucher.routes.js";
@@ -92,6 +93,10 @@ export const buildApp = async (): Promise<FastifyInstance> => {
 
   await fastify.register(outgoingGatePassRoutes, {
     prefix: "/api/v1/outgoing-gate-pass",
+  });
+
+  await fastify.register(transferStockRoutes, {
+    prefix: "/api/v1/transfer-stock",
   });
 
   await fastify.register(editHistoryRoutes, {
