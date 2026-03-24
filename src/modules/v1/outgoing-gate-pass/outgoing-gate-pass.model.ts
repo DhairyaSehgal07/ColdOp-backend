@@ -35,6 +35,8 @@ export enum GatePassType {
   RECEIPT = "RECEIPT",
   DELIVERY = "DELIVERY",
   RESTORE = "RESTORE",
+  /** Outgoing created when stock is transferred out to another farmer at the same cold storage */
+  OUTGOING_TRANSFER = "Outgoing-transfer",
 }
 
 export interface IOutgoingIncomingGatePassSnapshot {

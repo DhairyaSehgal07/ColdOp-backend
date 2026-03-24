@@ -14,6 +14,8 @@ export enum GatePassType {
   DELIVERY = "DELIVERY",
   RESTORE = "RESTORE",
   TRANSFER = "TRANSFER",
+  /** Receipt created when stock is transferred in from another farmer at the same cold storage */
+  INCOMING_TRANSFER = "Incoming-transfer",
 }
 
 /* =======================

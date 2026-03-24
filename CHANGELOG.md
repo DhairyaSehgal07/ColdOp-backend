@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-03-25
+
+### Added
+
+- **Transfer Stock – Outgoing gate pass and distinct receipt types**
+  - Creating a transfer stock gate pass now also creates an outgoing gate pass on the source farmer (`type: Outgoing-transfer`) in the same transaction, after quantities are decremented. New service helper `createOutgoingGatePassForTransferStock` in `outgoing-gate-pass.service.ts`.
+  - The incoming receipt on the destination farmer uses `type: Incoming-transfer` instead of `RECEIPT` so transfer-in receipts are distinguishable from normal receipts.
+  - `TransferStockGatePass` includes optional `createdOutgoingGatePassId`; create and list responses populate it with outgoing gate pass details (`gatePassNo`, `date`, `type`, `truckNumber`, `orderDetails`, `incomingGatePassSnapshots`).
+
+### Changed
+
+- **Incoming / Outgoing Gate Pass models**
+  - `GatePassType` on incoming adds `INCOMING_TRANSFER` (`"Incoming-transfer"`); on outgoing adds `OUTGOING_TRANSFER` (`"Outgoing-transfer"`). Create incoming schema comment updated to describe server-set types for transfer flows.
+
 ## [1.17.0] - 2026-03-16
 
 ### Added

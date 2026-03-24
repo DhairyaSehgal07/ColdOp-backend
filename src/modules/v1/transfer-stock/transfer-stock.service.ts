@@ -19,6 +19,9 @@ import {
   AppError,
 } from "../../../utils/errors.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
+import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
+import { createOutgoingGatePassForTransferStock } from "../outgoing-gate-pass/outgoing-gate-pass.service.js";
+import type { IIncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 
 /* =======================
    HELPERS (location / bag matching)
@@ -91,6 +94,27 @@ async function getNextIncomingGatePassNumberForColdStorage(
     .lean();
 
   const last = await IncomingGatePass.findOne({
+    farmerStorageLinkId: { $in: farmerStorageLinkIds },
+  })
+    .session(session)
+    .sort({ gatePassNo: -1 })
+    .select("gatePassNo")
+    .lean();
+  return ((last as { gatePassNo?: number } | null)?.gatePassNo ?? 0) + 1;
+}
+
+async function getNextOutgoingGatePassNumberForColdStorage(
+  coldStorageId: Types.ObjectId,
+  session: ClientSession,
+): Promise<number> {
+  const farmerStorageLinkIds = await FarmerStorageLink.find({
+    coldStorageId,
+  })
+    .session(session)
+    .distinct("_id")
+    .lean();
+
+  const last = await OutgoingGatePass.findOne({
     farmerStorageLinkId: { $in: farmerStorageLinkIds },
   })
     .session(session)
@@ -331,6 +355,11 @@ export async function createTransferStock(
           toColdStorageId,
           session,
         );
+      const nextOutgoingGatePassNo =
+        await getNextOutgoingGatePassNumberForColdStorage(
+          fromColdStorageId,
+          session,
+        );
 
       const newBagSizes = Array.from(newGatePassBagSizesMap.values()).map(
         (acc) => ({
@@ -350,7 +379,7 @@ export async function createTransferStock(
               : undefined,
             gatePassNo: nextIncomingGatePassNo,
             date: payload.date,
-            type: GatePassType.RECEIPT,
+            type: GatePassType.INCOMING_TRANSFER,
             variety: sourceVariety,
             truckNumber: payload.truckNumber,
             bagSizes: newBagSizes,
@@ -359,6 +388,30 @@ export async function createTransferStock(
           },
         ],
         { session },
+      );
+
+      const outgoingForFrom = await createOutgoingGatePassForTransferStock(
+        session,
+        {
+          fromFarmerStorageLinkId: fromLinkId,
+          coldStorageId: fromColdStorageId,
+          items: payload.items.map((i) => ({
+            incomingGatePassId: i.incomingGatePassId,
+            bagSize: i.bagSize,
+            quantity: i.quantity,
+            location: i.location,
+          })),
+          incomingPassMap: incomingPassMap as Map<
+            string,
+            IIncomingGatePass & { _id: Types.ObjectId }
+          >,
+          gatePassNo: nextOutgoingGatePassNo,
+          date: payload.date,
+          truckNumber: payload.truckNumber,
+          remarks: payload.remarks,
+          createdById,
+        },
+        logger,
       );
 
       const [transferDoc] = await TransferStockGatePass.create(
@@ -375,6 +428,7 @@ export async function createTransferStock(
             items: transferItems,
             remarks: payload.remarks,
             createdIncomingGatePassId: newIncomingDoc._id,
+            createdOutgoingGatePassId: outgoingForFrom._id,
           },
         ],
         { session },
@@ -411,6 +465,11 @@ export async function createTransferStock(
         .populate({
           path: "createdIncomingGatePassId",
           select: "gatePassNo date type variety bagSizes",
+        })
+        .populate({
+          path: "createdOutgoingGatePassId",
+          select:
+            "gatePassNo date type truckNumber orderDetails incomingGatePassSnapshots",
         })
         .lean();
 
@@ -542,6 +601,11 @@ export async function getTransferStockGatePassesForColdStorage(
     .populate({
       path: "createdIncomingGatePassId",
       select: "gatePassNo date type variety bagSizes",
+    })
+    .populate({
+      path: "createdOutgoingGatePassId",
+      select:
+        "gatePassNo date type truckNumber orderDetails incomingGatePassSnapshots",
     })
     .lean();
 

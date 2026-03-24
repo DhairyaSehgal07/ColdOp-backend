@@ -15,7 +15,7 @@ const bagSizeSchema = z.object({
   paltaiLocation: locationSchema.optional(),
 });
 
-/** Create payload: type is set server-side (RECEIPT for regular incoming, TRANSFER for transfer stock) and must not be sent. */
+/** Create payload: type is set server-side (RECEIPT for regular incoming; transfer stock uses Incoming-transfer on the generated receipt) and must not be sent. */
 export const createIncomingGatePassSchema = z.object({
   body: z.object({
     farmerStorageLinkId: z

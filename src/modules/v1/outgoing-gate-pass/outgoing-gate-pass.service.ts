@@ -866,3 +866,132 @@ export async function createOutgoingGatePass(
     session.endSession();
   }
 }
+
+/* =======================
+   OUTGOING FOR TRANSFER STOCK (from farmer)
+======================= */
+
+function buildValidatedAllocationsForTransfer(
+  items: Array<{
+    incomingGatePassId: string;
+    bagSize: string;
+    quantity: number;
+    location: { chamber: string; floor: string; row: string };
+  }>,
+  incomingPassMap: Map<string, IIncomingGatePass & { _id: Types.ObjectId }>,
+): OutgoingIncomingPassWithFilteredAllocations[] {
+  const byPass = new Map<string, OutgoingIncomingPassWithFilteredAllocations>();
+  for (const item of items) {
+    const pass = incomingPassMap.get(item.incomingGatePassId);
+    if (!pass) continue;
+    const variety = (pass as { variety?: string }).variety?.trim() ?? "";
+    let entry = byPass.get(item.incomingGatePassId);
+    if (!entry) {
+      entry = {
+        incomingGatePassId: item.incomingGatePassId,
+        variety,
+        allocations: [],
+      };
+      byPass.set(item.incomingGatePassId, entry);
+    }
+    entry.allocations.push({
+      incomingGatePassId: item.incomingGatePassId,
+      size: item.bagSize,
+      quantityToAllocate: item.quantity,
+      location: item.location,
+    });
+  }
+  return Array.from(byPass.values());
+}
+
+/**
+ * Creates an outgoing gate pass for the "from" farmer after transfer stock has
+ * decremented incoming quantities. `incomingPassMap` must be the pre-decrement
+ * fetch used for validation (same transaction).
+ */
+export async function createOutgoingGatePassForTransferStock(
+  session: ClientSession,
+  params: {
+    fromFarmerStorageLinkId: Types.ObjectId;
+    coldStorageId: Types.ObjectId;
+    items: Array<{
+      incomingGatePassId: string;
+      bagSize: string;
+      quantity: number;
+      location: { chamber: string; floor: string; row: string };
+    }>;
+    incomingPassMap: Map<string, IIncomingGatePass & { _id: Types.ObjectId }>;
+    gatePassNo: number;
+    date: Date;
+    truckNumber?: string;
+    remarks?: string;
+    createdById?: string;
+  },
+  logger?: FastifyBaseLogger,
+): Promise<{ _id: Types.ObjectId }> {
+  const validated = buildValidatedAllocationsForTransfer(
+    params.items,
+    params.incomingPassMap,
+  );
+  if (validated.length === 0) {
+    throw new ValidationError(
+      "Could not build outgoing gate pass allocations for transfer",
+      "TRANSFER_OUTGOING_ALLOCATIONS_EMPTY",
+    );
+  }
+
+  const incomingGatePassSnapshots = buildIncomingGatePassSnapshots(
+    validated,
+    params.incomingPassMap,
+  );
+  const orderDetails = buildOrderDetails(validated, params.incomingPassMap);
+
+  const [doc] = await OutgoingGatePass.create(
+    [
+      {
+        farmerStorageLinkId: params.fromFarmerStorageLinkId,
+        createdBy: params.createdById
+          ? new Types.ObjectId(params.createdById)
+          : undefined,
+        incomingGatePassSnapshots,
+        gatePassNo: params.gatePassNo,
+        date: params.date,
+        type: GatePassType.OUTGOING_TRANSFER,
+        truckNumber: params.truckNumber ?? "",
+        orderDetails,
+        remarks: params.remarks,
+      },
+    ],
+    { session },
+  );
+
+  const uniqueIncomingIds = [
+    ...new Set(validated.map((v) => v.incomingGatePassId)),
+  ];
+  await recordEditHistoryBulk(
+    uniqueIncomingIds.map((id) => ({
+      entityType: EditHistoryEntityType.INCOMING_GATE_PASS,
+      documentId: new Types.ObjectId(id),
+      coldStorageId: params.coldStorageId,
+      editedById: params.createdById,
+      action: EditHistoryAction.QUANTITY_ADJUSTMENT,
+      changeSummary: `Quantities reduced by outgoing gate pass #${params.gatePassNo}`,
+      logger,
+    })),
+    session,
+    logger,
+  );
+
+  await recordEditHistory({
+    entityType: EditHistoryEntityType.OUTGOING_GATE_PASS,
+    documentId: doc._id,
+    coldStorageId: params.coldStorageId,
+    editedById: params.createdById,
+    action: EditHistoryAction.CREATE,
+    changeSummary: `Outgoing gate pass #${params.gatePassNo} created (transfer stock)`,
+    session,
+    logger,
+  });
+
+  return { _id: doc._id };
+}

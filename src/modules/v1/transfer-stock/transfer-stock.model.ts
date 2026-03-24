@@ -29,6 +29,8 @@ export interface ITransferStockGatePass {
   remarks?: string;
 
   createdIncomingGatePassId: Types.ObjectId;
+  /** Present for transfers created after outgoing gate pass was added for the from farmer */
+  createdOutgoingGatePassId?: Types.ObjectId;
 
   createdAt: Date;
   updatedAt: Date;
@@ -135,6 +137,12 @@ const TransferStockGatePassSchema = new Schema<ITransferStockGatePass>(
       type: Schema.Types.ObjectId,
       ref: "IncomingGatePass",
       required: true,
+    },
+
+    createdOutgoingGatePassId: {
+      type: Schema.Types.ObjectId,
+      ref: "OutgoingGatePass",
+      required: false,
     },
   },
   {
