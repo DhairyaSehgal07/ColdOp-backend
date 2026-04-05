@@ -643,7 +643,7 @@ export async function getDaybookHandler(
 
 /**
  * Handler for POST search-order-by-receipt: search incoming and outgoing gate passes
- * by receipt number (gate pass number or manual number). Uses authenticated store admin's cold storage.
+ * by searchBy (gate pass no, manual parchi, marka, customMarka, or remarks). Scoped to token cold storage.
  */
 export async function searchOrderByReceiptNumberHandler(
   request: FastifyRequest,
@@ -656,10 +656,12 @@ export async function searchOrderByReceiptNumberHandler(
     });
     if (!parsed.success) {
       const bodyErrors = parsed.error.flatten().fieldErrors?.body as
-        | { receiptNumber?: string[] }
+        | { receiptNumber?: string[]; searchBy?: string[] }
         | undefined;
       const msg =
-        bodyErrors?.receiptNumber?.[0] ?? "Receipt number is required";
+        bodyErrors?.receiptNumber?.[0] ??
+        bodyErrors?.searchBy?.[0] ??
+        "Receipt number is required";
       request.log.warn(
         { coldStorageId: req.user?.coldStorageId, body: request.body },
         "Receipt number validation failed",
@@ -669,7 +671,7 @@ export async function searchOrderByReceiptNumberHandler(
         message: msg,
       });
     }
-    const { receiptNumber } = parsed.data.body;
+    const { receiptNumber, searchBy } = parsed.data.body;
 
     const coldStorageId =
       typeof req.user?.coldStorageId === "object" &&
@@ -689,7 +691,7 @@ export async function searchOrderByReceiptNumberHandler(
     }
 
     request.log.info(
-      { receiptNumber, coldStorageId },
+      { receiptNumber, searchBy, coldStorageId },
       "Searching for order with receipt number",
     );
 
@@ -697,6 +699,7 @@ export async function searchOrderByReceiptNumberHandler(
       coldStorageId,
       receiptNumber,
       request.log,
+      { searchBy },
     );
 
     if (result.status === "Fail" && result.message) {

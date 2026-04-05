@@ -412,7 +412,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Search for orders (incoming and outgoing gate passes) by receipt number. Matches gate pass number or manual receipt number.",
+          "Search for orders (incoming and outgoing gate passes). searchBy: gatePassNumber (default); manualParchiNumber; marka; customMarka (incoming only); remarks = case-insensitive substring on remarks (incoming + outgoing; regex metacharacters treated literally).",
         tags: ["Store Admin"],
         summary: "Search order by receipt number",
         body: {
@@ -421,7 +421,21 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
           properties: {
             receiptNumber: {
               type: "string",
-              description: "Receipt / gate pass / voucher number to search for",
+              description:
+                "Value to match per searchBy (gate pass no, manual parchi, marka, customMarka, or remarks search phrase)",
+            },
+            searchBy: {
+              type: "string",
+              enum: [
+                "gatePassNumber",
+                "manualParchiNumber",
+                "marka",
+                "customMarka",
+                "remarks",
+              ],
+              default: "gatePassNumber",
+              description:
+                "gatePassNumber | manualParchiNumber | marka | customMarka | remarks (substring).",
             },
           },
         },

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-04-05
+
+### Added
+
+- **Store Admin – Search order by receipt: `searchBy` modes**
+  - `POST /api/v1/store-admin/search-order-by-receipt` accepts optional body field `searchBy`: `gatePassNumber` (default; integer gate pass number), `manualParchiNumber`, `marka` (`gatePassNo/totalBags`, matched via aggregation on incoming bag totals and outgoing issued quantities), `customMarka` (incoming gate passes only), `remarks` (case-insensitive substring on incoming and outgoing; user input escaped for literal regex match). Controller, Zod schema, OpenAPI route schema, and `searchOrdersByReceiptNumber` in `store-admin.service.ts` updated.
+
+### Removed
+
+- `docs/curl-search-order-by-receipt.sh` (example curl script for the previous receipt-only search).
+
 ## [1.18.0] - 2026-03-25
 
 ### Added

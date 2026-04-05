@@ -1689,14 +1689,46 @@ export interface SearchOrdersByReceiptNumberResult {
   };
 }
 
+export type SearchOrdersByReceiptSearchBy =
+  | "gatePassNumber"
+  | "manualParchiNumber"
+  | "marka"
+  | "customMarka"
+  | "remarks";
+
+/** Escape user input for safe literal substring match in MongoDB $regex. */
+function escapeRegexLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Parse marka: gatePassNo/totalBags (spaces around / allowed). */
+function parseMarkaSearchString(
+  value: string,
+): { gatePassNo: number; totalBags: number } | null {
+  const m = value.trim().match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (!m) return null;
+  const gatePassNo = Number(m[1]);
+  const totalBags = Number(m[2]);
+  if (
+    !Number.isInteger(gatePassNo) ||
+    !Number.isInteger(totalBags) ||
+    gatePassNo < 0 ||
+    totalBags < 1
+  ) {
+    return null;
+  }
+  return { gatePassNo, totalBags };
+}
+
 /**
- * Search incoming and outgoing gate passes by receipt number (gatePassNo or manual numbers).
+ * Search incoming and outgoing gate passes by gate pass number, manual parchi, marka (gatePassNo/totalBags), customMarka (incoming only), or remarks (case-insensitive substring, both pass types).
  * Scoped to cold storage via farmer-storage-links. Returns populated farmer and sorted bagSizes/orderDetails.
  */
 export async function searchOrdersByReceiptNumber(
   coldStorageId: string,
   receiptNumber: string,
   logger?: FastifyBaseLogger,
+  options?: { searchBy?: SearchOrdersByReceiptSearchBy },
 ): Promise<SearchOrdersByReceiptNumberResult> {
   if (!receiptNumber?.trim()) {
     throw new ValidationError(
@@ -1711,6 +1743,8 @@ export async function searchOrdersByReceiptNumber(
       "INVALID_COLD_STORAGE_ID",
     );
   }
+
+  const searchBy = options?.searchBy ?? "gatePassNumber";
 
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
   const farmerStorageLinkIds = await FarmerStorageLink.find(
@@ -1733,22 +1767,6 @@ export async function searchOrdersByReceiptNumber(
   }
 
   const trimmed = receiptNumber.trim();
-  const gatePassNo = Number(trimmed);
-  if (
-    trimmed === "" ||
-    !Number.isInteger(gatePassNo) ||
-    Number.isNaN(gatePassNo)
-  ) {
-    throw new ValidationError(
-      "Receipt number must be a valid gate pass number (integer)",
-      "INVALID_RECEIPT_NUMBER",
-    );
-  }
-
-  const baseFilter = {
-    farmerStorageLinkId: { $in: farmerStorageLinkIds },
-    gatePassNo,
-  };
 
   const incomingSelect =
     "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber stockFilter customMarka createdAt";
@@ -1766,16 +1784,175 @@ export async function searchOrdersByReceiptNumber(
     },
   ];
 
-  const [incomingOrders, outgoingOrders] = await Promise.all([
-    IncomingGatePass.find(baseFilter as Record<string, unknown>)
-      .select(incomingSelect)
-      .populate(populateLink)
-      .lean(),
-    OutgoingGatePass.find(baseFilter as Record<string, unknown>)
-      .select(outgoingSelect)
-      .populate(populateLink)
-      .lean(),
-  ]);
+  if (searchBy === "marka") {
+    const parsedMarka = parseMarkaSearchString(trimmed);
+    if (!parsedMarka) {
+      throw new ValidationError(
+        'Marka must be gatePassNumber/totalBags, e.g. "42/300"',
+        "INVALID_MARKA_FORMAT",
+      );
+    }
+    const { gatePassNo, totalBags } = parsedMarka;
+    const linkMatch = { farmerStorageLinkId: { $in: farmerStorageLinkIds } };
+
+    const sumIncomingBags = {
+      $reduce: {
+        input: { $ifNull: ["$bagSizes", []] },
+        initialValue: 0,
+        in: {
+          $add: ["$$value", { $ifNull: ["$$this.initialQuantity", 0] }],
+        },
+      },
+    };
+    const sumOutgoingIssued = {
+      $reduce: {
+        input: { $ifNull: ["$orderDetails", []] },
+        initialValue: 0,
+        in: {
+          $add: ["$$value", { $ifNull: ["$$this.quantityIssued", 0] }],
+        },
+      },
+    };
+
+    const [incomingIdDocs, outgoingIdDocs] = await Promise.all([
+      IncomingGatePass.aggregate<{ _id: mongoose.Types.ObjectId }>([
+        { $match: { ...linkMatch, gatePassNo } },
+        { $addFields: { _markaTotalBags: sumIncomingBags } },
+        { $match: { _markaTotalBags: totalBags } },
+        { $project: { _id: 1 } },
+      ]),
+      OutgoingGatePass.aggregate<{ _id: mongoose.Types.ObjectId }>([
+        { $match: { ...linkMatch, gatePassNo } },
+        { $addFields: { _markaTotalBags: sumOutgoingIssued } },
+        { $match: { _markaTotalBags: totalBags } },
+        { $project: { _id: 1 } },
+      ]),
+    ]);
+
+    const incomingIds = incomingIdDocs.map((d) => d._id);
+    const outgoingIds = outgoingIdDocs.map((d) => d._id);
+
+    if (incomingIds.length === 0 && outgoingIds.length === 0) {
+      logger?.info(
+        { marka: trimmed, coldStorageId },
+        "No orders found for marka search",
+      );
+      return {
+        status: "Fail",
+        message: "No orders found with this receipt number",
+        data: { incoming: [], outgoing: [] },
+      };
+    }
+
+    const [incomingOrders, outgoingOrders] = await Promise.all([
+      incomingIds.length > 0
+        ? IncomingGatePass.find({ _id: { $in: incomingIds } })
+            .select(incomingSelect)
+            .populate(populateLink)
+            .lean()
+        : [],
+      outgoingIds.length > 0
+        ? OutgoingGatePass.find({ _id: { $in: outgoingIds } })
+            .select(outgoingSelect)
+            .populate(populateLink)
+            .lean()
+        : [],
+    ]);
+
+    const processedIncoming = sortOrderDetails(
+      incomingOrders as unknown as {
+        bagSizes?: { name: string }[];
+        orderDetails?: { size: string }[];
+      }[],
+    );
+    const processedOutgoing = sortOrderDetails(
+      outgoingOrders as unknown as {
+        bagSizes?: { name: string }[];
+        orderDetails?: { size: string }[];
+      }[],
+    );
+
+    logger?.info(
+      {
+        marka: trimmed,
+        coldStorageId,
+        incomingCount: incomingOrders.length,
+        outgoingCount: outgoingOrders.length,
+      },
+      "Search by marka: orders found",
+    );
+
+    return {
+      status: "Success",
+      data: {
+        incoming: processedIncoming,
+        outgoing: processedOutgoing,
+      },
+    };
+  }
+
+  let baseFilter: Record<string, unknown>;
+
+  if (searchBy === "manualParchiNumber") {
+    const parchiNum = Number(trimmed);
+    const outgoingNumeric =
+      Number.isInteger(parchiNum) && !Number.isNaN(parchiNum);
+    baseFilter = {
+      farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      $or: outgoingNumeric
+        ? [{ manualParchiNumber: trimmed }, { manualParchiNumber: parchiNum }]
+        : [{ manualParchiNumber: trimmed }],
+    };
+  } else if (searchBy === "customMarka") {
+    baseFilter = {
+      farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      customMarka: trimmed,
+    };
+  } else if (searchBy === "remarks") {
+    baseFilter = {
+      farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      remarks: {
+        $regex: escapeRegexLiteral(trimmed),
+        $options: "i",
+      },
+    };
+  } else {
+    const gatePassNo = Number(trimmed);
+    if (
+      trimmed === "" ||
+      !Number.isInteger(gatePassNo) ||
+      Number.isNaN(gatePassNo)
+    ) {
+      throw new ValidationError(
+        "Receipt number must be a valid gate pass number (integer)",
+        "INVALID_RECEIPT_NUMBER",
+      );
+    }
+    baseFilter = {
+      farmerStorageLinkId: { $in: farmerStorageLinkIds },
+      gatePassNo,
+    };
+  }
+
+  const [incomingOrders, outgoingOrders] =
+    searchBy === "customMarka"
+      ? await Promise.all([
+          IncomingGatePass.find(baseFilter as Record<string, unknown>)
+            .select(incomingSelect)
+            .populate(populateLink)
+            .lean(),
+          Promise.resolve([]),
+        ])
+      : await Promise.all([
+          IncomingGatePass.find(baseFilter as Record<string, unknown>)
+            .select(incomingSelect)
+            .populate(populateLink)
+            .lean(),
+          OutgoingGatePass.find(baseFilter as Record<string, unknown>)
+            .select(outgoingSelect)
+            .populate(populateLink)
+            .lean(),
+        ]);
 
   if (incomingOrders.length === 0 && outgoingOrders.length === 0) {
     logger?.info(

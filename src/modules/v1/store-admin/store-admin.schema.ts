@@ -399,10 +399,21 @@ export type GetGatePassesByFarmerStorageLinkQuery = z.infer<
   typeof getGatePassesByFarmerStorageLinkSchema
 >["querystring"];
 
-/** Body for POST search-order-by-receipt: receipt number (gate pass / voucher number) */
+const searchOrderByReceiptSearchBySchema = z.enum([
+  "gatePassNumber",
+  "manualParchiNumber",
+  "marka",
+  "customMarka",
+  "remarks",
+]);
+
+/** Body for POST search-order-by-receipt: gate pass no, manual parchi, marka, customMarka, or remarks substring (by searchBy) */
 export const searchOrderByReceiptNumberBodySchema = z.object({
   body: z.object({
     receiptNumber: z.string().trim().min(1, "Receipt number is required"),
+    searchBy: searchOrderByReceiptSearchBySchema
+      .optional()
+      .default("gatePassNumber"),
   }),
 });
 
