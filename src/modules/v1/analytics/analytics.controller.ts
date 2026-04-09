@@ -183,10 +183,15 @@ export async function getVarietyBreakdownHandler(
       typeof (request.query as { variety?: string }).variety === "string"
         ? (request.query as { variety: string }).variety
         : "";
+    const stockFilter =
+      typeof (request.query as { stockFilter?: string }).stockFilter === "string"
+        ? (request.query as { stockFilter: string }).stockFilter
+        : undefined;
 
     const result = await getVarietyBreakdown(
       coldStorageId,
       variety,
+      stockFilter,
       request.log,
     );
 

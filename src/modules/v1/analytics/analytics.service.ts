@@ -534,6 +534,7 @@ export async function getTopFarmersForStore(
 export async function getVarietyBreakdown(
   coldStorageId: string,
   varietyName: string,
+  stockFilter?: string,
   _logger?: FastifyBaseLogger,
 ): Promise<VarietyBreakdownResult> {
   if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
@@ -550,8 +551,35 @@ export async function getVarietyBreakdown(
       "VARIETY_NAME_REQUIRED",
     );
   }
+  const trimmedStockFilter = stockFilter?.trim();
+  if (
+    trimmedStockFilter &&
+    trimmedStockFilter !== STOCK_FILTER_FARMER &&
+    trimmedStockFilter !== STOCK_FILTER_OWNED
+  ) {
+    throw new ValidationError(
+      "stockFilter must be either FARMER or OWNED",
+      "INVALID_STOCK_FILTER",
+    );
+  }
 
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+  const stockFilterMatch: mongoose.PipelineStage[] =
+    trimmedStockFilter === STOCK_FILTER_FARMER
+      ? [{ $match: { stockFilter: STOCK_FILTER_FARMER } }]
+      : trimmedStockFilter === STOCK_FILTER_OWNED
+        ? [
+            {
+              $match: {
+                $or: [
+                  { stockFilter: STOCK_FILTER_OWNED },
+                  { stockFilter: { $in: [null, ""] } },
+                  { stockFilter: { $exists: false } },
+                ],
+              },
+            },
+          ]
+        : [];
 
   const pipeline: mongoose.PipelineStage[] = [
     {
@@ -571,6 +599,7 @@ export async function getVarietyBreakdown(
         "_link.coldStorageId": coldStorageObjectId,
       },
     },
+    ...stockFilterMatch,
     { $unwind: "$bagSizes" },
     {
       $group: {

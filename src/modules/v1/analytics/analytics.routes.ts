@@ -456,7 +456,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get breakdown for a variety: all sizes with initial/current/quantityRemoved and per-farmer contribution per size. Scoped to authenticated store.",
+          "Get breakdown for a variety: all sizes with initial/current/quantityRemoved and per-farmer contribution per size. Scoped to authenticated store. Optional stockFilter narrows results to FARMER or OWNED.",
         tags: ["Analytics"],
         summary: "Get variety breakdown by size and farmer",
         querystring: {
@@ -466,6 +466,12 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
             variety: {
               type: "string",
               description: "Variety name (e.g. Potato)",
+            },
+            stockFilter: {
+              type: "string",
+              description:
+                "Optional stock filter. Use FARMER or OWNED to filter breakdown data.",
+              enum: ["FARMER", "OWNED"],
             },
           },
         },
