@@ -1285,6 +1285,7 @@ function sortOrderDetails(
  * Get all incoming and outgoing gate passes for a single farmer-storage-link.
  * Returns same format as daybook: status, data (merged/filtered array), pagination (single page, no pagination logic).
  * Optional filter: from, to (YYYY-MM-DD). Optional: type (all | incoming | outgoing), sortBy.
+ * sortBy latest/oldest orders by gatePassNo (desc / asc), not by date.
  * Scoped to the given cold storage.
  */
 export async function getGatePassesByFarmerStorageLinkId(
@@ -1368,24 +1369,24 @@ export async function getGatePassesByFarmerStorageLinkId(
     case "all": {
       const [incomingList, outgoingList] = await Promise.all([
         IncomingGatePass.find(incomingFilter)
-          .sort({ createdAt: sortOrder })
+          .sort({ gatePassNo: sortOrder })
           .select(incomingSelect)
           .populate(populateLink)
           .lean(),
         OutgoingGatePass.find(outgoingFilter)
-          .sort({ createdAt: sortOrder })
+          .sort({ gatePassNo: sortOrder })
           .select(outgoingSelect)
           .populate(populateLink)
           .lean(),
       ]);
 
       const allOrders = [...incomingList, ...outgoingList] as Array<{
-        createdAt: Date | string;
+        gatePassNo?: number;
       }>;
       allOrders.sort((a, b) => {
-        const tA = new Date(a.createdAt).getTime();
-        const tB = new Date(b.createdAt).getTime();
-        return sortOrder === -1 ? tB - tA : tA - tB;
+        const noA = a.gatePassNo ?? 0;
+        const noB = b.gatePassNo ?? 0;
+        return sortOrder === -1 ? noB - noA : noA - noB;
       });
 
       const totalCount = allOrders.length;
@@ -1420,7 +1421,7 @@ export async function getGatePassesByFarmerStorageLinkId(
     }
     case "incoming": {
       const incomingOrders = await IncomingGatePass.find(incomingFilter)
-        .sort({ createdAt: sortOrder })
+        .sort({ gatePassNo: sortOrder })
         .select(incomingSelect)
         .populate(populateLink)
         .lean();
@@ -1445,7 +1446,7 @@ export async function getGatePassesByFarmerStorageLinkId(
     }
     case "outgoing": {
       const outgoingOrders = await OutgoingGatePass.find(outgoingFilter)
-        .sort({ createdAt: sortOrder })
+        .sort({ gatePassNo: sortOrder })
         .select(outgoingSelect)
         .populate(populateLink)
         .lean();

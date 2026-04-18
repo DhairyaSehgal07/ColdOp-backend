@@ -168,7 +168,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get gate passes for a farmer-storage-link. Same response format as daybook: status, data (array), pagination (single page). Query: from, to (YYYY-MM-DD), type (all | incoming | outgoing), sortBy (latest | oldest).",
+          "Get gate passes for a farmer-storage-link. Same response format as daybook: status, data (array), pagination (single page). Query: from, to (YYYY-MM-DD), type (all | incoming | outgoing), sortBy (latest | oldest) — sorts by gatePassNo (desc for latest, asc for oldest).",
         tags: ["Store Admin"],
         summary: "Get gate passes by farmer-storage-link",
         params: {
@@ -201,7 +201,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
             sortBy: {
               type: "string",
               description:
-                "latest = newest first, anything else = oldest first (default latest)",
+                "latest = highest gatePassNo first; otherwise = lowest gatePassNo first (default latest)",
             },
           },
         },

@@ -153,7 +153,7 @@ export async function getFarmerStorageLinksByColdStorageHandler(
 
 /**
  * Handler for GET farmer-storage-links/:farmerStorageLinkId/gate-passes.
- * Same response format as daybook: status, data (array), pagination. Query: from, to, type, sortBy, page, limit.
+ * Same response format as daybook: status, data (array), pagination. Query: from, to, type, sortBy (by gatePassNo).
  */
 export async function getGatePassesByFarmerStorageLinkHandler(
   request: FastifyRequest<{
