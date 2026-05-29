@@ -29,11 +29,9 @@ export const ledgerTypeEnum = z.enum(
    POST / — Create ledger
 ======================= */
 
-const createLedgerBodySchema = createLedgerBodySchemaFromUtils.merge(
-  z.object({
-    farmerStorageLinkId: z.union([objectIdString, z.null()]).optional(),
-  }),
-);
+const createLedgerBodySchema = createLedgerBodySchemaFromUtils.safeExtend({
+  farmerStorageLinkId: z.union([objectIdString, z.null()]).optional(),
+});
 
 export const createLedgerSchema = z.object({
   body: createLedgerBodySchema,
