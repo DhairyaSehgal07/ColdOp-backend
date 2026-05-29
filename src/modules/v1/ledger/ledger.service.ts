@@ -66,7 +66,7 @@ export async function createLedger(
   const openingBalance = payload.openingBalance ?? 0;
   const ledgerData = {
     name: payload.name.trim(),
-    type: payload.type,
+    type: payload.type as LedgerType,
     subType: payload.subType,
     category: payload.category,
     openingBalance,

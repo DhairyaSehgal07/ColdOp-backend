@@ -4,7 +4,7 @@ import mongoose, { Schema, Types, Model } from "mongoose";
    INTERFACES
 ======================= */
 
-interface IOutgoingOrderDetail {
+export interface IOutgoingOrderDetail {
   size: string;
   quantityAvailable: number;
   quantityIssued: number;
@@ -29,6 +29,9 @@ export interface IOutgoingIncomingGatePassSnapshotBagSize {
     floor: string;
     row: string;
   };
+
+  /** Bags deducted from incoming at issuance; required to restore stock on edit. */
+  quantityIssued?: number;
 }
 
 export enum GatePassType {
@@ -160,6 +163,12 @@ const OutgoingIncomingGatePassSnapshotBagSizeSchema =
           required: true,
           trim: true,
         },
+      },
+
+      quantityIssued: {
+        type: Number,
+        required: false,
+        min: 0,
       },
     },
     { _id: false },

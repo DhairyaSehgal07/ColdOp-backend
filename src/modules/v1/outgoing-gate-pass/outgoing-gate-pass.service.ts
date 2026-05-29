@@ -1,8 +1,17 @@
 import mongoose, { ClientSession, Types } from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
-import { OutgoingGatePass, GatePassType } from "./outgoing-gate-pass.model.js";
+import {
+  OutgoingGatePass,
+  GatePassType,
+  IOutgoingIncomingGatePassSnapshot,
+  IOutgoingIncomingGatePassSnapshotBagSize,
+  IOutgoingOrderDetail,
+} from "./outgoing-gate-pass.model.js";
 import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
-import type { CreateOutgoingGatePassInput } from "./outgoing-gate-pass.schema.js";
+import type {
+  CreateOutgoingGatePassInput,
+  UpdateOutgoingGatePassBody,
+} from "./outgoing-gate-pass.schema.js";
 import {
   ConflictError,
   NotFoundError,
@@ -136,6 +145,68 @@ function validateOutgoingGatePassInput(
   return result;
 }
 
+function allocationLocationKey(
+  size: string,
+  location?: { chamber: string; floor: string; row: string },
+): string {
+  const locPart = location
+    ? `|${(location.chamber ?? "").trim()}|${(location.floor ?? "").trim()}|${(location.row ?? "").trim()}`
+    : "";
+  return `${normalizeSize(size)}${locPart}`;
+}
+
+function allocationMapKey(
+  incomingGatePassId: string,
+  size: string,
+  location?: { chamber: string; floor: string; row: string },
+): string {
+  return `${incomingGatePassId}|${allocationLocationKey(size, location)}`;
+}
+
+function parseAllocationMapKey(key: string): {
+  incomingGatePassId: string;
+  size: string;
+  location?: { chamber: string; floor: string; row: string };
+} {
+  const pipeIdx = key.indexOf("|");
+  const incomingGatePassId = key.slice(0, pipeIdx);
+  const rest = key.slice(pipeIdx + 1);
+  const segments = rest.split("|");
+  if (segments.length >= 4) {
+    return {
+      incomingGatePassId,
+      size: segments[0],
+      location: {
+        chamber: segments[1],
+        floor: segments[2],
+        row: segments[3],
+      },
+    };
+  }
+  return { incomingGatePassId, size: rest };
+}
+
+function buildLocationArrayFilter(location: {
+  chamber: string;
+  floor: string;
+  row: string;
+}): Record<string, unknown> {
+  return {
+    $or: [
+      {
+        "elem.location.chamber": location.chamber,
+        "elem.location.floor": location.floor,
+        "elem.location.row": location.row,
+      },
+      {
+        "elem.paltaiLocation.chamber": location.chamber,
+        "elem.paltaiLocation.floor": location.floor,
+        "elem.paltaiLocation.row": location.row,
+      },
+    ],
+  };
+}
+
 /* =======================
    FETCH & VALIDATE INCOMING GATE PASSES
 ======================= */
@@ -145,6 +216,7 @@ async function fetchAndValidateIncomingGatePasses(
   validated: OutgoingIncomingPassWithFilteredAllocations[],
   session: ClientSession,
   _logger?: FastifyBaseLogger,
+  previouslyIssuedByKey?: Map<string, number>,
 ): Promise<Map<string, IIncomingGatePass & { _id: Types.ObjectId }>> {
   const incomingGatePassIds = [
     ...new Set(validated.map((v) => v.incomingGatePassId)),
@@ -203,12 +275,24 @@ async function fetchAndValidateIncomingGatePasses(
           "SIZE_NOT_FOUND",
         );
       }
-      if (bag.currentQuantity < alloc.quantityToAllocate) {
+      const allocationKey = allocationMapKey(
+        item.incomingGatePassId,
+        alloc.size,
+        alloc.location,
+      );
+      const previouslyIssued = previouslyIssuedByKey?.get(allocationKey) ?? 0;
+      const effectiveAvailable = bag.currentQuantity + previouslyIssued;
+
+      if (effectiveAvailable < alloc.quantityToAllocate) {
         const locationHint = alloc.location
           ? ` at location ${alloc.location.chamber}/${alloc.location.floor}/${alloc.location.row}`
           : "";
+        const availabilityDetail =
+          previouslyIssuedByKey && previouslyIssued > 0
+            ? `available ${effectiveAvailable} (current ${bag.currentQuantity} + ${previouslyIssued} from this pass)`
+            : `available ${bag.currentQuantity}`;
         throw new ValidationError(
-          `Insufficient quantity for size "${alloc.size}"${locationHint} in incoming gate pass ${item.incomingGatePassId}: available ${bag.currentQuantity}, requested ${alloc.quantityToAllocate}`,
+          `Insufficient quantity for size "${alloc.size}"${locationHint} in incoming gate pass ${item.incomingGatePassId}: ${availabilityDetail}, requested ${alloc.quantityToAllocate}`,
           "INSUFFICIENT_STOCK",
         );
       }
@@ -216,6 +300,49 @@ async function fetchAndValidateIncomingGatePasses(
   }
 
   return incomingPassMap;
+}
+
+/**
+ * Loads incoming gate passes by ID (no variety/stock validation).
+ * Used on edit to include snapshot-only passes being removed from the outgoing pass.
+ */
+async function fetchIncomingPassMapByIds(
+  incomingGatePassIds: string[],
+  session: ClientSession,
+): Promise<Map<string, IIncomingGatePass & { _id: Types.ObjectId }>> {
+  const uniqueIds = [...new Set(incomingGatePassIds)];
+  const map = new Map<string, IIncomingGatePass & { _id: Types.ObjectId }>();
+
+  if (uniqueIds.length === 0) {
+    return map;
+  }
+
+  const objectIds = uniqueIds.map((id) => new Types.ObjectId(id));
+  const fetched = await IncomingGatePass.find({
+    _id: { $in: objectIds },
+  })
+    .session(session)
+    .lean();
+
+  if (fetched.length !== objectIds.length) {
+    const foundIds = new Set(
+      fetched.map((f) => (f as { _id: Types.ObjectId })._id.toString()),
+    );
+    const missingIds = objectIds
+      .filter((id) => !foundIds.has(id.toString()))
+      .map((id) => id.toString());
+    throw new NotFoundError(
+      `Incoming gate pass(es) not found: ${missingIds.join(", ")}`,
+      "INCOMING_GATE_PASS_NOT_FOUND",
+    );
+  }
+
+  for (const ip of fetched) {
+    const doc = ip as IIncomingGatePass & { _id: Types.ObjectId };
+    map.set(doc._id.toString(), doc);
+  }
+
+  return map;
 }
 
 /* =======================
@@ -277,6 +404,209 @@ function prepareBulkOperationsForOutgoing(
   return bulkOps;
 }
 
+function snapshotRowMatchesOrderDetail(
+  row: IOutgoingIncomingGatePassSnapshotBagSize,
+  detail: IOutgoingOrderDetail,
+): boolean {
+  if (normalizeSize(detail.size) !== normalizeSize(row.name)) return false;
+  if (row.location && detail.location) {
+    return locationMatches(row.location, detail.location);
+  }
+  return !row.location && !detail.location;
+}
+
+function findOrderDetailForSnapshotRow(
+  row: IOutgoingIncomingGatePassSnapshotBagSize,
+  orderDetails: IOutgoingOrderDetail[],
+): IOutgoingOrderDetail | undefined {
+  const exact = orderDetails.find((d) => snapshotRowMatchesOrderDetail(row, d));
+  if (exact) return exact;
+
+  if (row.location) {
+    const sizeOnlyMatches = orderDetails.filter(
+      (d) => normalizeSize(d.size) === normalizeSize(row.name) && !d.location,
+    );
+    if (sizeOnlyMatches.length === 1) return sizeOnlyMatches[0];
+  }
+
+  return undefined;
+}
+
+function countSnapshotRowsByAllocationKey(
+  snapshots: IOutgoingIncomingGatePassSnapshot[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const snap of snapshots) {
+    for (const row of snap.bagSizes) {
+      const key = allocationLocationKey(row.name, row.location);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/**
+ * Resolves how many bags were issued for a snapshot line (new passes store quantityIssued;
+ * legacy passes fall back to orderDetails matched by size + location).
+ */
+function resolveQuantityIssuedForRestore(
+  row: IOutgoingIncomingGatePassSnapshotBagSize,
+  orderDetails: IOutgoingOrderDetail[],
+  rowCountByAllocationKey: Map<string, number>,
+): number {
+  if (row.quantityIssued != null) {
+    return row.quantityIssued;
+  }
+
+  const detail = findOrderDetailForSnapshotRow(row, orderDetails);
+
+  if (!detail || detail.quantityIssued <= 0) {
+    throw new ValidationError(
+      `Cannot determine issued quantity for size "${row.name}"; update order details or recreate the outgoing gate pass.`,
+      "OUTGOING_RESTORE_QUANTITY_UNKNOWN",
+    );
+  }
+
+  const key = allocationLocationKey(row.name, row.location);
+  const rowCount = rowCountByAllocationKey.get(key) ?? 1;
+  if (rowCount <= 1) {
+    return detail.quantityIssued;
+  }
+
+  // Same size/location from multiple incoming passes (aggregated in orderDetails).
+  return Math.floor(detail.quantityIssued / rowCount);
+}
+
+function buildPreviouslyIssuedMap(
+  snapshots: IOutgoingIncomingGatePassSnapshot[],
+  orderDetails: IOutgoingOrderDetail[],
+): Map<string, number> {
+  const map = new Map<string, number>();
+  const rowCountByAllocationKey = countSnapshotRowsByAllocationKey(snapshots);
+
+  for (const snap of snapshots) {
+    for (const row of snap.bagSizes) {
+      const issued = resolveQuantityIssuedForRestore(
+        row,
+        orderDetails,
+        rowCountByAllocationKey,
+      );
+      const key = allocationMapKey(snap._id.toString(), row.name, row.location);
+      map.set(key, (map.get(key) ?? 0) + issued);
+    }
+  }
+
+  return map;
+}
+
+function buildRequestedAllocationMap(
+  validated: OutgoingIncomingPassWithFilteredAllocations[],
+): Map<string, number> {
+  const map = new Map<string, number>();
+
+  for (const item of validated) {
+    for (const alloc of item.allocations) {
+      const key = allocationMapKey(
+        item.incomingGatePassId,
+        alloc.size,
+        alloc.location,
+      );
+      map.set(key, (map.get(key) ?? 0) + alloc.quantityToAllocate);
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Applies net stock change per allocation when editing an outgoing gate pass:
+ * delta = newIssued - oldIssued; $inc currentQuantity by -delta.
+ */
+function prepareNetDeltaBulkOperationsForUpdate(
+  previouslyIssuedMap: Map<string, number>,
+  requestedMap: Map<string, number>,
+  incomingPassMap: Map<string, IIncomingGatePass & { _id: Types.ObjectId }>,
+): mongoose.mongo.AnyBulkWriteOperation<IIncomingGatePass>[] {
+  const bulkOps: mongoose.mongo.AnyBulkWriteOperation<IIncomingGatePass>[] = [];
+  const allKeys = new Set([
+    ...previouslyIssuedMap.keys(),
+    ...requestedMap.keys(),
+  ]);
+
+  for (const key of allKeys) {
+    const oldIssued = previouslyIssuedMap.get(key) ?? 0;
+    const newIssued = requestedMap.get(key) ?? 0;
+    const delta = newIssued - oldIssued;
+    if (delta === 0) continue;
+
+    const { incomingGatePassId, size, location } = parseAllocationMapKey(key);
+    const ip = incomingPassMap.get(incomingGatePassId) as unknown as {
+      bagSizes: IBagSize[];
+    };
+    if (!ip?.bagSizes) {
+      throw new NotFoundError(
+        `Incoming gate pass ${incomingGatePassId} not found`,
+        "INCOMING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const alloc: OutgoingValidatedAllocation = {
+      incomingGatePassId,
+      size,
+      quantityToAllocate: newIssued,
+      ...(location && { location }),
+    };
+    const bag = getBagForAllocation(ip.bagSizes, alloc);
+    if (!bag) {
+      const locationHint = location
+        ? ` at location ${location.chamber}/${location.floor}/${location.row}`
+        : "";
+      throw new ValidationError(
+        `Size "${size}"${locationHint} not found in incoming gate pass ${incomingGatePassId}`,
+        "SIZE_NOT_FOUND",
+      );
+    }
+
+    if (delta > 0) {
+      const effectiveAvailable = bag.currentQuantity + oldIssued;
+      if (effectiveAvailable < newIssued) {
+        const locationHint = location
+          ? ` at location ${location.chamber}/${location.floor}/${location.row}`
+          : "";
+        throw new ValidationError(
+          `Insufficient quantity for size "${size}"${locationHint} in incoming gate pass ${incomingGatePassId}: available ${effectiveAvailable} (current ${bag.currentQuantity} + ${oldIssued} from this pass), requested ${newIssued}`,
+          "INSUFFICIENT_STOCK",
+        );
+      }
+    }
+
+    const baseFilter: Record<string, unknown> = {
+      "elem.name": bag.name,
+    };
+    if (delta > 0) {
+      baseFilter["elem.currentQuantity"] = { $gte: delta };
+    }
+
+    const locationFilter = location
+      ? buildLocationArrayFilter(location)
+      : undefined;
+
+    bulkOps.push({
+      updateOne: {
+        filter: { _id: new Types.ObjectId(incomingGatePassId) },
+        update: {
+          $inc: {
+            "bagSizes.$[elem].currentQuantity": -delta,
+          },
+        },
+        arrayFilters: [{ ...baseFilter, ...locationFilter }],
+      },
+    });
+  }
+
+  return bulkOps;
+}
+
 /* =======================
    BUILD SNAPSHOTS (remaining qty at creation time)
 ======================= */
@@ -284,6 +614,7 @@ function prepareBulkOperationsForOutgoing(
 function buildIncomingGatePassSnapshots(
   validated: OutgoingIncomingPassWithFilteredAllocations[],
   incomingPassMap: Map<string, IIncomingGatePass & { _id: Types.ObjectId }>,
+  options?: { stockAlreadyAdjusted?: boolean },
 ): Array<{
   _id: Types.ObjectId;
   gatePassNo: number;
@@ -294,6 +625,7 @@ function buildIncomingGatePassSnapshots(
     initialQuantity: number;
     type: GatePassType;
     location: { chamber: string; floor: string; row: string };
+    quantityIssued: number;
   }>;
 }> {
   const allocatedBySize = new Map<string, number>();
@@ -320,6 +652,7 @@ function buildIncomingGatePassSnapshots(
       initialQuantity: number;
       type: GatePassType;
       location: { chamber: string; floor: string; row: string };
+      quantityIssued: number;
     }>;
   }> = [];
 
@@ -338,6 +671,7 @@ function buildIncomingGatePassSnapshots(
       initialQuantity: number;
       type: GatePassType;
       location: { chamber: string; floor: string; row: string };
+      quantityIssued: number;
     }> = [];
 
     for (const alloc of item.allocations) {
@@ -349,7 +683,9 @@ function buildIncomingGatePassSnapshots(
         : "";
       const key = `${item.incomingGatePassId}|${normalizeSize(alloc.size)}${locPart}`;
       const allocated = allocatedBySize.get(key) ?? 0;
-      const remaining = Math.max(0, bag.currentQuantity - allocated);
+      const remaining = options?.stockAlreadyAdjusted
+        ? Math.max(0, bag.currentQuantity)
+        : Math.max(0, bag.currentQuantity - allocated);
       // Use paltai location as latest location when present (bags moved in cold storage)
       const effectiveLocation =
         bag.paltaiLocation &&
@@ -365,6 +701,7 @@ function buildIncomingGatePassSnapshots(
         initialQuantity: bag.initialQuantity,
         type: GatePassType.DELIVERY,
         location: effectiveLocation,
+        quantityIssued: alloc.quantityToAllocate,
       });
     }
 
@@ -395,6 +732,7 @@ type OrderDetailEntry = {
 function buildOrderDetails(
   validated: OutgoingIncomingPassWithFilteredAllocations[],
   incomingPassMap: Map<string, IIncomingGatePass & { _id: Types.ObjectId }>,
+  options?: { stockAlreadyAdjusted?: boolean },
 ): OrderDetailEntry[] {
   const byKey = new Map<
     string,
@@ -414,10 +752,9 @@ function buildOrderDetails(
     for (const alloc of item.allocations) {
       const bag = getBagForAllocation(ip.bagSizes, alloc);
       if (!bag) continue;
-      const remaining = Math.max(
-        0,
-        bag.currentQuantity - alloc.quantityToAllocate,
-      );
+      const remaining = options?.stockAlreadyAdjusted
+        ? Math.max(0, bag.currentQuantity)
+        : Math.max(0, bag.currentQuantity - alloc.quantityToAllocate);
 
       const locPart = alloc.location
         ? `|${alloc.location.chamber}|${alloc.location.floor}|${alloc.location.row}`
@@ -429,7 +766,9 @@ function buildOrderDetails(
       if (existing) {
         byKey.set(key, {
           quantityIssued: existing.quantityIssued + alloc.quantityToAllocate,
-          quantityAvailable: existing.quantityAvailable + remaining,
+          quantityAvailable: options?.stockAlreadyAdjusted
+            ? existing.quantityAvailable
+            : existing.quantityAvailable + remaining,
           location: existing.location ?? location,
         });
       } else {
@@ -461,6 +800,7 @@ function buildOrderDetails(
 function handleOutgoingServiceError(
   error: unknown,
   logger?: FastifyBaseLogger,
+  opts?: { fallbackMessage: string; fallbackCode: string },
 ): never {
   if (
     error instanceof ConflictError ||
@@ -490,9 +830,9 @@ function handleOutgoingServiceError(
     "Unexpected error in outgoing gate pass service",
   );
   throw new AppError(
-    "Failed to create outgoing gate pass",
+    opts?.fallbackMessage ?? "Failed to create outgoing gate pass",
     500,
-    "CREATE_OUTGOING_GATE_PASS_ERROR",
+    opts?.fallbackCode ?? "CREATE_OUTGOING_GATE_PASS_ERROR",
   );
 }
 
@@ -867,6 +1207,459 @@ export async function createOutgoingGatePass(
   }
 }
 
+/**
+ * Updates an outgoing gate pass. When `incomingGatePasses` is sent, previously
+ * issued quantities are restored on the linked incoming gate passes, then the
+ * new allocations are applied (same validation as create).
+ */
+export async function updateOutgoingGatePass(
+  id: string,
+  payload: UpdateOutgoingGatePassBody,
+  editedById: string | undefined,
+  loggedInUserColdStorageId: string | undefined,
+  logger?: FastifyBaseLogger,
+) {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ValidationError(
+      "Invalid outgoing gate pass ID format",
+      "INVALID_OUTGOING_GATE_PASS_ID",
+    );
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const idObj = new Types.ObjectId(id);
+    const existing = await OutgoingGatePass.findById(idObj)
+      .session(session)
+      .lean();
+
+    if (!existing) {
+      throw new NotFoundError(
+        "Outgoing gate pass not found",
+        "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const existingLinkRaw = existing.farmerStorageLinkId;
+    const existingLinkId =
+      typeof existingLinkRaw === "object" &&
+      existingLinkRaw !== null &&
+      "_id" in existingLinkRaw
+        ? (existingLinkRaw as { _id: Types.ObjectId })._id
+        : existingLinkRaw;
+    const existingLinkIdObj =
+      typeof existingLinkId === "object"
+        ? existingLinkId
+        : new Types.ObjectId(String(existingLinkId));
+
+    const storageLink = await FarmerStorageLink.findById(existingLinkIdObj)
+      .session(session)
+      .lean();
+
+    if (!storageLink) {
+      throw new NotFoundError(
+        "Farmer-storage-link not found",
+        "FARMER_STORAGE_LINK_NOT_FOUND",
+      );
+    }
+
+    const linkColdStorageId =
+      typeof storageLink.coldStorageId === "object" &&
+      storageLink.coldStorageId !== null
+        ? (storageLink.coldStorageId as { _id: Types.ObjectId })._id.toString()
+        : (storageLink.coldStorageId as string);
+
+    if (
+      loggedInUserColdStorageId &&
+      linkColdStorageId !== loggedInUserColdStorageId
+    ) {
+      throw new NotFoundError(
+        "Outgoing gate pass not found",
+        "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    let farmerStorageLinkObjectId = existingLinkIdObj;
+
+    if (payload.farmerStorageLinkId !== undefined) {
+      const newLinkIdObj = new Types.ObjectId(payload.farmerStorageLinkId);
+      const newLink = await FarmerStorageLink.findById(newLinkIdObj)
+        .session(session)
+        .lean();
+      if (!newLink) {
+        throw new NotFoundError(
+          "Farmer-storage-link not found",
+          "FARMER_STORAGE_LINK_NOT_FOUND",
+        );
+      }
+      const newLinkColdStorageId =
+        typeof newLink.coldStorageId === "object" &&
+        newLink.coldStorageId !== null
+          ? (newLink.coldStorageId as { _id: Types.ObjectId })._id.toString()
+          : (newLink.coldStorageId as string);
+      if (
+        loggedInUserColdStorageId &&
+        newLinkColdStorageId !== loggedInUserColdStorageId
+      ) {
+        throw new NotFoundError(
+          "Farmer-storage-link not found",
+          "FARMER_STORAGE_LINK_NOT_FOUND",
+        );
+      }
+      farmerStorageLinkObjectId = newLinkIdObj;
+    }
+
+    const coldStorageId = new Types.ObjectId(linkColdStorageId);
+
+    const updateFields: Record<string, unknown> = {};
+    if (payload.date !== undefined) updateFields.date = payload.date;
+    if (payload.from !== undefined) updateFields.from = payload.from;
+    if (payload.to !== undefined) updateFields.to = payload.to;
+    if (payload.truckNumber !== undefined)
+      updateFields.truckNumber = payload.truckNumber;
+    if (payload.remarks !== undefined) updateFields.remarks = payload.remarks;
+    if (payload.manualParchiNumber !== undefined)
+      updateFields.manualParchiNumber = payload.manualParchiNumber;
+    if (payload.farmerStorageLinkId !== undefined)
+      updateFields.farmerStorageLinkId = farmerStorageLinkObjectId;
+
+    if (payload.incomingGatePasses !== undefined) {
+      const snapshots =
+        (existing.incomingGatePassSnapshots as IOutgoingIncomingGatePassSnapshot[]) ??
+        [];
+
+      if (snapshots.length === 0) {
+        throw new ValidationError(
+          "This outgoing gate pass has no allocation snapshot; quantities cannot be edited.",
+          "OUTGOING_SNAPSHOT_MISSING",
+        );
+      }
+
+      const orderDetails =
+        (existing.orderDetails as IOutgoingOrderDetail[]) ?? [];
+      const previouslyIssuedMap = buildPreviouslyIssuedMap(
+        snapshots,
+        orderDetails,
+      );
+
+      const fakeCreate: CreateOutgoingGatePassInput = {
+        farmerStorageLinkId: farmerStorageLinkObjectId.toString(),
+        gatePassNo: existing.gatePassNo,
+        date: payload.date ?? existing.date,
+        from: payload.from ?? existing.from,
+        to: payload.to ?? existing.to,
+        truckNumber: payload.truckNumber ?? existing.truckNumber,
+        incomingGatePasses: payload.incomingGatePasses,
+        remarks: payload.remarks ?? existing.remarks,
+        manualParchiNumber:
+          payload.manualParchiNumber ?? existing.manualParchiNumber,
+      };
+
+      const validated = validateOutgoingGatePassInput(fakeCreate, logger);
+      const requestedMap = buildRequestedAllocationMap(validated);
+
+      await fetchAndValidateIncomingGatePasses(
+        fakeCreate,
+        validated,
+        session,
+        logger,
+        previouslyIssuedMap,
+      );
+
+      const allIncomingIdsForStock = [
+        ...new Set([
+          ...snapshots.map((s) => s._id.toString()),
+          ...validated.map((v) => v.incomingGatePassId),
+        ]),
+      ];
+      const fullIncomingPassMap = await fetchIncomingPassMapByIds(
+        allIncomingIdsForStock,
+        session,
+      );
+
+      const netDeltaOps = prepareNetDeltaBulkOperationsForUpdate(
+        previouslyIssuedMap,
+        requestedMap,
+        fullIncomingPassMap,
+      );
+      if (netDeltaOps.length === 0) {
+        throw new ValidationError(
+          "No allocation changes to apply; incoming gate passes and quantities match the current pass.",
+          "INVALID_ALLOCATION_QUANTITY",
+        );
+      }
+
+      const netDeltaResult = await IncomingGatePass.bulkWrite(
+        netDeltaOps as Parameters<typeof IncomingGatePass.bulkWrite>[0],
+        { session },
+      );
+      if (netDeltaResult.modifiedCount !== netDeltaOps.length) {
+        throw new ConflictError(
+          `Expected ${netDeltaOps.length} stock updates, got ${netDeltaResult.modifiedCount}. Concurrent modification detected.`,
+          "CONCURRENT_MODIFICATION",
+        );
+      }
+
+      const uniqueIncomingIds = [
+        ...new Set([
+          ...snapshots.map((s) => s._id.toString()),
+          ...validated.map((v) => v.incomingGatePassId),
+        ]),
+      ];
+      await recordEditHistoryBulk(
+        uniqueIncomingIds.map((incomingId) => ({
+          entityType: EditHistoryEntityType.INCOMING_GATE_PASS,
+          documentId: new Types.ObjectId(incomingId),
+          coldStorageId,
+          editedById,
+          action: EditHistoryAction.QUANTITY_ADJUSTMENT,
+          changeSummary: `Quantities adjusted after editing outgoing gate pass #${existing.gatePassNo}`,
+          logger,
+        })),
+        session,
+        logger,
+      );
+
+      const incomingIdsForSnapshots = [
+        ...new Set(validated.map((v) => v.incomingGatePassId)),
+      ].map((id) => new Types.ObjectId(id));
+      const incomingAfterUpdate = await IncomingGatePass.find({
+        _id: { $in: incomingIdsForSnapshots },
+      })
+        .session(session)
+        .lean();
+      const incomingPassMapAfterUpdate = new Map<
+        string,
+        IIncomingGatePass & { _id: Types.ObjectId }
+      >();
+      for (const ip of incomingAfterUpdate) {
+        const doc = ip as IIncomingGatePass & { _id: Types.ObjectId };
+        incomingPassMapAfterUpdate.set(doc._id.toString(), doc);
+      }
+
+      updateFields.incomingGatePassSnapshots = buildIncomingGatePassSnapshots(
+        validated,
+        incomingPassMapAfterUpdate,
+        { stockAlreadyAdjusted: true },
+      );
+      updateFields.orderDetails = buildOrderDetails(
+        validated,
+        incomingPassMapAfterUpdate,
+        { stockAlreadyAdjusted: true },
+      );
+    }
+
+    if (Object.keys(updateFields).length === 0) {
+      throw new ValidationError(
+        "No valid fields to update",
+        "NO_FIELDS_TO_UPDATE",
+      );
+    }
+
+    const updated = await OutgoingGatePass.findByIdAndUpdate(
+      idObj,
+      { $set: updateFields },
+      { session, new: true },
+    ).lean();
+
+    if (!updated) {
+      throw new NotFoundError(
+        "Outgoing gate pass not found",
+        "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    await session.commitTransaction();
+
+    await recordEditHistory({
+      entityType: EditHistoryEntityType.OUTGOING_GATE_PASS,
+      documentId: idObj,
+      coldStorageId,
+      editedById,
+      action: EditHistoryAction.UPDATE,
+      changeSummary: `Outgoing gate pass #${updated.gatePassNo} updated`,
+      logger,
+    });
+
+    const populated = await OutgoingGatePass.findById(idObj)
+      .populate({
+        path: "farmerStorageLinkId",
+        select: "accountNumber farmerId",
+        populate: {
+          path: "farmerId",
+          select: "name address mobileNumber",
+        },
+      })
+      .populate({ path: "createdBy", select: "name" })
+      .lean();
+
+    if (!populated) {
+      return updated as unknown as Record<string, unknown>;
+    }
+
+    const raw = populated as unknown as Record<string, unknown>;
+    type PopulatedLink = {
+      accountNumber: number;
+      farmerId: { name: string; address: string; mobileNumber: string };
+    };
+    const populatedLink = raw.farmerStorageLinkId as
+      | PopulatedLink
+      | null
+      | undefined;
+    type PopulatedAdmin = { _id: unknown; name: string };
+    const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+
+    return {
+      ...raw,
+      farmerStorageLinkId:
+        populatedLink && populatedLink.farmerId
+          ? {
+              name: populatedLink.farmerId.name,
+              accountNumber: populatedLink.accountNumber,
+              address: populatedLink.farmerId.address,
+              mobileNumber: populatedLink.farmerId.mobileNumber,
+            }
+          : raw.farmerStorageLinkId,
+      createdBy: populatedAdmin
+        ? { _id: populatedAdmin._id, name: populatedAdmin.name }
+        : raw.createdBy,
+    };
+  } catch (error) {
+    await session.abortTransaction().catch(() => {});
+    handleOutgoingServiceError(error, logger, {
+      fallbackMessage: "Failed to update outgoing gate pass",
+      fallbackCode: "UPDATE_OUTGOING_GATE_PASS_ERROR",
+    });
+  } finally {
+    session.endSession();
+  }
+}
+
+/**
+ * Fetches a single outgoing gate pass by ID, scoped to the logged-in user's cold storage.
+ */
+export async function getOutgoingGatePassById(
+  id: string,
+  loggedInUserColdStorageId: string | undefined,
+  logger?: FastifyBaseLogger,
+) {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ValidationError(
+      "Invalid outgoing gate pass ID format",
+      "INVALID_OUTGOING_GATE_PASS_ID",
+    );
+  }
+
+  try {
+    const idObj = new Types.ObjectId(id);
+    const existing = await OutgoingGatePass.findById(idObj).lean();
+
+    if (!existing) {
+      throw new NotFoundError(
+        "Outgoing gate pass not found",
+        "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const existingLinkRaw = existing.farmerStorageLinkId;
+    const existingLinkId =
+      typeof existingLinkRaw === "object" &&
+      existingLinkRaw !== null &&
+      "_id" in existingLinkRaw
+        ? (existingLinkRaw as { _id: Types.ObjectId })._id
+        : existingLinkRaw;
+    const existingLinkIdObj =
+      typeof existingLinkId === "object"
+        ? existingLinkId
+        : new Types.ObjectId(String(existingLinkId));
+
+    const storageLink =
+      await FarmerStorageLink.findById(existingLinkIdObj).lean();
+
+    if (!storageLink) {
+      throw new NotFoundError(
+        "Farmer-storage-link not found",
+        "FARMER_STORAGE_LINK_NOT_FOUND",
+      );
+    }
+
+    const linkColdStorageId =
+      typeof storageLink.coldStorageId === "object" &&
+      storageLink.coldStorageId !== null
+        ? (storageLink.coldStorageId as { _id: Types.ObjectId })._id.toString()
+        : (storageLink.coldStorageId as string);
+
+    if (
+      loggedInUserColdStorageId &&
+      linkColdStorageId !== loggedInUserColdStorageId
+    ) {
+      throw new NotFoundError(
+        "Outgoing gate pass not found",
+        "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const populated = await OutgoingGatePass.findById(idObj)
+      .populate({
+        path: "farmerStorageLinkId",
+        select: "accountNumber farmerId",
+        populate: {
+          path: "farmerId",
+          select: "name address mobileNumber",
+        },
+      })
+      .populate({ path: "createdBy", select: "name" })
+      .lean();
+
+    if (!populated) {
+      throw new NotFoundError(
+        "Outgoing gate pass not found",
+        "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    logger?.info(
+      { outgoingGatePassId: id },
+      "Retrieved outgoing gate pass by ID",
+    );
+
+    const raw = populated as unknown as Record<string, unknown>;
+    type PopulatedLink = {
+      accountNumber: number;
+      farmerId: { name: string; address: string; mobileNumber: string };
+    };
+    const populatedLink = raw.farmerStorageLinkId as
+      | PopulatedLink
+      | null
+      | undefined;
+    type PopulatedAdmin = { _id: unknown; name: string };
+    const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+
+    return {
+      ...raw,
+      farmerStorageLinkId:
+        populatedLink && populatedLink.farmerId
+          ? {
+              name: populatedLink.farmerId.name,
+              accountNumber: populatedLink.accountNumber,
+              address: populatedLink.farmerId.address,
+              mobileNumber: populatedLink.farmerId.mobileNumber,
+            }
+          : raw.farmerStorageLinkId,
+      createdBy: populatedAdmin
+        ? { _id: populatedAdmin._id, name: populatedAdmin.name }
+        : raw.createdBy,
+    };
+  } catch (error) {
+    handleOutgoingServiceError(error, logger, {
+      fallbackMessage: "Failed to retrieve outgoing gate pass",
+      fallbackCode: "GET_OUTGOING_GATE_PASS_ERROR",
+    });
+  }
+}
+
 /* =======================
    OUTGOING FOR TRANSFER STOCK (from farmer)
 ======================= */
@@ -995,3 +1788,12 @@ export async function createOutgoingGatePassForTransferStock(
 
   return { _id: doc._id };
 }
+
+/** @internal Exported for unit tests only */
+export const outgoingGatePassStockEditTestExports = {
+  allocationMapKey,
+  buildPreviouslyIssuedMap,
+  buildRequestedAllocationMap,
+  prepareNetDeltaBulkOperationsForUpdate,
+  buildIncomingGatePassSnapshots,
+};

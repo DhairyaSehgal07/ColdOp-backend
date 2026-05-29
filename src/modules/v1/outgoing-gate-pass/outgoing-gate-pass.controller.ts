@@ -1,6 +1,15 @@
 import { FastifyReply, FastifyRequest } from "fastify";
-import { createOutgoingGatePass } from "./outgoing-gate-pass.service.js";
-import { CreateOutgoingGatePassInput } from "./outgoing-gate-pass.schema.js";
+import {
+  createOutgoingGatePass,
+  getOutgoingGatePassById,
+  updateOutgoingGatePass,
+} from "./outgoing-gate-pass.service.js";
+import {
+  CreateOutgoingGatePassInput,
+  UpdateOutgoingGatePassBody,
+  getOutgoingGatePassByIdSchema,
+  updateOutgoingGatePassSchema,
+} from "./outgoing-gate-pass.schema.js";
 import {
   AppError,
   ConflictError,
@@ -8,6 +17,18 @@ import {
   ValidationError,
 } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
+
+function getLoggedInUserColdStorageId(
+  request: FastifyRequest,
+): string | undefined {
+  const req = request as AuthenticatedRequest;
+  if (!req.user?.coldStorageId) return undefined;
+  return typeof req.user.coldStorageId === "object" &&
+    req.user.coldStorageId !== null &&
+    "_id" in req.user.coldStorageId
+    ? (req.user.coldStorageId as { _id: string })._id
+    : (req.user.coldStorageId as string);
+}
 
 /**
  * Handler for creating a new outgoing gate pass (nikasi-style flow).
@@ -41,6 +62,213 @@ export async function createOutgoingGatePassHandler(
     request.log.error(
       { error, body: request.body },
       "Error in createOutgoingGatePassHandler",
+    );
+
+    if (error instanceof ConflictError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof ValidationError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof NotFoundError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof AppError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    const statusCode = 500;
+    return reply.code(statusCode).send({
+      status: "error",
+      statusCode,
+      errorCode: "INTERNAL_SERVER_ERROR",
+      message:
+        process.env.NODE_ENV === "development"
+          ? error instanceof Error
+            ? error.message
+            : "An unexpected error occurred"
+          : "An unexpected error occurred",
+    });
+  }
+}
+
+/**
+ * Handler for fetching a single outgoing gate pass by ID.
+ */
+export async function getOutgoingGatePassByIdHandler(
+  request: FastifyRequest<{ Params: { id: string } }>,
+  reply: FastifyReply,
+) {
+  try {
+    const parsed = getOutgoingGatePassByIdSchema.safeParse({
+      params: request.params,
+    });
+    if (!parsed.success) {
+      const message =
+        parsed.error.issues
+          ?.map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ") ?? parsed.error.message;
+      return reply.code(400).send({
+        status: "error",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+        message,
+      });
+    }
+
+    request.log.info(
+      { outgoingGatePassId: parsed.data.params.id },
+      "Get outgoing gate pass by ID request",
+    );
+
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+
+    const result = await getOutgoingGatePassById(
+      parsed.data.params.id,
+      loggedInUserColdStorageId,
+      request.log,
+    );
+
+    return reply.code(200).send({
+      status: "Success",
+      message: "Outgoing gate pass retrieved successfully.",
+      data: result,
+    });
+  } catch (error) {
+    request.log.error(
+      { error, params: request.params },
+      "Error in getOutgoingGatePassByIdHandler",
+    );
+
+    if (error instanceof ConflictError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof ValidationError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof NotFoundError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof AppError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    const statusCode = 500;
+    return reply.code(statusCode).send({
+      status: "error",
+      statusCode,
+      errorCode: "INTERNAL_SERVER_ERROR",
+      message:
+        process.env.NODE_ENV === "development"
+          ? error instanceof Error
+            ? error.message
+            : "An unexpected error occurred"
+          : "An unexpected error occurred",
+    });
+  }
+}
+
+/**
+ * Handler for updating an outgoing gate pass (quantities and/or header fields).
+ * When `incomingGatePasses` is sent, prior issuance is restored on incoming passes, then new allocations apply.
+ */
+export async function updateOutgoingGatePassHandler(
+  request: FastifyRequest<{
+    Params: { id: string };
+    Body: UpdateOutgoingGatePassBody;
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const parsed = updateOutgoingGatePassSchema.safeParse({
+      params: request.params,
+      body: request.body,
+    });
+    if (!parsed.success) {
+      const message =
+        parsed.error.issues
+          ?.map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ") ?? parsed.error.message;
+      return reply.code(400).send({
+        status: "error",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+        message,
+      });
+    }
+
+    request.log.info(
+      { outgoingGatePassId: parsed.data.params.id },
+      "Update outgoing gate pass request",
+    );
+
+    const req = request as AuthenticatedRequest;
+    const editedById = req.user?.id;
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+
+    const result = await updateOutgoingGatePass(
+      parsed.data.params.id,
+      parsed.data.body,
+      editedById,
+      loggedInUserColdStorageId,
+      request.log,
+    );
+
+    return reply.code(200).send({
+      status: "Success",
+      message: "Outgoing gate pass updated successfully.",
+      data: result,
+    });
+  } catch (error) {
+    request.log.error(
+      { error, params: request.params, body: request.body },
+      "Error in updateOutgoingGatePassHandler",
     );
 
     if (error instanceof ConflictError) {

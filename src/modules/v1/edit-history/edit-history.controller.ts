@@ -142,7 +142,7 @@ export async function getEditHistoryByDocumentHandler(
   }
 
   const raw = await EditHistory.find({
-    entityType,
+    entityType: entityType as EditHistoryEntityType,
     documentId: new mongoose.Types.ObjectId(documentId),
   })
     .sort({ editedAt: -1 })

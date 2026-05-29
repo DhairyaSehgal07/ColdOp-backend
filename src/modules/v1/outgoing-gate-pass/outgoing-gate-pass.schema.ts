@@ -7,8 +7,14 @@ import mongoose from "mongoose";
 
 const allocationLocationSchema = z
   .object({
-    chamber: z.string().trim().min(1, "Chamber is required when location is provided"),
-    floor: z.string().trim().min(1, "Floor is required when location is provided"),
+    chamber: z
+      .string()
+      .trim()
+      .min(1, "Chamber is required when location is provided"),
+    floor: z
+      .string()
+      .trim()
+      .min(1, "Floor is required when location is provided"),
     row: z.string().trim().min(1, "Row is required when location is provided"),
   })
   .strict();
@@ -22,7 +28,7 @@ const outgoingAllocationSchema = z.object({
   location: allocationLocationSchema.optional(),
 });
 
-const outgoingIncomingGatePassAllocationSchema = z.object({
+export const outgoingIncomingGatePassAllocationSchema = z.object({
   incomingGatePassId: z
     .string()
     .trim()
@@ -104,4 +110,89 @@ export const createOutgoingGatePassSchema = z.object({
 
 export type CreateOutgoingGatePassInput = z.infer<
   typeof createOutgoingGatePassSchema
+>["body"];
+
+const outgoingGatePassIdParamsSchema = z.object({
+  id: z
+    .string()
+    .trim()
+    .min(1, "Outgoing gate pass ID is required")
+    .refine(
+      (val) => mongoose.Types.ObjectId.isValid(val),
+      "Invalid outgoing gate pass ID format",
+    ),
+});
+
+export const getOutgoingGatePassByIdSchema = z.object({
+  params: outgoingGatePassIdParamsSchema,
+});
+
+export type GetOutgoingGatePassByIdParams = z.infer<
+  typeof getOutgoingGatePassByIdSchema
+>["params"];
+
+/** Update payload: fields optional; at least one required (mirrors incoming gate pass PATCH). */
+export const updateOutgoingGatePassSchema = z.object({
+  params: outgoingGatePassIdParamsSchema,
+  body: z
+    .object({
+      farmerStorageLinkId: z
+        .string()
+        .trim()
+        .min(1, "Farmer storage link ID cannot be empty")
+        .refine(
+          (val) => mongoose.Types.ObjectId.isValid(val),
+          "Invalid farmer storage link ID format",
+        )
+        .optional(),
+      date: z.coerce.date().optional(),
+      from: z
+        .string()
+        .trim()
+        .max(200, "From must not exceed 200 characters")
+        .optional(),
+      to: z
+        .string()
+        .trim()
+        .max(200, "To must not exceed 200 characters")
+        .optional(),
+      truckNumber: z
+        .string()
+        .trim()
+        .max(50, "Truck number must not exceed 50 characters")
+        .optional(),
+      incomingGatePasses: z
+        .array(outgoingIncomingGatePassAllocationSchema)
+        .min(1, "At least one incoming gate pass with allocations is required")
+        .optional(),
+      remarks: z
+        .string()
+        .trim()
+        .max(500, "Remarks must not exceed 500 characters")
+        .optional(),
+      manualParchiNumber: z.coerce
+        .number()
+        .int("Manual parchi number must be an integer")
+        .positive("Manual parchi number must be a positive number")
+        .optional(),
+    })
+    .refine(
+      (data) =>
+        data.farmerStorageLinkId !== undefined ||
+        data.date !== undefined ||
+        data.from !== undefined ||
+        data.to !== undefined ||
+        data.truckNumber !== undefined ||
+        data.incomingGatePasses !== undefined ||
+        data.remarks !== undefined ||
+        data.manualParchiNumber !== undefined,
+      "At least one field must be provided for update",
+    ),
+});
+
+export type UpdateOutgoingGatePassParams = z.infer<
+  typeof updateOutgoingGatePassSchema
+>["params"];
+export type UpdateOutgoingGatePassBody = z.infer<
+  typeof updateOutgoingGatePassSchema
 >["body"];
