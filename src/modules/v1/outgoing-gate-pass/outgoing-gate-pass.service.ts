@@ -310,49 +310,6 @@ async function fetchAndValidateIncomingGatePasses(
   return incomingPassMap;
 }
 
-/**
- * Loads incoming gate passes by ID (no variety/stock validation).
- * Used on edit to include snapshot-only passes being removed from the outgoing pass.
- */
-async function fetchIncomingPassMapByIds(
-  incomingGatePassIds: string[],
-  session: ClientSession,
-): Promise<Map<string, IIncomingGatePass & { _id: Types.ObjectId }>> {
-  const uniqueIds = [...new Set(incomingGatePassIds)];
-  const map = new Map<string, IIncomingGatePass & { _id: Types.ObjectId }>();
-
-  if (uniqueIds.length === 0) {
-    return map;
-  }
-
-  const objectIds = uniqueIds.map((id) => new Types.ObjectId(id));
-  const fetched = await IncomingGatePass.find({
-    _id: { $in: objectIds },
-  })
-    .session(session)
-    .lean();
-
-  if (fetched.length !== objectIds.length) {
-    const foundIds = new Set(
-      fetched.map((f) => (f as { _id: Types.ObjectId })._id.toString()),
-    );
-    const missingIds = objectIds
-      .filter((id) => !foundIds.has(id.toString()))
-      .map((id) => id.toString());
-    throw new NotFoundError(
-      `Incoming gate pass(es) not found: ${missingIds.join(", ")}`,
-      "INCOMING_GATE_PASS_NOT_FOUND",
-    );
-  }
-
-  for (const ip of fetched) {
-    const doc = ip as IIncomingGatePass & { _id: Types.ObjectId };
-    map.set(doc._id.toString(), doc);
-  }
-
-  return map;
-}
-
 /* =======================
    BULK OPERATIONS (arrayFilters by size / bag name)
 ======================= */

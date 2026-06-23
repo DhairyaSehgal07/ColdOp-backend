@@ -21,7 +21,9 @@ export interface UpdatePreferencesInput {
 
 const DEFAULT_MARKA_TYPE = "GatePass";
 
-function normalizePreferencesResponse<T extends Record<string, unknown>>(preferences: T): T {
+function normalizePreferencesResponse<T extends { markaType?: string }>(
+  preferences: T,
+): T {
   return {
     ...preferences,
     markaType:
