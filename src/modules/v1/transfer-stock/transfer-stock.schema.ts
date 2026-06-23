@@ -52,6 +52,7 @@ export const createTransferStockSchema = z.object({
       .array(transferStockItemSchema)
       .min(1, "At least one item is required"),
     remarks: z.string().trim().optional(),
+    customMarka: z.string().trim().optional(),
   }),
 });
 

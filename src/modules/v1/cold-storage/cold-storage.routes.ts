@@ -2,7 +2,6 @@ import { FastifyInstance } from "fastify";
 import {
   createColdStorageHandler,
   getColdStoragesHandler,
-  getColdStorageByIdHandler,
 } from "./cold-storage.controller.js";
 import {
   getPreferencesHandler,
@@ -11,7 +10,6 @@ import {
 import {
   createColdStorageSchema,
   getColdStoragesQuerySchema,
-  getColdStorageByIdParamsSchema,
 } from "./cold-storage.schema.js";
 
 /** Reusable error response schema for OpenAPI */
@@ -236,50 +234,5 @@ export async function coldStorageRoutes(fastify: FastifyInstance) {
       },
     },
     updatePreferencesHandler,
-  );
-
-  // Get cold storage by ID
-  fastify.get(
-    "/:id",
-    {
-      schema: {
-        ...getColdStorageByIdParamsSchema,
-        description: "Get a cold storage by ID",
-        tags: ["Cold Storage"],
-        summary: "Get cold storage by ID",
-        response: {
-          200: {
-            description: "Cold storage details",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              data: {
-                type: "object",
-                additionalProperties: true,
-              },
-            },
-          },
-          400: {
-            description: "Bad request – invalid cold storage ID format",
-            ...errorResponse,
-          },
-          404: {
-            description: "Cold storage not found",
-            ...errorResponse,
-          },
-          500: {
-            description: "Server error – something went wrong on our side",
-            ...errorResponse,
-          },
-        },
-      },
-      config: {
-        rateLimit: {
-          max: 100, // 100 requests
-          timeWindow: "1 minute", // per minute
-        },
-      },
-    },
-    getColdStorageByIdHandler,
   );
 }

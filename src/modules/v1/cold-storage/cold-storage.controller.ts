@@ -2,12 +2,10 @@ import { FastifyReply, FastifyRequest } from "fastify";
 import {
   createColdStorage,
   getColdStorages,
-  getColdStorageById,
 } from "./cold-storage.service.js";
 import {
   CreateColdStorageInput,
   GetColdStoragesQuery,
-  GetColdStorageByIdParams,
 } from "./cold-storage.schema.js";
 import {
   AppError,
@@ -130,36 +128,6 @@ export async function getColdStoragesHandler(
       error,
       reply,
       "We couldn't load the cold storages list. Please try again later.",
-    );
-  }
-}
-
-/**
- * Handler for retrieving a cold storage by ID
- */
-export async function getColdStorageByIdHandler(
-  request: FastifyRequest<{ Params: GetColdStorageByIdParams }>,
-  reply: FastifyReply,
-) {
-  try {
-    const coldStorage = await getColdStorageById(
-      request.params.id,
-      request.log,
-    );
-
-    return reply.send({
-      success: true,
-      data: coldStorage,
-    });
-  } catch (error) {
-    request.log.error(
-      { err: error, params: request.params },
-      "Error in getColdStorageByIdHandler",
-    );
-    return handleError(
-      error,
-      reply,
-      "We couldn't load this cold storage. Please try again later.",
     );
   }
 }

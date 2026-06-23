@@ -12,6 +12,11 @@ export interface CommodityObj {
   sizes: string[];
 }
 
+export interface StockFilterObj {
+  enabled: boolean;
+  options: string[];
+}
+
 export interface IPreferences extends Document {
   commodities: CommodityObj[];
 
@@ -23,6 +28,15 @@ export interface IPreferences extends Document {
 
   /** Labour cost (default 0) */
   labourCost: number;
+
+  /** Stock filter configuration */
+  stockFilter: StockFilterObj;
+
+  /** Whether custom marka is enabled */
+  customMarka?: boolean;
+
+  /** Marka type identifier (default: GatePass) */
+  markaType: string;
 
   /** Custom, user-defined fields for future customisations */
   customFields?: Record<string, unknown>;
@@ -43,6 +57,20 @@ const CommoditySchema = new Schema<CommodityObj>(
       default: [],
     },
     sizes: {
+      type: [String],
+      default: [],
+    },
+  },
+  { _id: false },
+);
+
+const StockFilterSchema = new Schema<StockFilterObj>(
+  {
+    enabled: {
+      type: Boolean,
+      default: false,
+    },
+    options: {
       type: [String],
       default: [],
     },
@@ -71,6 +99,21 @@ const PreferencesSchema = new Schema<IPreferences>(
     labourCost: {
       type: Number,
       default: 0,
+    },
+
+    stockFilter: {
+      type: StockFilterSchema,
+      default: () => ({ enabled: false, options: [] }),
+    },
+
+    customMarka: {
+      type: Boolean,
+    },
+
+    markaType: {
+      type: String,
+      default: "GatePass",
+      trim: true,
     },
 
     customFields: {

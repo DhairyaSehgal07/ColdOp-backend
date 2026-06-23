@@ -5,11 +5,13 @@ import {
   GatePassType,
   IOutgoingIncomingGatePassSnapshot,
   IOutgoingIncomingGatePassSnapshotBagSize,
+  IOutgoingGatePass,
   IOutgoingOrderDetail,
 } from "./outgoing-gate-pass.model.js";
 import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import type {
   CreateOutgoingGatePassInput,
+  NullOutgoingGatePassBody,
   UpdateOutgoingGatePassBody,
 } from "./outgoing-gate-pass.schema.js";
 import {
@@ -19,6 +21,12 @@ import {
   AppError,
 } from "../../../utils/errors.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
+import {
+  FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
+  FARMER_STORAGE_LINK_POPULATE_SELECT,
+  formatPopulatedFarmerStorageLinkDisplay,
+  type PopulatedFarmerStorageLink,
+} from "../farmer-storage-link/farmer-storage-link.utils.js";
 import type {
   IIncomingGatePass,
   IBagSize,
@@ -900,40 +908,29 @@ export async function createOutgoingGatePass(
         const populated = await OutgoingGatePass.findById(existing._id)
           .populate({
             path: "farmerStorageLinkId",
-            select: "accountNumber farmerId",
+            select: FARMER_STORAGE_LINK_POPULATE_SELECT,
             populate: {
               path: "farmerId",
-              select: "name address mobileNumber",
+              select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
             },
           })
           .populate({ path: "createdBy", select: "name" })
           .lean();
         if (!populated) return existing as unknown as Record<string, unknown>;
         const raw = populated as unknown as Record<string, unknown>;
-        type PopulatedLink = {
-          accountNumber: number;
-          farmerId: { name: string; address: string; mobileNumber: string };
-        };
         type PopulatedAdmin = { _id: unknown; name: string };
         const populatedLink = raw.farmerStorageLinkId as
-          | PopulatedLink
+          | PopulatedFarmerStorageLink
           | null
           | undefined;
         const populatedAdmin = raw.createdBy as
           | PopulatedAdmin
           | null
           | undefined;
+        const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
         return {
           ...raw,
-          farmerStorageLinkId:
-            populatedLink && populatedLink.farmerId
-              ? {
-                  name: populatedLink.farmerId.name,
-                  accountNumber: populatedLink.accountNumber,
-                  address: populatedLink.farmerId.address,
-                  mobileNumber: populatedLink.farmerId.mobileNumber,
-                }
-              : raw.farmerStorageLinkId,
+          farmerStorageLinkId: linkDisplay ?? raw.farmerStorageLinkId,
           createdBy: populatedAdmin
             ? { _id: populatedAdmin._id, name: populatedAdmin.name }
             : raw.createdBy,
@@ -1007,7 +1004,6 @@ export async function createOutgoingGatePass(
       }
       const labourLedger = await Ledger.findOne({
         coldStorageId,
-        createdBy: createdByObjId,
         name: "Labour",
         farmerStorageLinkId: null,
         isSystemLedger: true,
@@ -1017,7 +1013,6 @@ export async function createOutgoingGatePass(
         .lean();
       const labourContractorLedger = await Ledger.findOne({
         coldStorageId,
-        createdBy: createdByObjId,
         name: "Labour Contractor",
         farmerStorageLinkId: null,
         isSystemLedger: true,
@@ -1157,10 +1152,10 @@ export async function createOutgoingGatePass(
     const populated = await OutgoingGatePass.findById(doc._id)
       .populate({
         path: "farmerStorageLinkId",
-        select: "accountNumber farmerId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
         populate: {
           path: "farmerId",
-          select: "name address mobileNumber",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
         },
       })
       .populate({ path: "createdBy", select: "name" })
@@ -1171,28 +1166,17 @@ export async function createOutgoingGatePass(
     }
 
     const raw = populated as unknown as Record<string, unknown>;
-    type PopulatedLink = {
-      accountNumber: number;
-      farmerId: { name: string; address: string; mobileNumber: string };
-    };
     const populatedLink = raw.farmerStorageLinkId as
-      | PopulatedLink
+      | PopulatedFarmerStorageLink
       | null
       | undefined;
     type PopulatedAdmin = { _id: unknown; name: string };
     const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+    const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
 
     const response = {
       ...raw,
-      farmerStorageLinkId:
-        populatedLink && populatedLink.farmerId
-          ? {
-              name: populatedLink.farmerId.name,
-              accountNumber: populatedLink.accountNumber,
-              address: populatedLink.farmerId.address,
-              mobileNumber: populatedLink.farmerId.mobileNumber,
-            }
-          : raw.farmerStorageLinkId,
+      farmerStorageLinkId: linkDisplay ?? raw.farmerStorageLinkId,
       createdBy: populatedAdmin
         ? { _id: populatedAdmin._id, name: populatedAdmin.name }
         : raw.createdBy,
@@ -1208,9 +1192,8 @@ export async function createOutgoingGatePass(
 }
 
 /**
- * Updates an outgoing gate pass. When `incomingGatePasses` is sent, previously
- * issued quantities are restored on the linked incoming gate passes, then the
- * new allocations are applied (same validation as create).
+ * Updates outgoing gate pass header fields only (date, from, to, truck number,
+ * remarks, manual parchi number). Stock allocations are not editable.
  */
 export async function updateOutgoingGatePass(
   id: string,
@@ -1239,6 +1222,16 @@ export async function updateOutgoingGatePass(
       throw new NotFoundError(
         "Outgoing gate pass not found",
         "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    if (
+      existing.isNull === true ||
+      existing.type === GatePassType.NULL_DELIVERY
+    ) {
+      throw new ValidationError(
+        "Cannot update a nulled outgoing gate pass",
+        "OUTGOING_GATE_PASS_NULLED",
       );
     }
 
@@ -1281,36 +1274,6 @@ export async function updateOutgoingGatePass(
       );
     }
 
-    let farmerStorageLinkObjectId = existingLinkIdObj;
-
-    if (payload.farmerStorageLinkId !== undefined) {
-      const newLinkIdObj = new Types.ObjectId(payload.farmerStorageLinkId);
-      const newLink = await FarmerStorageLink.findById(newLinkIdObj)
-        .session(session)
-        .lean();
-      if (!newLink) {
-        throw new NotFoundError(
-          "Farmer-storage-link not found",
-          "FARMER_STORAGE_LINK_NOT_FOUND",
-        );
-      }
-      const newLinkColdStorageId =
-        typeof newLink.coldStorageId === "object" &&
-        newLink.coldStorageId !== null
-          ? (newLink.coldStorageId as { _id: Types.ObjectId })._id.toString()
-          : (newLink.coldStorageId as string);
-      if (
-        loggedInUserColdStorageId &&
-        newLinkColdStorageId !== loggedInUserColdStorageId
-      ) {
-        throw new NotFoundError(
-          "Farmer-storage-link not found",
-          "FARMER_STORAGE_LINK_NOT_FOUND",
-        );
-      }
-      farmerStorageLinkObjectId = newLinkIdObj;
-    }
-
     const coldStorageId = new Types.ObjectId(linkColdStorageId);
 
     const updateFields: Record<string, unknown> = {};
@@ -1322,134 +1285,6 @@ export async function updateOutgoingGatePass(
     if (payload.remarks !== undefined) updateFields.remarks = payload.remarks;
     if (payload.manualParchiNumber !== undefined)
       updateFields.manualParchiNumber = payload.manualParchiNumber;
-    if (payload.farmerStorageLinkId !== undefined)
-      updateFields.farmerStorageLinkId = farmerStorageLinkObjectId;
-
-    if (payload.incomingGatePasses !== undefined) {
-      const snapshots =
-        (existing.incomingGatePassSnapshots as IOutgoingIncomingGatePassSnapshot[]) ??
-        [];
-
-      if (snapshots.length === 0) {
-        throw new ValidationError(
-          "This outgoing gate pass has no allocation snapshot; quantities cannot be edited.",
-          "OUTGOING_SNAPSHOT_MISSING",
-        );
-      }
-
-      const orderDetails =
-        (existing.orderDetails as IOutgoingOrderDetail[]) ?? [];
-      const previouslyIssuedMap = buildPreviouslyIssuedMap(
-        snapshots,
-        orderDetails,
-      );
-
-      const fakeCreate: CreateOutgoingGatePassInput = {
-        farmerStorageLinkId: farmerStorageLinkObjectId.toString(),
-        gatePassNo: existing.gatePassNo,
-        date: payload.date ?? existing.date,
-        from: payload.from ?? existing.from,
-        to: payload.to ?? existing.to,
-        truckNumber: payload.truckNumber ?? existing.truckNumber,
-        incomingGatePasses: payload.incomingGatePasses,
-        remarks: payload.remarks ?? existing.remarks,
-        manualParchiNumber:
-          payload.manualParchiNumber ?? existing.manualParchiNumber,
-      };
-
-      const validated = validateOutgoingGatePassInput(fakeCreate, logger);
-      const requestedMap = buildRequestedAllocationMap(validated);
-
-      await fetchAndValidateIncomingGatePasses(
-        fakeCreate,
-        validated,
-        session,
-        logger,
-        previouslyIssuedMap,
-      );
-
-      const allIncomingIdsForStock = [
-        ...new Set([
-          ...snapshots.map((s) => s._id.toString()),
-          ...validated.map((v) => v.incomingGatePassId),
-        ]),
-      ];
-      const fullIncomingPassMap = await fetchIncomingPassMapByIds(
-        allIncomingIdsForStock,
-        session,
-      );
-
-      const netDeltaOps = prepareNetDeltaBulkOperationsForUpdate(
-        previouslyIssuedMap,
-        requestedMap,
-        fullIncomingPassMap,
-      );
-      if (netDeltaOps.length === 0) {
-        throw new ValidationError(
-          "No allocation changes to apply; incoming gate passes and quantities match the current pass.",
-          "INVALID_ALLOCATION_QUANTITY",
-        );
-      }
-
-      const netDeltaResult = await IncomingGatePass.bulkWrite(
-        netDeltaOps as Parameters<typeof IncomingGatePass.bulkWrite>[0],
-        { session },
-      );
-      if (netDeltaResult.modifiedCount !== netDeltaOps.length) {
-        throw new ConflictError(
-          `Expected ${netDeltaOps.length} stock updates, got ${netDeltaResult.modifiedCount}. Concurrent modification detected.`,
-          "CONCURRENT_MODIFICATION",
-        );
-      }
-
-      const uniqueIncomingIds = [
-        ...new Set([
-          ...snapshots.map((s) => s._id.toString()),
-          ...validated.map((v) => v.incomingGatePassId),
-        ]),
-      ];
-      await recordEditHistoryBulk(
-        uniqueIncomingIds.map((incomingId) => ({
-          entityType: EditHistoryEntityType.INCOMING_GATE_PASS,
-          documentId: new Types.ObjectId(incomingId),
-          coldStorageId,
-          editedById,
-          action: EditHistoryAction.QUANTITY_ADJUSTMENT,
-          changeSummary: `Quantities adjusted after editing outgoing gate pass #${existing.gatePassNo}`,
-          logger,
-        })),
-        session,
-        logger,
-      );
-
-      const incomingIdsForSnapshots = [
-        ...new Set(validated.map((v) => v.incomingGatePassId)),
-      ].map((id) => new Types.ObjectId(id));
-      const incomingAfterUpdate = await IncomingGatePass.find({
-        _id: { $in: incomingIdsForSnapshots },
-      })
-        .session(session)
-        .lean();
-      const incomingPassMapAfterUpdate = new Map<
-        string,
-        IIncomingGatePass & { _id: Types.ObjectId }
-      >();
-      for (const ip of incomingAfterUpdate) {
-        const doc = ip as IIncomingGatePass & { _id: Types.ObjectId };
-        incomingPassMapAfterUpdate.set(doc._id.toString(), doc);
-      }
-
-      updateFields.incomingGatePassSnapshots = buildIncomingGatePassSnapshots(
-        validated,
-        incomingPassMapAfterUpdate,
-        { stockAlreadyAdjusted: true },
-      );
-      updateFields.orderDetails = buildOrderDetails(
-        validated,
-        incomingPassMapAfterUpdate,
-        { stockAlreadyAdjusted: true },
-      );
-    }
 
     if (Object.keys(updateFields).length === 0) {
       throw new ValidationError(
@@ -1486,10 +1321,10 @@ export async function updateOutgoingGatePass(
     const populated = await OutgoingGatePass.findById(idObj)
       .populate({
         path: "farmerStorageLinkId",
-        select: "accountNumber farmerId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
         populate: {
           path: "farmerId",
-          select: "name address mobileNumber",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
         },
       })
       .populate({ path: "createdBy", select: "name" })
@@ -1500,28 +1335,17 @@ export async function updateOutgoingGatePass(
     }
 
     const raw = populated as unknown as Record<string, unknown>;
-    type PopulatedLink = {
-      accountNumber: number;
-      farmerId: { name: string; address: string; mobileNumber: string };
-    };
     const populatedLink = raw.farmerStorageLinkId as
-      | PopulatedLink
+      | PopulatedFarmerStorageLink
       | null
       | undefined;
     type PopulatedAdmin = { _id: unknown; name: string };
     const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+    const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
 
     return {
       ...raw,
-      farmerStorageLinkId:
-        populatedLink && populatedLink.farmerId
-          ? {
-              name: populatedLink.farmerId.name,
-              accountNumber: populatedLink.accountNumber,
-              address: populatedLink.farmerId.address,
-              mobileNumber: populatedLink.farmerId.mobileNumber,
-            }
-          : raw.farmerStorageLinkId,
+      farmerStorageLinkId: linkDisplay ?? raw.farmerStorageLinkId,
       createdBy: populatedAdmin
         ? { _id: populatedAdmin._id, name: populatedAdmin.name }
         : raw.createdBy,
@@ -1604,10 +1428,10 @@ export async function getOutgoingGatePassById(
     const populated = await OutgoingGatePass.findById(idObj)
       .populate({
         path: "farmerStorageLinkId",
-        select: "accountNumber farmerId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
         populate: {
           path: "farmerId",
-          select: "name address mobileNumber",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
         },
       })
       .populate({ path: "createdBy", select: "name" })
@@ -1626,28 +1450,17 @@ export async function getOutgoingGatePassById(
     );
 
     const raw = populated as unknown as Record<string, unknown>;
-    type PopulatedLink = {
-      accountNumber: number;
-      farmerId: { name: string; address: string; mobileNumber: string };
-    };
     const populatedLink = raw.farmerStorageLinkId as
-      | PopulatedLink
+      | PopulatedFarmerStorageLink
       | null
       | undefined;
     type PopulatedAdmin = { _id: unknown; name: string };
     const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+    const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
 
     return {
       ...raw,
-      farmerStorageLinkId:
-        populatedLink && populatedLink.farmerId
-          ? {
-              name: populatedLink.farmerId.name,
-              accountNumber: populatedLink.accountNumber,
-              address: populatedLink.farmerId.address,
-              mobileNumber: populatedLink.farmerId.mobileNumber,
-            }
-          : raw.farmerStorageLinkId,
+      farmerStorageLinkId: linkDisplay ?? raw.farmerStorageLinkId,
       createdBy: populatedAdmin
         ? { _id: populatedAdmin._id, name: populatedAdmin.name }
         : raw.createdBy,
@@ -1657,6 +1470,270 @@ export async function getOutgoingGatePassById(
       fallbackMessage: "Failed to retrieve outgoing gate pass",
       fallbackCode: "GET_OUTGOING_GATE_PASS_ERROR",
     });
+  }
+}
+
+function buildDwarfOutgoingPassFields(
+  existing: Pick<IOutgoingGatePass, "orderDetails">,
+): {
+  type: GatePassType.NULL_DELIVERY;
+  incomingGatePassSnapshots: null;
+  orderDetails: IOutgoingOrderDetail[];
+} {
+  return {
+    type: GatePassType.NULL_DELIVERY,
+    incomingGatePassSnapshots: null,
+    orderDetails: existing.orderDetails.map((detail) => ({
+      ...detail,
+      quantityIssued: 0,
+      quantityAvailable: 0,
+    })),
+  };
+}
+
+/**
+ * Nulls (voids) an outgoing gate pass and restores issued quantities to incoming gate passes.
+ */
+export async function nullOutgoingGatePass(
+  id: string,
+  payload: NullOutgoingGatePassBody,
+  editedById: string | undefined,
+  loggedInUserColdStorageId: string | undefined,
+  logger?: FastifyBaseLogger,
+) {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ValidationError(
+      "Invalid outgoing gate pass ID format",
+      "INVALID_OUTGOING_GATE_PASS_ID",
+    );
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const idObj = new Types.ObjectId(id);
+    const existing = await OutgoingGatePass.findById(idObj)
+      .session(session)
+      .lean();
+
+    if (!existing) {
+      throw new NotFoundError(
+        "Outgoing gate pass not found",
+        "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    if (
+      existing.isNull === true ||
+      existing.type === GatePassType.NULL_DELIVERY
+    ) {
+      throw new ConflictError(
+        "Outgoing gate pass is already nulled",
+        "OUTGOING_GATE_PASS_ALREADY_NULLED",
+      );
+    }
+
+    const existingLinkRaw = existing.farmerStorageLinkId;
+    const existingLinkId =
+      typeof existingLinkRaw === "object" &&
+      existingLinkRaw !== null &&
+      "_id" in existingLinkRaw
+        ? (existingLinkRaw as { _id: Types.ObjectId })._id
+        : existingLinkRaw;
+    const existingLinkIdObj =
+      typeof existingLinkId === "object"
+        ? existingLinkId
+        : new Types.ObjectId(String(existingLinkId));
+
+    const storageLink = await FarmerStorageLink.findById(existingLinkIdObj)
+      .session(session)
+      .lean();
+
+    if (!storageLink) {
+      throw new NotFoundError(
+        "Farmer-storage-link not found",
+        "FARMER_STORAGE_LINK_NOT_FOUND",
+      );
+    }
+
+    const linkColdStorageId =
+      typeof storageLink.coldStorageId === "object" &&
+      storageLink.coldStorageId !== null
+        ? (storageLink.coldStorageId as { _id: Types.ObjectId })._id.toString()
+        : (storageLink.coldStorageId as string);
+
+    if (
+      loggedInUserColdStorageId &&
+      linkColdStorageId !== loggedInUserColdStorageId
+    ) {
+      throw new NotFoundError(
+        "Outgoing gate pass not found",
+        "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const coldStorageId = new Types.ObjectId(linkColdStorageId);
+
+    const incomingGatePassIds = [
+      ...new Set(
+        (existing.incomingGatePassSnapshots ?? []).map((snap) =>
+          snap._id.toString(),
+        ),
+      ),
+    ].map((incomingId) => new Types.ObjectId(incomingId));
+
+    const fetched = await IncomingGatePass.find({
+      _id: { $in: incomingGatePassIds },
+    })
+      .session(session)
+      .lean();
+
+    if (fetched.length !== incomingGatePassIds.length) {
+      throw new NotFoundError(
+        "One or more incoming gate passes not found for restore",
+        "INCOMING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    const incomingPassMap = new Map<
+      string,
+      IIncomingGatePass & { _id: Types.ObjectId }
+    >();
+    for (const pass of fetched) {
+      incomingPassMap.set(
+        (pass as { _id: Types.ObjectId })._id.toString(),
+        pass as IIncomingGatePass & { _id: Types.ObjectId },
+      );
+    }
+
+    const previouslyIssuedMap = buildPreviouslyIssuedMap(
+      existing.incomingGatePassSnapshots ?? [],
+      existing.orderDetails,
+    );
+
+    const bulkOps = prepareNetDeltaBulkOperationsForUpdate(
+      previouslyIssuedMap,
+      new Map(),
+      incomingPassMap,
+    );
+
+    if (bulkOps.length > 0) {
+      const updateResult = await IncomingGatePass.bulkWrite(
+        bulkOps as Parameters<typeof IncomingGatePass.bulkWrite>[0],
+        { session },
+      );
+
+      if (updateResult.modifiedCount !== bulkOps.length) {
+        throw new ConflictError(
+          `Expected ${bulkOps.length} incoming updates, got ${updateResult.modifiedCount}. Concurrent modification detected.`,
+          "CONCURRENT_MODIFICATION",
+        );
+      }
+
+      await recordEditHistoryBulk(
+        incomingGatePassIds.map((incomingId) => ({
+          entityType: EditHistoryEntityType.INCOMING_GATE_PASS,
+          documentId: incomingId,
+          coldStorageId,
+          editedById,
+          action: EditHistoryAction.QUANTITY_ADJUSTMENT,
+          changeSummary: `Quantities restored by nulling outgoing gate pass #${existing.gatePassNo}`,
+          logger,
+        })),
+        session,
+        logger,
+      );
+    }
+
+    const nullUpdateFields: Record<string, unknown> = {
+      isNull: true,
+      nulledAt: new Date(),
+      ...buildDwarfOutgoingPassFields(existing),
+    };
+    if (editedById) {
+      nullUpdateFields.nulledBy = new Types.ObjectId(editedById);
+    }
+    if (payload.remarks !== undefined) {
+      nullUpdateFields.remarks = payload.remarks;
+    }
+
+    const updated = await OutgoingGatePass.findByIdAndUpdate(
+      idObj,
+      { $set: nullUpdateFields },
+      { session, new: true },
+    ).lean();
+
+    if (!updated) {
+      throw new NotFoundError(
+        "Outgoing gate pass not found",
+        "OUTGOING_GATE_PASS_NOT_FOUND",
+      );
+    }
+
+    await recordEditHistory({
+      entityType: EditHistoryEntityType.OUTGOING_GATE_PASS,
+      documentId: idObj,
+      coldStorageId,
+      editedById,
+      action: EditHistoryAction.OTHER,
+      changeSummary: `Outgoing gate pass #${existing.gatePassNo} nulled`,
+      session,
+      logger,
+    });
+
+    await session.commitTransaction();
+
+    logger?.info(
+      { outgoingGatePassId: id, gatePassNo: existing.gatePassNo },
+      "Outgoing gate pass nulled successfully",
+    );
+
+    const populated = await OutgoingGatePass.findById(idObj)
+      .populate({
+        path: "farmerStorageLinkId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
+        populate: {
+          path: "farmerId",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
+        },
+      })
+      .populate({ path: "createdBy", select: "name" })
+      .populate({ path: "nulledBy", select: "name" })
+      .lean();
+
+    if (!populated) {
+      return updated as unknown as Record<string, unknown>;
+    }
+
+    const raw = populated as unknown as Record<string, unknown>;
+    const populatedLink = raw.farmerStorageLinkId as
+      | PopulatedFarmerStorageLink
+      | null
+      | undefined;
+    type PopulatedAdmin = { _id: unknown; name: string };
+    const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+    const populatedNulledBy = raw.nulledBy as PopulatedAdmin | null | undefined;
+    const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
+
+    return {
+      ...raw,
+      farmerStorageLinkId: linkDisplay ?? raw.farmerStorageLinkId,
+      createdBy: populatedAdmin
+        ? { _id: populatedAdmin._id, name: populatedAdmin.name }
+        : raw.createdBy,
+      nulledBy: populatedNulledBy
+        ? { _id: populatedNulledBy._id, name: populatedNulledBy.name }
+        : raw.nulledBy,
+    };
+  } catch (error) {
+    await session.abortTransaction().catch(() => {});
+    handleOutgoingServiceError(error, logger, {
+      fallbackMessage: "Failed to null outgoing gate pass",
+      fallbackCode: "NULL_OUTGOING_GATE_PASS_ERROR",
+    });
+  } finally {
+    session.endSession();
   }
 }
 

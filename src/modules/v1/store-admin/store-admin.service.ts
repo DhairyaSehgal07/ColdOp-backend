@@ -2,10 +2,9 @@ import { StoreAdmin, Role } from "./store-admin.model.js";
 import {
   CreateStoreAdminInput,
   LoginStoreAdminInput,
-  QuickRegisterFarmerInput,
-  UpdateFarmerStorageLinkInput,
   type DaybookGatePassType,
   type DaybookListType,
+  type UpdateStoreAdminProfileInput,
 } from "./store-admin.schema.js";
 import {
   ConflictError,
@@ -21,13 +20,23 @@ import type { ResourcePermission } from "../role-permission/role-permission.mode
 import bcrypt from "bcryptjs";
 import { Farmer } from "../farmer/farmer-model.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
-import { Preferences } from "../preferences/preferences.model.js";
-import { createDebtorLedger } from "../../../utils/accounting/helper-fns.js";
-import Ledger from "../ledger/ledger.model.js";
-import { updateLedger } from "../ledger/ledger.service.js";
+import {
+  FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
+  FARMER_STORAGE_LINK_POPULATE_SELECT,
+  GATE_PASS_LIST_INCOMING_SELECT,
+  GATE_PASS_LIST_OUTGOING_SELECT,
+  GATE_PASS_LIST_POPULATE_LINK,
+  createGatePassListPaginationMeta,
+  sortGatePassOrderDetails,
+  mapGatePassListLinkDisplay,
+  type GatePassListPaginationResult,
+} from "../farmer-storage-link/farmer-storage-link.utils.js";
 import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
-import { recordFarmerEditHistory } from "../farmer-edit-history/farmer-edit-history.service.js";
+import {
+  getColdStorageById,
+  updateColdStorage,
+} from "../cold-storage/cold-storage.service.js";
 
 /**
  * Get all available resources and actions for Admin permissions
@@ -234,6 +243,57 @@ export async function getStoreAdminById(
 }
 
 /**
+ * Retrieves store admin profile with linked cold storage details
+ */
+export async function getStoreAdminProfile(
+  storeAdminId: string,
+  logger?: FastifyBaseLogger,
+) {
+  const storeAdmin = await getStoreAdminById(storeAdminId, logger);
+  const coldStorage = await getColdStorageById(
+    String(storeAdmin.coldStorageId),
+    logger,
+  );
+
+  return { storeAdmin, coldStorage };
+}
+
+/**
+ * Updates store admin profile and optionally linked cold storage details
+ */
+export async function updateStoreAdminProfile(
+  storeAdminId: string,
+  payload: UpdateStoreAdminProfileInput,
+  logger?: FastifyBaseLogger,
+) {
+  const { coldStorage: coldStoragePayload, ...storeAdminFields } = payload;
+
+  const hasStoreAdminFields = Object.keys(storeAdminFields).length > 0;
+
+  if (hasStoreAdminFields) {
+    await updateStoreAdmin(storeAdminId, storeAdminFields, logger);
+  }
+
+  if (coldStoragePayload && Object.keys(coldStoragePayload).length > 0) {
+    const existing = await StoreAdmin.findById(storeAdminId).select(
+      "coldStorageId",
+    );
+
+    if (!existing) {
+      throw new NotFoundError("Store admin not found", "STORE_ADMIN_NOT_FOUND");
+    }
+
+    await updateColdStorage(
+      String(existing.coldStorageId),
+      coldStoragePayload,
+      logger,
+    );
+  }
+
+  return getStoreAdminProfile(storeAdminId, logger);
+}
+
+/**
  * Updates a store admin
  * @param id - Store admin ID
  * @param payload - Update data
@@ -318,12 +378,20 @@ export async function updateStoreAdmin(
       );
     }
 
-    // Update the store admin
-    const updatedStoreAdmin = await StoreAdmin.findByIdAndUpdate(
-      id,
-      { ...payload },
-      { new: true, runValidators: true },
-    )
+    // Update the store admin (use save() so pre-save password hashing runs)
+    if (payload.name !== undefined) existing.name = payload.name;
+    if (payload.mobileNumber !== undefined) {
+      existing.mobileNumber = payload.mobileNumber;
+    }
+    if (payload.password !== undefined) existing.password = payload.password;
+    if (payload.role !== undefined) existing.role = payload.role;
+    if (payload.isVerified !== undefined) {
+      existing.isVerified = payload.isVerified;
+    }
+
+    await existing.save();
+
+    const updatedStoreAdmin = await StoreAdmin.findById(id)
       .select("-password")
       .lean();
 
@@ -448,54 +516,6 @@ export async function checkMobileNumber(
       "Failed to check mobile number",
       500,
       "CHECK_MOBILE_NUMBER_ERROR",
-    );
-  }
-}
-
-/**
- * Retrieves all farmer-storage-links for a cold storage with farmer details populated (name, address, mobileNumber)
- * @param coldStorageId - Cold storage ID
- * @param logger - Optional logger instance
- * @returns Array of farmer-storage-links with populated farmerId
- */
-export async function getFarmerStorageLinksByColdStorage(
-  coldStorageId: string,
-  logger?: FastifyBaseLogger,
-) {
-  try {
-    if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
-      throw new ValidationError(
-        "Invalid cold storage ID format",
-        "INVALID_COLD_STORAGE_ID",
-      );
-    }
-
-    const links = await FarmerStorageLink.find({
-      coldStorageId: new mongoose.Types.ObjectId(coldStorageId),
-    })
-      .populate("farmerId", "name address mobileNumber")
-      .lean();
-
-    logger?.info(
-      { coldStorageId, count: links.length },
-      "Retrieved farmer-storage-links by cold storage",
-    );
-
-    return links;
-  } catch (error) {
-    if (error instanceof ValidationError) {
-      throw error;
-    }
-
-    logger?.error(
-      { error, coldStorageId },
-      "Error retrieving farmer-storage-links by cold storage",
-    );
-
-    throw new AppError(
-      "Failed to retrieve farmer-storage-links",
-      500,
-      "GET_FARMER_STORAGE_LINKS_ERROR",
     );
   }
 }
@@ -644,525 +664,6 @@ export async function logoutStoreAdmin(logger?: FastifyBaseLogger) {
   }
 }
 
-/**
- * Quick register a farmer and create farmer-storage-link
- * @param payload - Farmer registration data
- * @param logger - Optional logger instance
- * @returns Object containing created farmer and farmer-storage-link
- * @throws NotFoundError if cold storage or store admin not found
- * @throws ConflictError if farmer with mobile number already exists or link already exists
- * @throws ValidationError if input validation fails
- */
-export async function quickRegisterFarmer(
-  payload: QuickRegisterFarmerInput,
-  logger?: FastifyBaseLogger,
-) {
-  try {
-    // Validate cold storage exists
-    const ColdStorage = mongoose.model("ColdStorage");
-    const coldStorage = await ColdStorage.findById(payload.coldStorageId);
-
-    if (!coldStorage) {
-      logger?.warn(
-        { coldStorageId: payload.coldStorageId },
-        "Attempt to register farmer for non-existent cold storage",
-      );
-      throw new NotFoundError(
-        "Cold storage not found",
-        "COLD_STORAGE_NOT_FOUND",
-      );
-    }
-
-    // Validate store admin exists
-    const storeAdmin = await StoreAdmin.findById(payload.linkedById);
-
-    if (!storeAdmin) {
-      logger?.warn(
-        { linkedById: payload.linkedById },
-        "Attempt to register farmer with non-existent store admin",
-      );
-      throw new NotFoundError("Store admin not found", "STORE_ADMIN_NOT_FOUND");
-    }
-
-    // Check if farmer with mobile number already exists
-    const existingFarmer = await Farmer.findOne({
-      mobileNumber: payload.mobileNumber,
-    });
-
-    if (existingFarmer) {
-      // Check if farmer-storage-link already exists for this farmer and cold storage
-      const existingLink = await FarmerStorageLink.findOne({
-        farmerId: existingFarmer._id,
-        coldStorageId: payload.coldStorageId,
-      });
-
-      if (existingLink) {
-        logger?.warn(
-          {
-            farmerId: existingFarmer._id,
-            coldStorageId: payload.coldStorageId,
-          },
-          "Attempt to create duplicate farmer-storage-link",
-        );
-        throw new ConflictError(
-          "Farmer is already linked to this cold storage",
-          "LINK_ALREADY_EXISTS",
-        );
-      }
-
-      logger?.warn(
-        { mobileNumber: payload.mobileNumber },
-        "Attempt to register farmer with existing mobile number",
-      );
-      throw new ConflictError(
-        "Farmer with this mobile number already exists",
-        "MOBILE_NUMBER_EXISTS",
-      );
-    }
-
-    // Determine account number - use provided or auto-generate
-    let accountNumber: number;
-
-    if (payload.accountNumber !== undefined) {
-      // Check if the provided account number already exists for this cold storage
-      const existingAccountLink = await FarmerStorageLink.findOne({
-        coldStorageId: payload.coldStorageId,
-        accountNumber: payload.accountNumber,
-      });
-
-      if (existingAccountLink) {
-        logger?.warn(
-          {
-            accountNumber: payload.accountNumber,
-            coldStorageId: payload.coldStorageId,
-          },
-          "Attempt to use existing account number",
-        );
-        throw new ConflictError(
-          "Account number already exists for this cold storage",
-          "ACCOUNT_NUMBER_EXISTS",
-        );
-      }
-
-      accountNumber = payload.accountNumber;
-    } else {
-      // Generate account number (find max account number for this cold storage and increment)
-      const maxAccountLink = await FarmerStorageLink.findOne({
-        coldStorageId: payload.coldStorageId,
-      })
-        .sort({ accountNumber: -1 })
-        .select("accountNumber")
-        .lean();
-
-      accountNumber = maxAccountLink ? maxAccountLink.accountNumber + 1 : 1;
-    }
-
-    // Create farmer with default password "123456"
-    const farmer = await Farmer.create({
-      name: payload.name,
-      address: payload.address,
-      mobileNumber: payload.mobileNumber,
-      imageUrl: payload.imageUrl || "",
-      password: "123456", // Default password, will be hashed by pre-save hook
-    });
-
-    logger?.info(
-      {
-        farmerId: farmer._id,
-        name: farmer.name,
-        mobileNumber: farmer.mobileNumber,
-      },
-      "Farmer created successfully",
-    );
-
-    // Create farmer-storage-link (include costPerBag if received in payload)
-    const farmerStorageLink = await FarmerStorageLink.create({
-      farmerId: farmer._id,
-      coldStorageId: payload.coldStorageId,
-      linkedById: payload.linkedById,
-      accountNumber,
-      isActive: true,
-      ...(payload.costPerBag !== undefined && {
-        costPerBag: payload.costPerBag,
-      }),
-    });
-
-    logger?.info(
-      {
-        linkId: farmerStorageLink._id,
-        farmerId: farmer._id,
-        coldStorageId: payload.coldStorageId,
-        accountNumber,
-      },
-      "Farmer-storage-link created successfully",
-    );
-
-    // Create debtor ledger for farmer when cold storage has showFinances enabled
-    const preferences = coldStorage.preferencesId
-      ? await Preferences.findById(coldStorage.preferencesId).lean()
-      : null;
-    if (preferences?.showFinances) {
-      await createDebtorLedger({
-        farmerStorageLinkId: farmerStorageLink._id,
-        coldStorageId: coldStorage._id,
-        name: farmer.name,
-        openingBalance: payload.openingBalance ?? 0,
-        createdBy: new mongoose.Types.ObjectId(payload.linkedById),
-      });
-    }
-
-    // Return farmer without password and the link
-    const { password: _, ...farmerWithoutPassword } = farmer.toObject();
-
-    return {
-      farmer: farmerWithoutPassword,
-      farmerStorageLink: farmerStorageLink.toObject(),
-    };
-  } catch (error) {
-    // Re-throw known errors
-    if (
-      error instanceof ConflictError ||
-      error instanceof ValidationError ||
-      error instanceof NotFoundError
-    ) {
-      throw error;
-    }
-
-    // Handle mongoose validation errors
-    if (error instanceof mongoose.Error.ValidationError) {
-      const messages = Object.values(error.errors).map((err) => err.message);
-      throw new ValidationError(
-        messages.join(", "),
-        "MONGOOSE_VALIDATION_ERROR",
-      );
-    }
-
-    // Handle mongoose duplicate key errors
-    if (error instanceof Error && "code" in error && error.code === 11000) {
-      const mongooseError = error as Error & {
-        keyPattern?: Record<string, unknown>;
-      };
-      const field = Object.keys(mongooseError.keyPattern || {})[0] || "field";
-      throw new ConflictError(`${field} already exists`, "DUPLICATE_KEY_ERROR");
-    }
-
-    // Log unexpected errors
-    logger?.error(
-      { error, payload },
-      "Unexpected error in quick register farmer",
-    );
-
-    throw new AppError(
-      "Failed to quick register farmer",
-      500,
-      "QUICK_REGISTER_FARMER_ERROR",
-    );
-  }
-}
-
-/**
- * Updates a farmer-storage-link and associated farmer
- * @param id - Farmer-storage-link ID
- * @param payload - Update data
- * @param logger - Optional logger instance
- * @returns Object containing updated farmer and farmer-storage-link
- * @throws NotFoundError if farmer-storage-link not found
- * @throws ConflictError if accountNumber or mobileNumber already exists
- * @throws ValidationError if input validation fails
- */
-export async function updateFarmerStorageLink(
-  id: string,
-  payload: UpdateFarmerStorageLinkInput,
-  logger?: FastifyBaseLogger,
-  editedByStoreAdminId?: string,
-) {
-  try {
-    // Validate ObjectId format
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      throw new ValidationError(
-        "Invalid farmer-storage-link ID format",
-        "INVALID_ID",
-      );
-    }
-
-    // Find the farmer-storage-link
-    const farmerStorageLink =
-      await FarmerStorageLink.findById(id).populate("farmerId");
-
-    if (!farmerStorageLink) {
-      logger?.warn(
-        { farmerStorageLinkId: id },
-        "Farmer-storage-link not found for update",
-      );
-      throw new NotFoundError(
-        "Farmer-storage-link not found",
-        "FARMER_STORAGE_LINK_NOT_FOUND",
-      );
-    }
-
-    const farmerId = farmerStorageLink.farmerId as mongoose.Types.ObjectId;
-    const coldStorageId = farmerStorageLink.coldStorageId;
-
-    // Capture before state for farmer edit history (full snapshots, password excluded)
-    const farmerBefore = await Farmer.findById(farmerId).lean();
-    if (farmerBefore) {
-      delete (farmerBefore as { password?: string }).password;
-    }
-    const linkBefore = await FarmerStorageLink.findById(id).lean();
-    const snapshotBefore = {
-      farmer: (farmerBefore ?? {}) as Record<string, unknown>,
-      farmerStorageLink: (linkBefore ?? {}) as Record<string, unknown>,
-    };
-
-    // If accountNumber is being updated, check for uniqueness within the cold storage
-    if (payload.accountNumber !== undefined) {
-      const existingAccountLink = await FarmerStorageLink.findOne({
-        coldStorageId: coldStorageId,
-        accountNumber: payload.accountNumber,
-        _id: { $ne: id }, // Exclude the current link
-      });
-
-      if (existingAccountLink) {
-        logger?.warn(
-          {
-            accountNumber: payload.accountNumber,
-            coldStorageId: coldStorageId,
-            farmerStorageLinkId: id,
-          },
-          "Attempt to update to existing account number",
-        );
-        throw new ConflictError(
-          "Account number already exists for this cold storage",
-          "ACCOUNT_NUMBER_EXISTS",
-        );
-      }
-    }
-
-    // If mobileNumber is being updated, check for conflicts
-    if (payload.mobileNumber !== undefined) {
-      const existingFarmer = await Farmer.findOne({
-        mobileNumber: payload.mobileNumber,
-        _id: { $ne: farmerId }, // Exclude the current farmer
-      });
-
-      if (existingFarmer) {
-        logger?.warn(
-          {
-            mobileNumber: payload.mobileNumber,
-            farmerId: farmerId,
-          },
-          "Attempt to update to existing mobile number",
-        );
-        throw new ConflictError(
-          "Farmer with this mobile number already exists",
-          "MOBILE_NUMBER_EXISTS",
-        );
-      }
-    }
-
-    // If linkedById is being updated, validate store admin exists
-    if (payload.linkedById !== undefined) {
-      const storeAdmin = await StoreAdmin.findById(payload.linkedById);
-
-      if (!storeAdmin) {
-        logger?.warn(
-          { linkedById: payload.linkedById },
-          "Attempt to link to non-existent store admin",
-        );
-        throw new NotFoundError(
-          "Store admin not found",
-          "STORE_ADMIN_NOT_FOUND",
-        );
-      }
-    }
-
-    // Prepare farmer update data
-    const farmerUpdateData: Partial<{
-      name: string;
-      address: string;
-      mobileNumber: string;
-      imageUrl: string;
-    }> = {};
-
-    if (payload.name !== undefined) {
-      farmerUpdateData.name = payload.name;
-    }
-    if (payload.address !== undefined) {
-      farmerUpdateData.address = payload.address;
-    }
-    if (payload.mobileNumber !== undefined) {
-      farmerUpdateData.mobileNumber = payload.mobileNumber;
-    }
-    if (payload.imageUrl !== undefined) {
-      farmerUpdateData.imageUrl = payload.imageUrl;
-    }
-
-    // Prepare farmer-storage-link update data
-    const linkUpdateData: Partial<{
-      accountNumber: number;
-      isActive: boolean;
-      notes: string;
-      linkedById: mongoose.Types.ObjectId;
-      costPerBag: number;
-    }> = {};
-
-    if (payload.accountNumber !== undefined) {
-      linkUpdateData.accountNumber = payload.accountNumber;
-    }
-    if (payload.isActive !== undefined) {
-      linkUpdateData.isActive = payload.isActive;
-    }
-    if (payload.notes !== undefined) {
-      linkUpdateData.notes = payload.notes;
-    }
-    if (payload.linkedById !== undefined) {
-      linkUpdateData.linkedById = new mongoose.Types.ObjectId(
-        payload.linkedById,
-      );
-    }
-    if (payload.costPerBag !== undefined) {
-      linkUpdateData.costPerBag = payload.costPerBag;
-    }
-
-    // Update farmer if there are farmer fields to update
-    let updatedFarmer = null;
-    if (Object.keys(farmerUpdateData).length > 0) {
-      updatedFarmer = await Farmer.findByIdAndUpdate(
-        farmerId,
-        farmerUpdateData,
-        { new: true, runValidators: true },
-      ).lean();
-
-      if (!updatedFarmer) {
-        logger?.warn({ farmerId }, "Farmer not found for update");
-        throw new NotFoundError("Farmer not found", "FARMER_NOT_FOUND");
-      }
-
-      // Remove password from response
-      delete (updatedFarmer as { password?: string }).password;
-    }
-
-    // Update farmer-storage-link
-    const updatedLink = await FarmerStorageLink.findByIdAndUpdate(
-      id,
-      linkUpdateData,
-      { new: true, runValidators: true },
-    )
-      .populate("farmerId")
-      .lean();
-
-    if (!updatedLink) {
-      logger?.warn(
-        { farmerStorageLinkId: id },
-        "Failed to update farmer-storage-link",
-      );
-      throw new NotFoundError(
-        "Farmer-storage-link not found",
-        "FARMER_STORAGE_LINK_NOT_FOUND",
-      );
-    }
-
-    // Update debtor ledger opening balance when provided (mirrors quick-register behaviour)
-    if (payload.openingBalance !== undefined) {
-      const debtorLedger = await Ledger.findOne({
-        coldStorageId,
-        farmerStorageLinkId: new mongoose.Types.ObjectId(id),
-        category: "Debtors",
-      }).lean();
-
-      if (debtorLedger) {
-        await updateLedger(
-          debtorLedger._id.toString(),
-          coldStorageId.toString(),
-          { openingBalance: payload.openingBalance },
-          logger,
-        );
-      }
-    }
-
-    // Get updated farmer if not already fetched
-    if (!updatedFarmer) {
-      updatedFarmer = await Farmer.findById(farmerId).lean();
-      if (updatedFarmer) {
-        delete (updatedFarmer as { password?: string }).password;
-      }
-    }
-
-    // Record farmer edit history (before/after snapshots and who made the change)
-    const farmerAfter =
-      updatedFarmer ?? (await Farmer.findById(farmerId).lean());
-    if (farmerAfter) {
-      delete (farmerAfter as { password?: string }).password;
-    }
-    const snapshotAfter = {
-      farmer: (farmerAfter ?? {}) as Record<string, unknown>,
-      farmerStorageLink: updatedLink as unknown as Record<string, unknown>,
-    };
-    await recordFarmerEditHistory({
-      farmerId,
-      farmerStorageLinkId: new mongoose.Types.ObjectId(id),
-      coldStorageId: coldStorageId as mongoose.Types.ObjectId,
-      editedById: editedByStoreAdminId,
-      snapshotBefore,
-      snapshotAfter,
-      logger,
-    });
-
-    logger?.info(
-      {
-        farmerStorageLinkId: id,
-        farmerId: farmerId,
-        updates: { ...farmerUpdateData, ...linkUpdateData },
-      },
-      "Farmer-storage-link updated successfully",
-    );
-
-    return {
-      farmer: updatedFarmer,
-      farmerStorageLink: updatedLink,
-    };
-  } catch (error) {
-    // Re-throw known errors
-    if (
-      error instanceof ConflictError ||
-      error instanceof ValidationError ||
-      error instanceof NotFoundError
-    ) {
-      throw error;
-    }
-
-    // Handle mongoose validation errors
-    if (error instanceof mongoose.Error.ValidationError) {
-      const messages = Object.values(error.errors).map((err) => err.message);
-      throw new ValidationError(
-        messages.join(", "),
-        "MONGOOSE_VALIDATION_ERROR",
-      );
-    }
-
-    // Handle mongoose duplicate key errors
-    if (error instanceof Error && "code" in error && error.code === 11000) {
-      const mongooseError = error as Error & {
-        keyPattern?: Record<string, unknown>;
-      };
-      const field = Object.keys(mongooseError.keyPattern || {})[0] || "field";
-      throw new ConflictError(`${field} already exists`, "DUPLICATE_KEY_ERROR");
-    }
-
-    // Log unexpected errors
-    logger?.error(
-      { error, id, payload },
-      "Unexpected error in update farmer-storage-link",
-    );
-
-    throw new AppError(
-      "Failed to update farmer-storage-link",
-      500,
-      "UPDATE_FARMER_STORAGE_LINK_ERROR",
-    );
-  }
-}
-
 /* =======================
    DAYBOOK (incoming + outgoing gate passes)
 ======================= */
@@ -1204,23 +705,9 @@ export interface DaybookPagination {
 }
 
 /** Pagination meta for daybook orders list (all / incoming / outgoing) */
-export interface DaybookOrdersPaginationMeta {
-  currentPage: number;
-  totalPages: number;
-  totalItems: number;
-  itemsPerPage: number;
-  hasNextPage: boolean;
-  hasPreviousPage: boolean;
-  nextPage: number | null;
-  previousPage: number | null;
-}
+export type DaybookOrdersPaginationMeta = import("../farmer-storage-link/farmer-storage-link.utils.js").GatePassListPaginationMeta;
 
-export interface GetDaybookOrdersResult {
-  status: "Success" | "Fail";
-  message?: string;
-  data?: Record<string, unknown>[];
-  pagination: DaybookOrdersPaginationMeta;
-}
+export type GetDaybookOrdersResult = GatePassListPaginationResult;
 
 export interface GetDaybookOptions {
   limit?: number;
@@ -1230,254 +717,6 @@ export interface GetDaybookOptions {
 }
 
 const DAYBOOK_STAGE_ORDER: DaybookGatePassType[] = ["incoming", "outgoing"];
-
-function createPaginationMeta(
-  total: number,
-  page: number,
-  limit: number,
-): DaybookOrdersPaginationMeta {
-  const totalPages = Math.ceil(total / limit);
-  return {
-    currentPage: page,
-    totalPages,
-    totalItems: total,
-    itemsPerPage: limit,
-    hasNextPage: page < totalPages,
-    hasPreviousPage: page > 1,
-    nextPage: page < totalPages ? page + 1 : null,
-    previousPage: page > 1 ? page - 1 : null,
-  };
-}
-
-/** Sort bagSizes by name on incoming docs; sort orderDetails by size on outgoing docs. */
-function sortOrderDetails(
-  orders: Array<
-    | { bagSizes?: { name: string }[]; orderDetails?: { size: string }[] }
-    | {
-        toObject: () => Record<string, unknown>;
-        bagSizes?: unknown;
-        orderDetails?: unknown;
-      }
-  >,
-): Record<string, unknown>[] {
-  return orders.map((order) => {
-    const hasToObject =
-      typeof (order as { toObject?: () => Record<string, unknown> })
-        .toObject === "function";
-    const obj = hasToObject
-      ? (order as { toObject: () => Record<string, unknown> }).toObject()
-      : { ...(order as Record<string, unknown>) };
-    if (Array.isArray(obj.bagSizes)) {
-      (obj as { bagSizes: { name: string }[] }).bagSizes = [
-        ...(obj.bagSizes as { name: string }[]),
-      ].sort((a, b) => a.name.localeCompare(b.name));
-    }
-    if (Array.isArray(obj.orderDetails)) {
-      (obj as { orderDetails: { size: string }[] }).orderDetails = [
-        ...(obj.orderDetails as { size: string }[]),
-      ].sort((a, b) => a.size.localeCompare(b.size));
-    }
-    return obj as Record<string, unknown>;
-  });
-}
-
-/**
- * Get all incoming and outgoing gate passes for a single farmer-storage-link.
- * Returns same format as daybook: status, data (merged/filtered array), pagination (single page, no pagination logic).
- * Optional filter: from, to (YYYY-MM-DD). Optional: type (all | incoming | outgoing), sortBy.
- * sortBy latest/oldest orders by gatePassNo (desc / asc), not by date.
- * Scoped to the given cold storage.
- */
-export async function getGatePassesByFarmerStorageLinkId(
-  farmerStorageLinkId: string,
-  coldStorageId: string,
-  options: {
-    from?: string;
-    to?: string;
-    type?: DaybookListType;
-    sortBy?: "latest" | "oldest";
-  } = {},
-  logger?: FastifyBaseLogger,
-): Promise<GetDaybookOrdersResult> {
-  if (!mongoose.Types.ObjectId.isValid(farmerStorageLinkId)) {
-    throw new ValidationError(
-      "Invalid farmer storage link ID format",
-      "INVALID_FARMER_STORAGE_LINK_ID",
-    );
-  }
-  if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
-    throw new ValidationError(
-      "Invalid cold storage ID format",
-      "INVALID_COLD_STORAGE_ID",
-    );
-  }
-
-  const linkIdObj = new mongoose.Types.ObjectId(farmerStorageLinkId);
-  const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
-
-  const storageLink = await FarmerStorageLink.findOne({
-    _id: linkIdObj,
-    coldStorageId: coldStorageObjectId,
-  }).lean();
-
-  if (!storageLink) {
-    logger?.warn(
-      { farmerStorageLinkId, coldStorageId },
-      "Farmer-storage-link not found or does not belong to cold storage",
-    );
-    throw new NotFoundError(
-      "Farmer-storage-link not found",
-      "FARMER_STORAGE_LINK_NOT_FOUND",
-    );
-  }
-
-  const dateFilter: { date?: { $gte?: Date; $lte?: Date } } = {};
-  if (options.from || options.to) {
-    const dateClause: { $gte?: Date; $lte?: Date } = {};
-    if (options.from) dateClause.$gte = new Date(options.from);
-    if (options.to) {
-      const toEnd = new Date(options.to);
-      toEnd.setHours(23, 59, 59, 999);
-      dateClause.$lte = toEnd;
-    }
-    dateFilter.date = dateClause;
-  }
-  const incomingFilter = { farmerStorageLinkId: linkIdObj, ...dateFilter };
-  const outgoingFilter = { farmerStorageLinkId: linkIdObj, ...dateFilter };
-
-  const sortOrder = options.sortBy === "latest" ? -1 : 1;
-  const type = options.type ?? "all";
-
-  const incomingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber stockFilter customMarka createdAt";
-  const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots createdAt";
-
-  const populateLink = [
-    {
-      path: "farmerStorageLinkId",
-      select: "farmerId accountNumber",
-      populate: {
-        path: "farmerId",
-        model: Farmer,
-        select: "name mobileNumber address",
-      },
-    },
-  ];
-
-  switch (type) {
-    case "all": {
-      const [incomingList, outgoingList] = await Promise.all([
-        IncomingGatePass.find(incomingFilter)
-          .sort({ gatePassNo: sortOrder })
-          .select(incomingSelect)
-          .populate(populateLink)
-          .lean(),
-        OutgoingGatePass.find(outgoingFilter)
-          .sort({ gatePassNo: sortOrder })
-          .select(outgoingSelect)
-          .populate(populateLink)
-          .lean(),
-      ]);
-
-      const allOrders = [...incomingList, ...outgoingList] as Array<{
-        gatePassNo?: number;
-      }>;
-      allOrders.sort((a, b) => {
-        const noA = a.gatePassNo ?? 0;
-        const noB = b.gatePassNo ?? 0;
-        return sortOrder === -1 ? noB - noA : noA - noB;
-      });
-
-      const totalCount = allOrders.length;
-      if (totalCount === 0) {
-        logger?.info(
-          { farmerStorageLinkId, from: options.from, to: options.to },
-          "Gate passes by farmer-storage-link: no orders",
-        );
-        return {
-          status: "Fail",
-          message: "No gate passes found. Try changing the filters.",
-          pagination: createPaginationMeta(0, 1, 1),
-        };
-      }
-
-      const sorted = sortOrderDetails(
-        allOrders as {
-          bagSizes?: { name: string }[];
-          orderDetails?: { size: string }[];
-        }[],
-      );
-
-      logger?.info(
-        { farmerStorageLinkId, totalCount },
-        "Gate passes by farmer-storage-link (all) retrieved",
-      );
-      return {
-        status: "Success",
-        data: sorted,
-        pagination: createPaginationMeta(totalCount, 1, totalCount),
-      };
-    }
-    case "incoming": {
-      const incomingOrders = await IncomingGatePass.find(incomingFilter)
-        .sort({ gatePassNo: sortOrder })
-        .select(incomingSelect)
-        .populate(populateLink)
-        .lean();
-
-      const totalCount = incomingOrders.length;
-      if (totalCount === 0) {
-        return {
-          status: "Fail",
-          message: "No incoming gate passes found.",
-          pagination: createPaginationMeta(0, 1, 1),
-        };
-      }
-
-      const sorted = sortOrderDetails(
-        incomingOrders as unknown as { bagSizes?: { name: string }[] }[],
-      );
-      return {
-        status: "Success",
-        data: sorted,
-        pagination: createPaginationMeta(totalCount, 1, totalCount),
-      };
-    }
-    case "outgoing": {
-      const outgoingOrders = await OutgoingGatePass.find(outgoingFilter)
-        .sort({ gatePassNo: sortOrder })
-        .select(outgoingSelect)
-        .populate(populateLink)
-        .lean();
-
-      const totalCount = outgoingOrders.length;
-      if (totalCount === 0) {
-        return {
-          status: "Fail",
-          message: "No outgoing gate passes found.",
-          pagination: createPaginationMeta(0, 1, 1),
-        };
-      }
-
-      const sorted = sortOrderDetails(
-        outgoingOrders as unknown as { orderDetails?: { size: string }[] }[],
-      );
-      return {
-        status: "Success",
-        data: sorted,
-        pagination: createPaginationMeta(totalCount, 1, totalCount),
-      };
-    }
-    default: {
-      void type as never;
-      throw new ValidationError(
-        "Invalid type parameter. Use 'all', 'incoming', or 'outgoing'.",
-        "INVALID_DAYBOOK_TYPE",
-      );
-    }
-  }
-}
 
 /**
  * Get daybook as a list of incoming and/or outgoing gate passes with farmer populated,
@@ -1518,31 +757,13 @@ export async function getDaybookOrders(
     return {
       status: "Fail",
       message: "Cold storage doesn't have any orders",
-      pagination: createPaginationMeta(0, page, limit),
+      pagination: createGatePassListPaginationMeta(0, page, limit),
     };
   }
 
-  const incomingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber stockFilter customMarka createdAt";
-  const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots createdAt";
-
-  const populateLink = [
-    {
-      path: "farmerStorageLinkId",
-      select: "farmerId accountNumber",
-      populate: {
-        path: "farmerId",
-        model: Farmer,
-        select: "name mobileNumber address",
-      },
-    },
-    {
-      path: "createdBy",
-      model: StoreAdmin,
-      select: "name",
-    },
-  ];
+  const incomingSelect = GATE_PASS_LIST_INCOMING_SELECT;
+  const outgoingSelect = GATE_PASS_LIST_OUTGOING_SELECT;
+  const populateLink = GATE_PASS_LIST_POPULATE_LINK;
 
   switch (options.type) {
     case "all": {
@@ -1561,7 +782,7 @@ export async function getDaybookOrders(
         return {
           status: "Fail",
           message: "Cold storage doesn't have any orders",
-          pagination: createPaginationMeta(0, page, limit),
+          pagination: createGatePassListPaginationMeta(0, page, limit),
         };
       }
 
@@ -1571,13 +792,15 @@ export async function getDaybookOrders(
         })
           .sort({ createdAt: sortOrder })
           .select(incomingSelect)
-          .populate(populateLink),
+          .populate(populateLink)
+          .lean(),
         OutgoingGatePass.find({
           farmerStorageLinkId: { $in: farmerStorageLinkIds },
         })
           .sort({ createdAt: sortOrder })
           .select(outgoingSelect)
-          .populate(populateLink),
+          .populate(populateLink)
+          .lean(),
       ]);
 
       const allOrders = [...allIncoming, ...allOutgoing] as Array<{
@@ -1590,12 +813,12 @@ export async function getDaybookOrders(
       });
 
       const paginated = allOrders.slice(skip, skip + limit);
-      const sorted = sortOrderDetails(
+      const sorted = sortGatePassOrderDetails(
         paginated as {
           bagSizes?: { name: string }[];
           orderDetails?: { size: string }[];
         }[],
-      );
+      ).map(mapGatePassListLinkDisplay);
 
       logger?.info(
         { coldStorageId, totalCount, page, limit },
@@ -1604,7 +827,7 @@ export async function getDaybookOrders(
       return {
         status: "Success",
         data: sorted,
-        pagination: createPaginationMeta(totalCount, page, limit),
+        pagination: createGatePassListPaginationMeta(totalCount, page, limit),
       };
     }
     case "incoming": {
@@ -1616,7 +839,7 @@ export async function getDaybookOrders(
         return {
           status: "Fail",
           message: "No incoming orders found.",
-          pagination: createPaginationMeta(0, page, limit),
+          pagination: createGatePassListPaginationMeta(0, page, limit),
         };
       }
 
@@ -1627,16 +850,17 @@ export async function getDaybookOrders(
         .skip(skip)
         .limit(limit)
         .select(incomingSelect)
-        .populate(populateLink);
+        .populate(populateLink)
+        .lean();
 
-      const sorted = sortOrderDetails(
+      const sorted = sortGatePassOrderDetails(
         incomingOrders as unknown as { bagSizes?: { name: string }[] }[],
-      );
+      ).map(mapGatePassListLinkDisplay);
 
       return {
         status: "Success",
         data: sorted,
-        pagination: createPaginationMeta(totalCount, page, limit),
+        pagination: createGatePassListPaginationMeta(totalCount, page, limit),
       };
     }
     case "outgoing": {
@@ -1648,7 +872,7 @@ export async function getDaybookOrders(
         return {
           status: "Fail",
           message: "No outgoing orders found.",
-          pagination: createPaginationMeta(0, page, limit),
+          pagination: createGatePassListPaginationMeta(0, page, limit),
         };
       }
 
@@ -1659,16 +883,17 @@ export async function getDaybookOrders(
         .skip(skip)
         .limit(limit)
         .select(outgoingSelect)
-        .populate(populateLink);
+        .populate(populateLink)
+        .lean();
 
-      const sorted = sortOrderDetails(
+      const sorted = sortGatePassOrderDetails(
         outgoingOrders as unknown as { orderDetails?: { size: string }[] }[],
-      );
+      ).map(mapGatePassListLinkDisplay);
 
       return {
         status: "Success",
         data: sorted,
-        pagination: createPaginationMeta(totalCount, page, limit),
+        pagination: createGatePassListPaginationMeta(totalCount, page, limit),
       };
     }
     default: {
@@ -1722,7 +947,7 @@ function parseMarkaSearchString(
 }
 
 /**
- * Search incoming and outgoing gate passes by gate pass number, manual parchi, marka (gatePassNo/totalBags), customMarka (incoming only), or remarks (case-insensitive substring, both pass types).
+ * Search incoming and outgoing gate passes by gate pass number, manual parchi, marka (gatePassNo/totalBags and/or customMarka on incoming), or remarks (case-insensitive substring, both pass types).
  * Scoped to cold storage via farmer-storage-links. Returns populated farmer and sorted bagSizes/orderDetails.
  */
 export async function searchOrdersByReceiptNumber(
@@ -1772,71 +997,87 @@ export async function searchOrdersByReceiptNumber(
   const incomingSelect =
     "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber stockFilter customMarka createdAt";
   const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots createdAt";
+    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots isNull createdAt";
   const populateLink = [
     {
       path: "farmerStorageLinkId",
-      select: "farmerId accountNumber",
+      select: FARMER_STORAGE_LINK_POPULATE_SELECT,
       populate: {
         path: "farmerId",
         model: Farmer,
-        select: "name mobileNumber address",
+        select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
       },
     },
   ];
 
   if (searchBy === "marka") {
-    const parsedMarka = parseMarkaSearchString(trimmed);
-    if (!parsedMarka) {
-      throw new ValidationError(
-        'Marka must be gatePassNumber/totalBags, e.g. "42/300"',
-        "INVALID_MARKA_FORMAT",
-      );
-    }
-    const { gatePassNo, totalBags } = parsedMarka;
     const linkMatch = { farmerStorageLinkId: { $in: farmerStorageLinkIds } };
+    const parsedMarka = parseMarkaSearchString(trimmed);
 
-    const sumIncomingBags = {
-      $reduce: {
-        input: { $ifNull: ["$bagSizes", []] },
-        initialValue: 0,
-        in: {
-          $add: ["$$value", { $ifNull: ["$$this.initialQuantity", 0] }],
-        },
-      },
-    };
-    const sumOutgoingIssued = {
-      $reduce: {
-        input: { $ifNull: ["$orderDetails", []] },
-        initialValue: 0,
-        in: {
-          $add: ["$$value", { $ifNull: ["$$this.quantityIssued", 0] }],
-        },
-      },
-    };
+    let markaIncomingIds: mongoose.Types.ObjectId[] = [];
+    let markaOutgoingIds: mongoose.Types.ObjectId[] = [];
 
-    const [incomingIdDocs, outgoingIdDocs] = await Promise.all([
-      IncomingGatePass.aggregate<{ _id: mongoose.Types.ObjectId }>([
-        { $match: { ...linkMatch, gatePassNo } },
-        { $addFields: { _markaTotalBags: sumIncomingBags } },
-        { $match: { _markaTotalBags: totalBags } },
-        { $project: { _id: 1 } },
-      ]),
-      OutgoingGatePass.aggregate<{ _id: mongoose.Types.ObjectId }>([
-        { $match: { ...linkMatch, gatePassNo } },
-        { $addFields: { _markaTotalBags: sumOutgoingIssued } },
-        { $match: { _markaTotalBags: totalBags } },
-        { $project: { _id: 1 } },
-      ]),
+    if (parsedMarka) {
+      const { gatePassNo, totalBags } = parsedMarka;
+
+      const sumIncomingBags = {
+        $reduce: {
+          input: { $ifNull: ["$bagSizes", []] },
+          initialValue: 0,
+          in: {
+            $add: ["$$value", { $ifNull: ["$$this.initialQuantity", 0] }],
+          },
+        },
+      };
+      const sumOutgoingIssued = {
+        $reduce: {
+          input: { $ifNull: ["$orderDetails", []] },
+          initialValue: 0,
+          in: {
+            $add: ["$$value", { $ifNull: ["$$this.quantityIssued", 0] }],
+          },
+        },
+      };
+
+      const [incomingIdDocs, outgoingIdDocs] = await Promise.all([
+        IncomingGatePass.aggregate<{ _id: mongoose.Types.ObjectId }>([
+          { $match: { ...linkMatch, gatePassNo } },
+          { $addFields: { _markaTotalBags: sumIncomingBags } },
+          { $match: { _markaTotalBags: totalBags } },
+          { $project: { _id: 1 } },
+        ]),
+        OutgoingGatePass.aggregate<{ _id: mongoose.Types.ObjectId }>([
+          { $match: { ...linkMatch, gatePassNo } },
+          { $addFields: { _markaTotalBags: sumOutgoingIssued } },
+          { $match: { _markaTotalBags: totalBags } },
+          { $project: { _id: 1 } },
+        ]),
+      ]);
+
+      markaIncomingIds = incomingIdDocs.map((d) => d._id);
+      markaOutgoingIds = outgoingIdDocs.map((d) => d._id);
+    }
+
+    const customMarkaIdDocs = await IncomingGatePass.find({
+      ...linkMatch,
+      customMarka: trimmed,
+    })
+      .select("_id")
+      .lean();
+
+    const incomingIdSet = new Set<string>([
+      ...markaIncomingIds.map((id) => id.toString()),
+      ...customMarkaIdDocs.map((d) => d._id.toString()),
     ]);
-
-    const incomingIds = incomingIdDocs.map((d) => d._id);
-    const outgoingIds = outgoingIdDocs.map((d) => d._id);
+    const incomingIds = [...incomingIdSet].map(
+      (id) => new mongoose.Types.ObjectId(id),
+    );
+    const outgoingIds = markaOutgoingIds;
 
     if (incomingIds.length === 0 && outgoingIds.length === 0) {
       logger?.info(
         { marka: trimmed, coldStorageId },
-        "No orders found for marka search",
+        "No orders found for marka or customMarka search",
       );
       return {
         status: "Fail",
@@ -1860,13 +1101,13 @@ export async function searchOrdersByReceiptNumber(
         : [],
     ]);
 
-    const processedIncoming = sortOrderDetails(
+    const processedIncoming = sortGatePassOrderDetails(
       incomingOrders as unknown as {
         bagSizes?: { name: string }[];
         orderDetails?: { size: string }[];
       }[],
     );
-    const processedOutgoing = sortOrderDetails(
+    const processedOutgoing = sortGatePassOrderDetails(
       outgoingOrders as unknown as {
         bagSizes?: { name: string }[];
         orderDetails?: { size: string }[];
@@ -1879,6 +1120,8 @@ export async function searchOrdersByReceiptNumber(
         coldStorageId,
         incomingCount: incomingOrders.length,
         outgoingCount: outgoingOrders.length,
+        usedGatePassTotalBags: Boolean(parsedMarka),
+        usedCustomMarka: customMarkaIdDocs.length > 0,
       },
       "Search by marka: orders found",
     );
@@ -1967,13 +1210,13 @@ export async function searchOrdersByReceiptNumber(
     };
   }
 
-  const processedIncoming = sortOrderDetails(
+  const processedIncoming = sortGatePassOrderDetails(
     incomingOrders as unknown as {
       bagSizes?: { name: string }[];
       orderDetails?: { size: string }[];
     }[],
   );
-  const processedOutgoing = sortOrderDetails(
+  const processedOutgoing = sortGatePassOrderDetails(
     outgoingOrders as unknown as {
       bagSizes?: { name: string }[];
       orderDetails?: { size: string }[];
@@ -2166,7 +1409,27 @@ export async function getDaybook(
         farmer: {
           $mergeObjects: [
             { $ifNull: [{ $arrayElemAt: ["$farmerArr", 0] }, {}] },
-            { accountNumber: "$linkDoc.accountNumber" },
+            {
+              accountNumber: "$linkDoc.accountNumber",
+              name: {
+                $ifNull: [
+                  "$linkDoc.name",
+                  { $arrayElemAt: ["$farmerArr.name", 0] },
+                ],
+              },
+              address: {
+                $ifNull: [
+                  "$linkDoc.address",
+                  { $arrayElemAt: ["$farmerArr.address", 0] },
+                ],
+              },
+              mobileNumber: {
+                $ifNull: [
+                  "$linkDoc.mobileNumber",
+                  { $arrayElemAt: ["$farmerArr.mobileNumber", 0] },
+                ],
+              },
+            },
           ],
         },
         outgoingPasses: 1,

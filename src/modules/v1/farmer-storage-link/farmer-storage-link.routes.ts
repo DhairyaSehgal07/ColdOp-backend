@@ -2,11 +2,15 @@ import { FastifyInstance } from "fastify";
 import { authenticate } from "../../../utils/auth.js";
 import {
   checkFarmerMobileHandler,
-  linkFarmerToStoreHandler,
+  getFarmerStorageLinksByColdStorageHandler,
+  quickRegisterFarmerHandler,
+  updateFarmerStorageLinkHandler,
+  getFarmerStorageLinkGatePassesHandler,
 } from "./farmer-storage-link.controller.js";
 import {
   checkFarmerMobileSchema,
-  linkFarmerToStoreSchema,
+  quickRegisterFarmerSchema,
+  updateFarmerStorageLinkSchema,
 } from "./farmer-storage-link.schema.js";
 
 /**
@@ -107,80 +111,213 @@ export async function farmerStorageLinkRoutes(fastify: FastifyInstance) {
     },
   );
 
-  fastify.post(
-    "/link-farmer-to-store",
+  fastify.get(
+    "/",
     {
       preHandler: [authenticate],
       schema: {
         description:
-          "Link an existing farmer to the current logged-in cold storage. Creates the farmer-storage link and optionally a debtor ledger when showFinances is enabled.",
+          "Get all farmer-storage-links for the authenticated cold storage. Each link includes store-specific name, address, and mobileNumber.",
         tags: ["Farmer Storage Link"],
-        summary: "Link farmer to store",
-        body: {
+        summary: "List farmers for my cold storage",
+        response: {
+          200: {
+            description:
+              "List of farmer-storage-links with store-specific display fields",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    _id: { type: "string" },
+                    accountNumber: { type: "number" },
+                    name: { type: "string" },
+                    address: { type: "string" },
+                    mobileNumber: { type: "string" },
+                    isActive: { type: "boolean" },
+                    notes: { type: "string" },
+                    costPerBag: { type: "number" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      config: {
+        rateLimit: {
+          max: 200,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getFarmerStorageLinksByColdStorageHandler as never,
+  );
+
+  fastify.get(
+    "/:id/gate-passes",
+    {
+      preHandler: [authenticate],
+      schema: {
+        description:
+          "Get gate passes for a farmer-storage-link. Same response format as daybook: status, data (array), summaries (bag totals), pagination (single page). Each item's farmerStorageLinkId is a flat object with name, accountNumber, address, mobileNumber (no nested farmerId). Query: from, to (YYYY-MM-DD), type (all | incoming | outgoing), sortBy (latest | oldest) — type=all returns merged list sorted by createdAt; incoming/outgoing filtered lists sorted by createdAt. Summaries always reflect all incoming/outgoing passes in the date range (ignores type filter).",
+        tags: ["Farmer Storage Link"],
+        summary: "Get gate passes for a farmer-storage-link",
+        params: {
           type: "object",
-          required: ["farmerId", "accountNumber", "costPerBag"],
+          required: ["id"],
           properties: {
-            farmerId: {
+            id: {
               type: "string",
-              pattern: "^[a-fA-F0-9]{24}$",
-              description: "MongoDB ObjectId of the farmer",
+              description: "Farmer-storage-link ID",
             },
-            accountNumber: {
-              type: "integer",
-              minimum: 1,
+          },
+        },
+        querystring: {
+          type: "object",
+          properties: {
+            from: {
+              type: "string",
+              description: "Start date (YYYY-MM-DD) inclusive",
+            },
+            to: {
+              type: "string",
+              description: "End date (YYYY-MM-DD) inclusive",
+            },
+            type: {
+              type: "string",
+              enum: ["all", "incoming", "outgoing"],
               description:
-                "Account number for this farmer at this cold storage",
+                "all = merged list; incoming or outgoing = filter by type (default all)",
             },
-            costPerBag: {
-              type: "number",
-              minimum: 0,
-              description: "Cost per bag",
-            },
-            openingBalance: {
-              type: "number",
-              default: 0,
+            sortBy: {
+              type: "string",
               description:
-                "Opening balance for debtor ledger (when showFinances is enabled)",
+                "latest = newest createdAt first; otherwise = oldest createdAt first (default oldest, same as daybook)",
             },
           },
         },
         response: {
           200: {
-            description: "Farmer linked successfully",
+            description:
+              "status Success with data (full array of gate passes; farmerStorageLinkId is flat: name, accountNumber, address, mobileNumber), summaries (bag totals), and pagination (single page); or status Fail with message, summaries, and pagination when no orders",
+            type: "object",
+            properties: {
+              status: { type: "string", enum: ["Success", "Fail"] },
+              message: { type: "string" },
+              data: {
+                type: "array",
+                items: { type: "object", additionalProperties: true },
+              },
+              summaries: {
+                type: "object",
+                properties: {
+                  totalIncomingBags: { type: "number" },
+                  totalOutgoingBags: { type: "number" },
+                  totalInternallyTransferredIncomingBags: { type: "number" },
+                  totalInternallyTransferredOutgoingBags: { type: "number" },
+                },
+              },
+              pagination: {
+                type: "object",
+                properties: {
+                  currentPage: { type: "number" },
+                  totalPages: { type: "number" },
+                  totalItems: { type: "number" },
+                  itemsPerPage: { type: "number" },
+                  hasNextPage: { type: "boolean" },
+                  hasPreviousPage: { type: "boolean" },
+                  nextPage: { type: ["number", "null"] },
+                  previousPage: { type: ["number", "null"] },
+                },
+              },
+            },
+          },
+          400: {
+            description: "Invalid type or validation error",
             type: "object",
             properties: {
               success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
               message: { type: "string" },
+            },
+          },
+          401: {
+            description: "Unauthorized or missing cold storage",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          404: {
+            description: "Farmer-storage-link not found",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      config: {
+        rateLimit: {
+          max: 120,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getFarmerStorageLinkGatePassesHandler as never,
+  );
+
+  fastify.post(
+    "/quick-register-farmer",
+    {
+      preHandler: [authenticate],
+      schema: {
+        ...quickRegisterFarmerSchema,
+        description:
+          "Quick register a new farmer and create a farmer-storage-link for the current cold storage",
+        tags: ["Farmer Storage Link"],
+        summary: "Quick register farmer",
+        response: {
+          201: {
+            description: "Farmer registered successfully",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
               data: {
                 type: "object",
                 properties: {
-                  farmer: {
-                    type: "object",
-                    properties: {
-                      _id: { type: "string" },
-                      name: { type: "string" },
-                      address: { type: "string" },
-                      mobileNumber: { type: "string" },
-                      imageUrl: { type: "string", nullable: true },
-                      createdAt: { type: "string", format: "date-time" },
-                      updatedAt: { type: "string", format: "date-time" },
-                    },
-                  },
+                  farmer: { type: "object", additionalProperties: true },
                   farmerStorageLink: {
                     type: "object",
-                    properties: {
-                      _id: { type: "string" },
-                      farmerId: { type: "string" },
-                      coldStorageId: { type: "string" },
-                      accountNumber: { type: "number" },
-                      isActive: { type: "boolean" },
-                      costPerBag: { type: "number", nullable: true },
-                      createdAt: { type: "string", format: "date-time" },
-                      updatedAt: { type: "string", format: "date-time" },
-                    },
+                    additionalProperties: true,
                   },
                 },
               },
+              message: { type: "string" },
             },
           },
           400: {
@@ -197,22 +334,8 @@ export async function farmerStorageLinkRoutes(fastify: FastifyInstance) {
               },
             },
           },
-          401: {
-            description: "Unauthorized",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
           404: {
-            description: "Farmer, cold storage or store admin not found",
+            description: "Cold storage or store admin not found",
             type: "object",
             properties: {
               success: { type: "boolean" },
@@ -226,8 +349,7 @@ export async function farmerStorageLinkRoutes(fastify: FastifyInstance) {
             },
           },
           409: {
-            description:
-              "Conflict (e.g. link or account number already exists)",
+            description: "Conflict - resource already exists",
             type: "object",
             properties: {
               success: { type: "boolean" },
@@ -250,7 +372,7 @@ export async function farmerStorageLinkRoutes(fastify: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const parsed = linkFarmerToStoreSchema.safeParse({
+      const parsed = quickRegisterFarmerSchema.safeParse({
         body: request.body,
       });
       if (!parsed.success) {
@@ -262,10 +384,116 @@ export async function farmerStorageLinkRoutes(fastify: FastifyInstance) {
           },
         });
       }
-      return linkFarmerToStoreHandler(
+      return quickRegisterFarmerHandler(
         { ...request, body: parsed.data.body } as Parameters<
-          typeof linkFarmerToStoreHandler
+          typeof quickRegisterFarmerHandler
         >[0],
+        reply,
+      );
+    },
+  );
+
+  fastify.put(
+    "/:id",
+    {
+      preHandler: [authenticate],
+      schema: {
+        ...updateFarmerStorageLinkSchema,
+        description:
+          "Update a farmer-storage-link. Store-specific name, address, and mobileNumber update the link only; imageUrl updates the global farmer.",
+        tags: ["Farmer Storage Link"],
+        summary: "Update farmer-storage-link",
+        response: {
+          200: {
+            description: "Farmer-storage-link updated successfully",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  farmer: { type: "object", additionalProperties: true },
+                  farmerStorageLink: {
+                    type: "object",
+                    additionalProperties: true,
+                  },
+                },
+              },
+              message: { type: "string" },
+            },
+          },
+          400: {
+            description: "Validation error",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          404: {
+            description: "Farmer-storage-link not found",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          409: {
+            description: "Conflict - resource already exists",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (request, reply) => {
+      const parsed = updateFarmerStorageLinkSchema.safeParse({
+        params: request.params,
+        body: request.body,
+      });
+      if (!parsed.success) {
+        return reply.code(400).send({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message:
+              parsed.error.flatten().formErrors?.[0] ?? "Invalid request",
+          },
+        });
+      }
+      return updateFarmerStorageLinkHandler(
+        {
+          ...request,
+          params: parsed.data.params,
+          body: parsed.data.body,
+        } as Parameters<typeof updateFarmerStorageLinkHandler>[0],
         reply,
       );
     },

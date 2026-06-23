@@ -40,6 +40,8 @@ export enum GatePassType {
   RESTORE = "RESTORE",
   /** Outgoing created when stock is transferred out to another farmer at the same cold storage */
   OUTGOING_TRANSFER = "Outgoing-transfer",
+  /** Outgoing pass voided (nulled / dwarf) — stock restored to incoming gate passes */
+  NULL_DELIVERY = "NULL-DELIVERY",
 }
 
 export interface IOutgoingIncomingGatePassSnapshot {
@@ -53,8 +55,8 @@ export interface IOutgoingGatePass extends mongoose.Document {
   farmerStorageLinkId: Types.ObjectId;
   createdBy?: Types.ObjectId;
 
-  /** Snapshot of each incoming gate pass state */
-  incomingGatePassSnapshots: IOutgoingIncomingGatePassSnapshot[];
+  /** Snapshot of each incoming gate pass state; null on nulled (dwarf) passes */
+  incomingGatePassSnapshots: IOutgoingIncomingGatePassSnapshot[] | null;
 
   gatePassNo: number;
   manualParchiNumber?: number;
@@ -74,6 +76,13 @@ export interface IOutgoingGatePass extends mongoose.Document {
   remarks?: string;
 
   idempotencyKey?: string;
+
+  /** When true, the pass is voided and stock has been restored to incoming gate passes */
+  isNull?: boolean;
+
+  nulledAt?: Date;
+
+  nulledBy?: Types.ObjectId;
 
   createdAt: Date;
   updatedAt: Date;
@@ -221,7 +230,8 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
 
     incomingGatePassSnapshots: {
       type: [OutgoingIncomingGatePassSnapshotSchema],
-      required: true,
+      required: false,
+      default: undefined,
     },
 
     gatePassNo: {
@@ -283,6 +293,20 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
     idempotencyKey: {
       type: String,
       trim: true,
+    },
+
+    isNull: {
+      type: Boolean,
+      default: false,
+    },
+
+    nulledAt: {
+      type: Date,
+    },
+
+    nulledBy: {
+      type: Schema.Types.ObjectId,
+      ref: "StoreAdmin",
     },
   },
   {

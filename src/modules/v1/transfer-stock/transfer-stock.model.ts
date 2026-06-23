@@ -28,6 +28,8 @@ export interface ITransferStockGatePass {
 
   remarks?: string;
 
+  customMarka?: string;
+
   createdIncomingGatePassId: Types.ObjectId;
   /** Present for transfers created after outgoing gate pass was added for the from farmer */
   createdOutgoingGatePassId?: Types.ObjectId;
@@ -130,6 +132,12 @@ const TransferStockGatePassSchema = new Schema<ITransferStockGatePass>(
 
     remarks: {
       type: String,
+      trim: true,
+    },
+
+    customMarka: {
+      type: String,
+      required: false,
       trim: true,
     },
 

@@ -1,36 +1,24 @@
 import { FastifyReply, FastifyRequest } from "fastify";
 import {
   createStoreAdmin,
-  getStoreAdminById,
-  updateStoreAdmin,
+  getStoreAdminProfile,
+  updateStoreAdminProfile,
   deleteStoreAdmin,
   checkMobileNumber,
-  getFarmerStorageLinksByColdStorage,
   loginStoreAdmin,
   logoutStoreAdmin,
-  quickRegisterFarmer,
-  updateFarmerStorageLink,
   getNextVoucherNumber,
   getDaybookOrders,
   searchOrdersByReceiptNumber,
-  getGatePassesByFarmerStorageLinkId,
 } from "./store-admin.service.js";
 import {
   CreateStoreAdminInput,
-  GetStoreAdminByIdParams,
-  UpdateStoreAdminInput,
-  UpdateStoreAdminParams,
+  UpdateStoreAdminProfileInput,
   DeleteStoreAdminParams,
   CheckMobileNumberQuery,
   LoginStoreAdminInput,
-  QuickRegisterFarmerInput,
-  UpdateFarmerStorageLinkInput,
-  UpdateFarmerStorageLinkParams,
   NextVoucherNumberQuery,
   searchOrderByReceiptNumberBodySchema,
-  GetGatePassesByFarmerStorageLinkParams,
-  GetGatePassesByFarmerStorageLinkQuery,
-  getGatePassesByFarmerStorageLinkSchema,
 } from "./store-admin.schema.js";
 import { AppError, ValidationError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
@@ -85,150 +73,50 @@ export async function createStoreAdminHandler(
 }
 
 /**
- * Handler for retrieving a store admin by ID
+ * Handler for retrieving the authenticated store admin profile with cold storage
  */
-export async function getStoreAdminByIdHandler(
-  request: FastifyRequest<{ Params: GetStoreAdminByIdParams }>,
-  reply: FastifyReply,
-) {
-  try {
-    const storeAdmin = await getStoreAdminById(request.params.id, request.log);
-
-    return reply.send({
-      success: true,
-      data: storeAdmin,
-    });
-  } catch (error) {
-    request.log.error(
-      { error, params: request.params },
-      "Error in getStoreAdminByIdHandler",
-    );
-    return sendErrorReply(reply, error);
-  }
-}
-
-/**
- * Handler for retrieving farmer-storage-links for the authenticated user's cold storage (farmerId populated with name, address, mobileNumber)
- */
-export async function getFarmerStorageLinksByColdStorageHandler(
+export async function getStoreAdminProfileHandler(
   request: FastifyRequest,
   reply: FastifyReply,
 ) {
   try {
     const req = request as AuthenticatedRequest;
-    const coldStorageId =
-      typeof req.user.coldStorageId === "object" &&
-      req.user.coldStorageId !== null &&
-      "_id" in req.user.coldStorageId
-        ? req.user.coldStorageId._id
-        : (req.user.coldStorageId as string);
-
-    if (!coldStorageId) {
-      return reply.code(401).send({
-        success: false,
-        error: {
-          code: "MISSING_COLD_STORAGE",
-          message: "Cold storage not found in token",
-        },
-      });
-    }
-
-    const links = await getFarmerStorageLinksByColdStorage(
-      coldStorageId,
-      request.log,
-    );
+    const profile = await getStoreAdminProfile(req.user.id, request.log);
 
     return reply.send({
       success: true,
-      data: links,
+      data: profile,
     });
   } catch (error) {
-    request.log.error(
-      { error },
-      "Error in getFarmerStorageLinksByColdStorageHandler",
-    );
+    request.log.error({ error }, "Error in getStoreAdminProfileHandler");
     return sendErrorReply(reply, error);
   }
 }
 
 /**
- * Handler for GET farmer-storage-links/:farmerStorageLinkId/gate-passes.
- * Same response format as daybook: status, data (array), pagination. Query: from, to, type, sortBy (by gatePassNo).
+ * Handler for updating the authenticated store admin profile and cold storage
  */
-export async function getGatePassesByFarmerStorageLinkHandler(
-  request: FastifyRequest<{
-    Params: GetGatePassesByFarmerStorageLinkParams;
-    Querystring: GetGatePassesByFarmerStorageLinkQuery;
-  }>,
+export async function updateStoreAdminProfileHandler(
+  request: FastifyRequest<{ Body: UpdateStoreAdminProfileInput }>,
   reply: FastifyReply,
 ) {
   try {
     const req = request as AuthenticatedRequest;
-    const coldStorageId =
-      typeof req.user.coldStorageId === "object" &&
-      req.user.coldStorageId !== null &&
-      "_id" in req.user.coldStorageId
-        ? req.user.coldStorageId._id
-        : (req.user.coldStorageId as string);
-
-    if (!coldStorageId) {
-      return reply.code(401).send({
-        success: false,
-        error: {
-          code: "MISSING_COLD_STORAGE",
-          message: "Cold storage not found in token",
-        },
-      });
-    }
-
-    const parsed = getGatePassesByFarmerStorageLinkSchema.safeParse({
-      params: request.params,
-      querystring: request.query ?? {},
-    });
-    if (!parsed.success) {
-      const msg = parsed.error.flatten().formErrors?.[0] ?? "Invalid request";
-      return reply.code(400).send({
-        success: false,
-        error: { code: "VALIDATION_ERROR", message: msg },
-      });
-    }
-
-    const { farmerStorageLinkId } = parsed.data.params;
-    const { from, to, type, sortBy } = parsed.data.querystring;
-
-    const result = await getGatePassesByFarmerStorageLinkId(
-      farmerStorageLinkId,
-      coldStorageId,
-      { from, to, type, sortBy },
+    const profile = await updateStoreAdminProfile(
+      req.user.id,
+      request.body,
       request.log,
     );
 
-    if (result.status === "Fail" && result.message && !result.data) {
-      return reply.code(200).send({
-        status: result.status,
-        message: result.message,
-        pagination: result.pagination,
-      });
-    }
-
-    if (
-      result.status === "Fail" &&
-      result.message?.includes("Invalid type parameter")
-    ) {
-      return reply.code(400).send({
-        message: result.message,
-      });
-    }
-
-    return reply.code(200).send({
-      status: result.status,
-      ...(result.data != null && { data: result.data }),
-      pagination: result.pagination,
+    return reply.send({
+      success: true,
+      data: profile,
+      message: "Profile updated successfully",
     });
   } catch (error) {
     request.log.error(
-      { error, params: request.params, query: request.query },
-      "Error in getGatePassesByFarmerStorageLinkHandler",
+      { error, body: request.body },
+      "Error in updateStoreAdminProfileHandler",
     );
     return sendErrorReply(reply, error);
   }
@@ -238,37 +126,6 @@ export async function getGatePassesByFarmerStorageLinkHandler(
  * Handler for retrieving daybook (all gate passes) for the authenticated user's cold storage.
  * Supports pagination (limit, page), sorting by date (sortOrder), and filtering by gate pass type.
  */
-/**
- * Handler for updating a store admin
- */
-export async function updateStoreAdminHandler(
-  request: FastifyRequest<{
-    Params: UpdateStoreAdminParams;
-    Body: UpdateStoreAdminInput;
-  }>,
-  reply: FastifyReply,
-) {
-  try {
-    const storeAdmin = await updateStoreAdmin(
-      request.params.id,
-      request.body,
-      request.log,
-    );
-
-    return reply.send({
-      success: true,
-      data: storeAdmin,
-      message: "Store admin updated successfully",
-    });
-  } catch (error) {
-    request.log.error(
-      { error, params: request.params, body: request.body },
-      "Error in updateStoreAdminHandler",
-    );
-    return sendErrorReply(reply, error);
-  }
-}
-
 /**
  * Handler for deleting a store admin
  */
@@ -438,63 +295,6 @@ export async function logoutStoreAdminHandler(
 }
 
 /**
- * Handler for quick registering a farmer
- */
-export async function quickRegisterFarmerHandler(
-  request: FastifyRequest<{ Body: QuickRegisterFarmerInput }>,
-  reply: FastifyReply,
-) {
-  try {
-    const result = await quickRegisterFarmer(request.body, request.log);
-
-    return reply.code(201).send({
-      success: true,
-      data: result,
-      message: "Farmer registered successfully",
-    });
-  } catch (error) {
-    request.log.error(
-      { error, body: request.body },
-      "Error in quickRegisterFarmerHandler",
-    );
-    return sendErrorReply(reply, error);
-  }
-}
-
-/**
- * Handler for updating a farmer-storage-link
- */
-export async function updateFarmerStorageLinkHandler(
-  request: FastifyRequest<{
-    Params: UpdateFarmerStorageLinkParams;
-    Body: UpdateFarmerStorageLinkInput;
-  }>,
-  reply: FastifyReply,
-) {
-  try {
-    const storeAdminId = (request as AuthenticatedRequest).user?.id;
-    const result = await updateFarmerStorageLink(
-      request.params.id,
-      request.body,
-      request.log,
-      storeAdminId,
-    );
-
-    return reply.send({
-      success: true,
-      data: result,
-      message: "Farmer-storage-link updated successfully",
-    });
-  } catch (error) {
-    request.log.error(
-      { error, params: request.params, body: request.body },
-      "Error in updateFarmerStorageLinkHandler",
-    );
-    return sendErrorReply(reply, error);
-  }
-}
-
-/**
  * Handler for getting the next voucher number for a voucher type (incoming or outgoing).
  * Uses authenticated store admin's cold storage.
  */
@@ -642,8 +442,8 @@ export async function getDaybookHandler(
 }
 
 /**
- * Handler for POST search-order-by-receipt: search incoming and outgoing gate passes
- * by searchBy (gate pass no, manual parchi, marka, customMarka, or remarks). Scoped to token cold storage.
+ * Handler for POST /search: search incoming and outgoing gate passes
+ * by searchBy (gate pass no, manual parchi, marka, customMarka, or remarks). Marka matches gatePassNo/totalBags and customMarka. Scoped to token cold storage.
  */
 export async function searchOrderByReceiptNumberHandler(
   request: FastifyRequest,

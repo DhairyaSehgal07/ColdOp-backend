@@ -10,6 +10,11 @@ export interface IFarmerStorageLink extends Document {
   notes?: string;
   costPerBag?: number;
 
+  /** Store-specific display fields (optional until backfill; fallback to Farmer). */
+  name?: string;
+  address?: string;
+  mobileNumber?: string;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -49,6 +54,21 @@ const farmerStorageLinkSchema = new Schema<IFarmerStorageLink>(
 
     costPerBag: {
       type: Number,
+    },
+
+    name: {
+      type: String,
+      trim: true,
+    },
+
+    address: {
+      type: String,
+      trim: true,
+    },
+
+    mobileNumber: {
+      type: String,
+      trim: true,
     },
   },
   {

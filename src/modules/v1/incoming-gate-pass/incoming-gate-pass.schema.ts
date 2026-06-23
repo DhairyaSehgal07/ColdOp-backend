@@ -137,3 +137,35 @@ export type UpdateIncomingGatePassParams = z.infer<
 export type UpdateIncomingGatePassBody = z.infer<
   typeof updateIncomingGatePassSchema
 >["body"];
+
+/** Query params for GET /edit-history */
+export const getIncomingGatePassEditHistoryQuerySchema = z.object({
+  querystring: z.object({
+    incomingGatePassId: z
+      .string()
+      .trim()
+      .refine(
+        (val) => !val || mongoose.Types.ObjectId.isValid(val),
+        "Invalid incoming gate pass ID format",
+      )
+      .optional(),
+    page: z.coerce
+      .number()
+      .int()
+      .min(1, "Page must be at least 1")
+      .optional()
+      .default(1),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1, "Limit must be at least 1")
+      .max(100, "Limit must not exceed 100")
+      .optional()
+      .default(10),
+  }),
+});
+
+export type GetIncomingGatePassEditHistoryQuery = z.infer<
+  typeof getIncomingGatePassEditHistoryQuerySchema
+>["querystring"];
+

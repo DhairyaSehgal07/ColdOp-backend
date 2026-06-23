@@ -3,6 +3,7 @@ import { Preferences } from "../preferences/preferences.model.js";
 import {
   CreateColdStorageInput,
   GetColdStoragesQuery,
+  UpdateColdStorageInput,
 } from "./cold-storage.schema.js";
 import {
   ConflictError,
@@ -270,6 +271,102 @@ export async function getColdStorageById(
       "We couldn't load this cold storage. Please try again later.",
       500,
       "GET_COLD_STORAGE_BY_ID_ERROR",
+    );
+  }
+}
+
+/**
+ * Updates a cold storage by ID
+ * @param id - Cold storage ID
+ * @param payload - Update data
+ * @param logger - Optional logger instance
+ * @returns Updated cold storage document with populated preferences
+ */
+export async function updateColdStorage(
+  id: string,
+  payload: UpdateColdStorageInput,
+  logger?: FastifyBaseLogger,
+) {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new ValidationError(
+        "The cold storage ID format is invalid",
+        "INVALID_ID",
+      );
+    }
+
+    const existing = await ColdStorage.findById(id);
+
+    if (!existing) {
+      logger?.warn({ coldStorageId: id }, "Cold storage not found for update");
+      throw new NotFoundError(
+        "No cold storage found with the given ID",
+        "COLD_STORAGE_NOT_FOUND",
+      );
+    }
+
+    if (
+      payload.mobileNumber &&
+      payload.mobileNumber !== existing.mobileNumber
+    ) {
+      const conflict = await ColdStorage.findOne({
+        mobileNumber: payload.mobileNumber,
+        _id: { $ne: id },
+      });
+
+      if (conflict) {
+        logger?.warn(
+          { coldStorageId: id, mobileNumber: payload.mobileNumber },
+          "Attempt to update to existing mobile number",
+        );
+        throw new ConflictError(
+          "A cold storage with this mobile number already exists",
+          "MOBILE_NUMBER_EXISTS",
+        );
+      }
+    }
+
+    const updated = await ColdStorage.findByIdAndUpdate(
+      id,
+      { ...payload },
+      { new: true, runValidators: true },
+    )
+      .populate("preferencesId")
+      .lean();
+
+    logger?.info({ coldStorageId: id }, "Cold storage updated successfully");
+
+    return updated;
+  } catch (error) {
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ValidationError ||
+      error instanceof ConflictError
+    ) {
+      throw error;
+    }
+
+    if (error instanceof mongoose.Error.ValidationError) {
+      const messages = Object.values(error.errors).map((err) => err.message);
+      throw new ValidationError(
+        messages.join(", "),
+        "MONGOOSE_VALIDATION_ERROR",
+      );
+    }
+
+    if (error instanceof Error && "code" in error && error.code === 11000) {
+      throw new ConflictError(
+        "A cold storage with this mobile number already exists",
+        "MOBILE_NUMBER_EXISTS",
+      );
+    }
+
+    logger?.error({ error, id, payload }, "Error updating cold storage");
+
+    throw new AppError(
+      "We couldn't update this cold storage. Please try again later.",
+      500,
+      "UPDATE_COLD_STORAGE_ERROR",
     );
   }
 }

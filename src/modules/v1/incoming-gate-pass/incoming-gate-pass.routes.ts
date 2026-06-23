@@ -3,6 +3,7 @@ import {
   createIncomingGatePassHandler,
   getIncomingGatePassesByFarmerStorageLinkIdHandler,
   updateIncomingGatePassHandler,
+  getIncomingGatePassEditHistoryHandler,
 } from "./incoming-gate-pass.controller.js";
 import { createIncomingGatePassSchema } from "./incoming-gate-pass.schema.js";
 import { authenticate } from "../../../utils/auth.js";
@@ -12,6 +13,128 @@ import { authenticate } from "../../../utils/auth.js";
  * @param fastify - Fastify instance
  */
 export async function incomingGatePassRoutes(fastify: FastifyInstance) {
+  const auditItemSchema = {
+    type: "object",
+    properties: {
+      _id: { type: "string" },
+      incomingGatePassId: { type: "string" },
+      editedBy: {
+        type: "object",
+        properties: {
+          _id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+      previousState: {
+        type: "object",
+        additionalProperties: true,
+        description: "Field values before the edit (changed fields only)",
+      },
+      modifiedState: {
+        type: "object",
+        additionalProperties: true,
+        description: "Field values after the edit (changed fields only)",
+      },
+      ipAddress: { type: "string" },
+      userAgent: { type: "string" },
+      createdAt: { type: "string", format: "date-time" },
+    },
+  };
+
+  // Edit history (audit entries) — must be registered before /:id routes
+  fastify.get(
+    "/edit-history",
+    {
+      schema: {
+        description:
+          "Get incoming gate pass edit history (audit entries) for the current user's cold storage. Optionally filter by incomingGatePassId. Supports pagination via page and limit.",
+        tags: ["Incoming Gate Pass"],
+        summary: "Get incoming gate pass edit history",
+        querystring: {
+          type: "object",
+          properties: {
+            incomingGatePassId: {
+              type: "string",
+              description:
+                "Optional incoming gate pass ID to filter audit entries",
+            },
+            page: {
+              type: "number",
+              minimum: 1,
+              default: 1,
+              description: "Page number (default 1)",
+            },
+            limit: {
+              type: "number",
+              minimum: 1,
+              maximum: 100,
+              default: 10,
+              description: "Items per page (default 10, max 100)",
+            },
+          },
+        },
+        response: {
+          200: {
+            description: "Incoming gate pass edit history list",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: { type: "array", items: auditItemSchema },
+              pagination: {
+                type: "object",
+                properties: {
+                  page: { type: "number" },
+                  limit: { type: "number" },
+                  total: { type: "number" },
+                  totalPages: { type: "number" },
+                  hasNextPage: { type: "boolean" },
+                  hasPreviousPage: { type: "boolean" },
+                },
+              },
+              message: { type: "string" },
+            },
+          },
+          400: {
+            description: "Bad request",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          404: {
+            description: "Incoming gate pass not found",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 120,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getIncomingGatePassEditHistoryHandler as never,
+  );
+
   // Get all incoming gate passes for a farmer-storage-link
   fastify.get(
     "/farmer-storage-link/:farmerStorageLinkId",
@@ -165,7 +288,7 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Update an existing incoming gate pass by ID. When updating bagSizes, both initial and current quantities are updated. An edit-history entry is created.",
+          "Update an existing incoming gate pass by ID. When updating bagSizes, both initial and current quantities are updated. An audit entry is created.",
         tags: ["Incoming Gate Pass"],
         summary: "Edit incoming gate pass",
         params: {

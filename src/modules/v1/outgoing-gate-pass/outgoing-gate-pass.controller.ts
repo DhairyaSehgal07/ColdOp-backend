@@ -2,12 +2,15 @@ import { FastifyReply, FastifyRequest } from "fastify";
 import {
   createOutgoingGatePass,
   getOutgoingGatePassById,
+  nullOutgoingGatePass,
   updateOutgoingGatePass,
 } from "./outgoing-gate-pass.service.js";
 import {
   CreateOutgoingGatePassInput,
+  NullOutgoingGatePassBody,
   UpdateOutgoingGatePassBody,
   getOutgoingGatePassByIdSchema,
+  nullOutgoingGatePassSchema,
   updateOutgoingGatePassSchema,
 } from "./outgoing-gate-pass.schema.js";
 import {
@@ -215,8 +218,7 @@ export async function getOutgoingGatePassByIdHandler(
 }
 
 /**
- * Handler for updating an outgoing gate pass (quantities and/or header fields).
- * When `incomingGatePasses` is sent, prior issuance is restored on incoming passes, then new allocations apply.
+ * Handler for updating outgoing gate pass header fields only.
  */
 export async function updateOutgoingGatePassHandler(
   request: FastifyRequest<{
@@ -269,6 +271,113 @@ export async function updateOutgoingGatePassHandler(
     request.log.error(
       { error, params: request.params, body: request.body },
       "Error in updateOutgoingGatePassHandler",
+    );
+
+    if (error instanceof ConflictError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof ValidationError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof NotFoundError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof AppError) {
+      return reply.code(error.statusCode).send({
+        status: "error",
+        statusCode: error.statusCode,
+        errorCode: error.code,
+        message: error.message,
+      });
+    }
+
+    const statusCode = 500;
+    return reply.code(statusCode).send({
+      status: "error",
+      statusCode,
+      errorCode: "INTERNAL_SERVER_ERROR",
+      message:
+        process.env.NODE_ENV === "development"
+          ? error instanceof Error
+            ? error.message
+            : "An unexpected error occurred"
+          : "An unexpected error occurred",
+    });
+  }
+}
+
+/**
+ * Handler for nulling (voiding) an outgoing gate pass and restoring stock.
+ */
+export async function nullOutgoingGatePassHandler(
+  request: FastifyRequest<{
+    Params: { id: string };
+    Body: NullOutgoingGatePassBody;
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const parsed = nullOutgoingGatePassSchema.safeParse({
+      params: request.params,
+      body: request.body ?? {},
+    });
+    if (!parsed.success) {
+      const message =
+        parsed.error.issues
+          ?.map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ") ?? parsed.error.message;
+      return reply.code(400).send({
+        status: "error",
+        statusCode: 400,
+        errorCode: "VALIDATION_ERROR",
+        message,
+      });
+    }
+
+    request.log.info(
+      { outgoingGatePassId: parsed.data.params.id },
+      "Null outgoing gate pass request",
+    );
+
+    const req = request as AuthenticatedRequest;
+    const editedById = req.user?.id;
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+
+    const result = await nullOutgoingGatePass(
+      parsed.data.params.id,
+      parsed.data.body,
+      editedById,
+      loggedInUserColdStorageId,
+      request.log,
+    );
+
+    return reply.code(200).send({
+      status: "Success",
+      message: "Outgoing gate pass nulled successfully.",
+      data: result,
+    });
+  } catch (error) {
+    request.log.error(
+      { error, params: request.params, body: request.body },
+      "Error in nullOutgoingGatePassHandler",
     );
 
     if (error instanceof ConflictError) {

@@ -453,9 +453,17 @@ export async function getTopFarmersForStore(
       $addFields: {
         farmerName: {
           $ifNull: [
-            { $arrayElemAt: ["$_farmer.name", 0] },
+            "$_linkDoc.name",
             {
-              $concat: ["Account #", { $toString: "$_linkDoc.accountNumber" }],
+              $ifNull: [
+                { $arrayElemAt: ["$_farmer.name", 0] },
+                {
+                  $concat: [
+                    "Account #",
+                    { $toString: "$_linkDoc.accountNumber" },
+                  ],
+                },
+              ],
             },
           ],
         },
@@ -639,9 +647,17 @@ export async function getVarietyBreakdown(
       $addFields: {
         farmerName: {
           $ifNull: [
-            { $arrayElemAt: ["$_farmer.name", 0] },
+            "$_linkDoc.name",
             {
-              $concat: ["Account #", { $toString: "$_linkDoc.accountNumber" }],
+              $ifNull: [
+                { $arrayElemAt: ["$_farmer.name", 0] },
+                {
+                  $concat: [
+                    "Account #",
+                    { $toString: "$_linkDoc.accountNumber" },
+                  ],
+                },
+              ],
             },
           ],
         },

@@ -131,20 +131,11 @@ export type GetOutgoingGatePassByIdParams = z.infer<
   typeof getOutgoingGatePassByIdSchema
 >["params"];
 
-/** Update payload: fields optional; at least one required (mirrors incoming gate pass PATCH). */
+/** Update payload: header fields only; at least one required. */
 export const updateOutgoingGatePassSchema = z.object({
   params: outgoingGatePassIdParamsSchema,
   body: z
     .object({
-      farmerStorageLinkId: z
-        .string()
-        .trim()
-        .min(1, "Farmer storage link ID cannot be empty")
-        .refine(
-          (val) => mongoose.Types.ObjectId.isValid(val),
-          "Invalid farmer storage link ID format",
-        )
-        .optional(),
       date: z.coerce.date().optional(),
       from: z
         .string()
@@ -161,10 +152,6 @@ export const updateOutgoingGatePassSchema = z.object({
         .trim()
         .max(50, "Truck number must not exceed 50 characters")
         .optional(),
-      incomingGatePasses: z
-        .array(outgoingIncomingGatePassAllocationSchema)
-        .min(1, "At least one incoming gate pass with allocations is required")
-        .optional(),
       remarks: z
         .string()
         .trim()
@@ -178,12 +165,10 @@ export const updateOutgoingGatePassSchema = z.object({
     })
     .refine(
       (data) =>
-        data.farmerStorageLinkId !== undefined ||
         data.date !== undefined ||
         data.from !== undefined ||
         data.to !== undefined ||
         data.truckNumber !== undefined ||
-        data.incomingGatePasses !== undefined ||
         data.remarks !== undefined ||
         data.manualParchiNumber !== undefined,
       "At least one field must be provided for update",
@@ -195,4 +180,20 @@ export type UpdateOutgoingGatePassParams = z.infer<
 >["params"];
 export type UpdateOutgoingGatePassBody = z.infer<
   typeof updateOutgoingGatePassSchema
+>["body"];
+
+/** Null payload: remarks only (optional). */
+export const nullOutgoingGatePassSchema = z.object({
+  params: outgoingGatePassIdParamsSchema,
+  body: z.object({
+    remarks: z
+      .string()
+      .trim()
+      .max(500, "Remarks must not exceed 500 characters")
+      .optional(),
+  }),
+});
+
+export type NullOutgoingGatePassBody = z.infer<
+  typeof nullOutgoingGatePassSchema
 >["body"];

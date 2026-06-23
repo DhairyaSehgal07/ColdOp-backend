@@ -4,10 +4,12 @@ import {
   getIncomingGatePassesByFarmerStorageLinkId,
   updateIncomingGatePass,
 } from "./incoming-gate-pass.service.js";
+import { getIncomingGatePassAudits } from "./incoming-gate-pass-audit.service.js";
 import {
   CreateIncomingGatePassInput,
   UpdateIncomingGatePassBody,
   updateIncomingGatePassSchema,
+  getIncomingGatePassEditHistoryQuerySchema,
 } from "./incoming-gate-pass.schema.js";
 import { AppError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
@@ -118,7 +120,7 @@ export async function getIncomingGatePassesByFarmerStorageLinkIdHandler(
 /**
  * Handler for updating an existing incoming gate pass (edit).
  * Updates both initial and current quantities when bagSizes are provided.
- * Records an edit-history entry for the change.
+ * Records an audit entry for the change.
  */
 export async function updateIncomingGatePassHandler(
   request: FastifyRequest<{
@@ -148,12 +150,24 @@ export async function updateIncomingGatePassHandler(
     const editedById = req.user?.id;
     const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
 
+    const userAgentHeader = request.headers["user-agent"];
+    const userAgent =
+      typeof userAgentHeader === "string"
+        ? userAgentHeader
+        : Array.isArray(userAgentHeader)
+          ? userAgentHeader[0]
+          : undefined;
+
     const updated = await updateIncomingGatePass(
       params.id,
       body,
       editedById,
       loggedInUserColdStorageId,
       request.log,
+      {
+        ipAddress: request.ip,
+        userAgent,
+      },
     );
 
     return reply.code(200).send({
@@ -165,6 +179,62 @@ export async function updateIncomingGatePassHandler(
     request.log.error(
       { error, params: request.params, body: request.body },
       "Error in updateIncomingGatePassHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * Handler for listing incoming gate pass edit history (audit entries).
+ */
+export async function getIncomingGatePassEditHistoryHandler(
+  request: FastifyRequest<{
+    Querystring: {
+      incomingGatePassId?: string;
+      page?: number;
+      limit?: number;
+    };
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const parsed = getIncomingGatePassEditHistoryQuerySchema.safeParse({
+      querystring: request.query,
+    });
+    if (!parsed.success) {
+      const message =
+        parsed.error.issues
+          ?.map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ") ?? parsed.error.message;
+      return reply.code(400).send({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message },
+      });
+    }
+
+    const { querystring } = parsed.data;
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+
+    const result = await getIncomingGatePassAudits(
+      loggedInUserColdStorageId,
+      {
+        incomingGatePassId: querystring.incomingGatePassId,
+        page: querystring.page,
+        limit: querystring.limit,
+      },
+      request.log,
+    );
+
+    return reply.code(200).send({
+      success: true,
+      data: result.data,
+      pagination: result.pagination,
+      message: "Incoming gate pass edit history retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error(
+      { error, query: request.query },
+      "Error in getIncomingGatePassEditHistoryHandler",
     );
     return sendErrorReply(reply, error);
   }

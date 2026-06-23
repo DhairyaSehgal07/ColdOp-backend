@@ -16,6 +16,12 @@ import {
 import mongoose from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
+import {
+  FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
+  FARMER_STORAGE_LINK_POPULATE_SELECT,
+  formatPopulatedFarmerStorageLinkDisplay,
+  type PopulatedFarmerStorageLink,
+} from "../farmer-storage-link/farmer-storage-link.utils.js";
 
 /**
  * List all incoming gate passes for a farmer-storage-link.
@@ -80,39 +86,28 @@ export async function getIncomingGatePassesByFarmerStorageLinkId(
     .sort({ date: -1, gatePassNo: -1 })
     .populate({
       path: "farmerStorageLinkId",
-      select: "accountNumber farmerId",
+      select: FARMER_STORAGE_LINK_POPULATE_SELECT,
       populate: {
         path: "farmerId",
-        select: "name address mobileNumber",
+        select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
       },
     })
     .populate({ path: "createdBy", select: "name" })
     .lean();
 
-  type PopulatedLink = {
-    accountNumber: number;
-    farmerId: { name: string; address: string; mobileNumber: string };
-  };
   type PopulatedAdmin = { _id: unknown; name: string };
 
   return list.map((raw) => {
     const row = raw as unknown as Record<string, unknown>;
     const populatedLink = row.farmerStorageLinkId as
-      | PopulatedLink
+      | PopulatedFarmerStorageLink
       | null
       | undefined;
     const populatedAdmin = row.createdBy as PopulatedAdmin | null | undefined;
+    const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
     return {
       ...row,
-      farmerStorageLinkId:
-        populatedLink && populatedLink.farmerId
-          ? {
-              name: populatedLink.farmerId.name,
-              accountNumber: populatedLink.accountNumber,
-              address: populatedLink.farmerId.address,
-              mobileNumber: populatedLink.farmerId.mobileNumber,
-            }
-          : row.farmerStorageLinkId,
+      farmerStorageLinkId: linkDisplay ?? row.farmerStorageLinkId,
       createdBy: populatedAdmin
         ? { _id: populatedAdmin._id, name: populatedAdmin.name }
         : row.createdBy,
@@ -132,10 +127,9 @@ import {
   reverseVoucherBalances,
 } from "../../../utils/accounting/update-balances.js";
 import {
-  recordEditHistory,
-  EditHistoryEntityType,
-  EditHistoryAction,
-} from "../edit-history/edit-history.service.js";
+  buildIncomingGatePassAuditStates,
+  recordIncomingGatePassAudit,
+} from "./incoming-gate-pass-audit.service.js";
 import Voucher from "../voucher/voucher.model.js";
 
 /**
@@ -247,13 +241,12 @@ export async function createIncomingGatePass(
           );
         }
 
-        // Current store's Store Rent ledger (credit): cold-storage-level ledger for logged-in store admin.
+        // Current store's Store Rent ledger (credit): cold-storage-level ledger.
         const loggedInColdStorageObj = new mongoose.Types.ObjectId(
           loggedInUserColdStorageId,
         );
         const storeRentLedger = await Ledger.findOne({
           coldStorageId: loggedInColdStorageObj,
-          createdBy: createdByObjId,
           name: "Store Rent",
           farmerStorageLinkId: null,
         })
@@ -320,7 +313,6 @@ export async function createIncomingGatePass(
           );
           const labourLedger = await Ledger.findOne({
             coldStorageId: loggedInColdStorageObj,
-            createdBy: createdByObjId,
             name: "Labour",
             farmerStorageLinkId: null,
             isSystemLedger: true,
@@ -329,7 +321,6 @@ export async function createIncomingGatePass(
             .lean();
           const labourContractorLedger = await Ledger.findOne({
             coldStorageId: loggedInColdStorageObj,
-            createdBy: createdByObjId,
             name: "Labour Contractor",
             farmerStorageLinkId: null,
             isSystemLedger: true,
@@ -415,10 +406,10 @@ export async function createIncomingGatePass(
     const populated = await IncomingGatePass.findById(doc._id)
       .populate({
         path: "farmerStorageLinkId",
-        select: "accountNumber farmerId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
         populate: {
           path: "farmerId",
-          select: "name address mobileNumber",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
         },
       })
       .populate({ path: "createdBy", select: "name" })
@@ -429,28 +420,17 @@ export async function createIncomingGatePass(
     }
 
     const raw = populated as unknown as Record<string, unknown>;
-    type PopulatedLink = {
-      accountNumber: number;
-      farmerId: { name: string; address: string; mobileNumber: string };
-    };
     const populatedLink = raw.farmerStorageLinkId as
-      | PopulatedLink
+      | PopulatedFarmerStorageLink
       | null
       | undefined;
     type PopulatedAdmin = { _id: unknown; name: string };
     const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+    const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
 
     const response = {
       ...raw,
-      farmerStorageLinkId:
-        populatedLink && populatedLink.farmerId
-          ? {
-              name: populatedLink.farmerId.name,
-              accountNumber: populatedLink.accountNumber,
-              address: populatedLink.farmerId.address,
-              mobileNumber: populatedLink.farmerId.mobileNumber,
-            }
-          : raw.farmerStorageLinkId,
+      farmerStorageLinkId: linkDisplay ?? raw.farmerStorageLinkId,
       createdBy: populatedAdmin
         ? { _id: populatedAdmin._id, name: populatedAdmin.name }
         : raw.createdBy,
@@ -495,44 +475,22 @@ export async function createIncomingGatePass(
   }
 }
 
-/** Sanitize a lean document for edit-history snapshot (serializable, no __v). */
-function sanitizeForSnapshot(
-  doc: Record<string, unknown> | null,
-): Record<string, unknown> | undefined {
-  if (!doc) return undefined;
-  const out = { ...doc };
-  delete out.__v;
-  if (out._id && typeof out._id === "object" && "toString" in out._id) {
-    out._id = (out._id as { toString(): string }).toString();
-  }
-  if (Array.isArray(out.bagSizes)) {
-    out.bagSizes = out.bagSizes.map((b: unknown) => {
-      const item = b as Record<string, unknown>;
-      const copy = { ...item };
-      if (copy.location && typeof copy.location === "object") {
-        copy.location = { ...(copy.location as Record<string, unknown>) };
-      }
-      if (copy.paltaiLocation && typeof copy.paltaiLocation === "object") {
-        copy.paltaiLocation = {
-          ...(copy.paltaiLocation as Record<string, unknown>),
-        };
-      }
-      return copy;
-    });
-  }
-  return out;
+export interface UpdateIncomingGatePassAuditContext {
+  ipAddress?: string;
+  userAgent?: string;
 }
 
 /**
  * Updates an existing incoming gate pass.
  * Only OPEN gate passes can be edited. Updates both initial and current quantities when bagSizes are provided.
- * Uses a MongoDB transaction so the document update and edit-history entry succeed or roll back together.
+ * Uses a MongoDB transaction so the document update and audit entry succeed or roll back together.
  *
  * @param id - Incoming gate pass document _id
  * @param payload - Fields to update (date, variety, truckNumber, remarks, manualParchiNumber, bagSizes)
- * @param editedById - Store admin ID performing the edit (for edit history)
+ * @param editedById - Store admin ID performing the edit (for audit)
  * @param loggedInUserColdStorageId - Cold storage ID of the logged-in user (for auth scope)
  * @param logger - Optional logger instance
+ * @param auditContext - Optional request metadata (ipAddress, userAgent) for audit
  * @returns Updated incoming gate pass document (populated)
  * @throws ValidationError if id invalid, no fields to update, or gate pass is closed
  * @throws NotFoundError if gate pass not found or not in user's cold storage
@@ -543,6 +501,7 @@ export async function updateIncomingGatePass(
   editedById: string | undefined,
   loggedInUserColdStorageId: string | undefined,
   logger?: FastifyBaseLogger,
+  auditContext?: UpdateIncomingGatePassAuditContext,
 ) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new ValidationError(
@@ -704,6 +663,9 @@ export async function updateIncomingGatePass(
       }
     }
 
+    let rentAmountBefore: number | undefined;
+    let rentAmountAfter: number | undefined;
+
     if (hasRentAmountUpdate) {
       const rentVoucher = await Voucher.findById(rentEntryVoucherId)
         .session(session)
@@ -727,6 +689,8 @@ export async function updateIncomingGatePass(
           : new mongoose.Types.ObjectId(rentVoucher.creditLedger);
       const oldAmount = Number(rentVoucher.amount);
       const newAmount = payload.amount as number;
+      rentAmountBefore = oldAmount;
+      rentAmountAfter = newAmount;
 
       await reverseVoucherBalances(
         debitLedgerId,
@@ -761,10 +725,6 @@ export async function updateIncomingGatePass(
       );
     }
 
-    const snapshotBefore = sanitizeForSnapshot(
-      existing as unknown as Record<string, unknown>,
-    );
-
     const updated = await IncomingGatePass.findByIdAndUpdate(
       idObj,
       { $set: updateFields },
@@ -778,35 +738,21 @@ export async function updateIncomingGatePass(
       );
     }
 
-    const snapshotAfter = sanitizeForSnapshot(
-      updated as unknown as Record<string, unknown>,
-    );
+    const { previousState, modifiedState } = buildIncomingGatePassAuditStates({
+      existing: existing as unknown as Record<string, unknown>,
+      updated: updated as unknown as Record<string, unknown>,
+      changedGatePassFields: Object.keys(updateFields),
+      rentAmountBefore,
+      rentAmountAfter,
+    });
 
-    const changeParts: string[] = [];
-    if (payload.farmerStorageLinkId !== undefined)
-      changeParts.push("farmer-storage-link");
-    if (payload.date !== undefined) changeParts.push("date");
-    if (payload.variety !== undefined) changeParts.push("variety");
-    if (payload.truckNumber !== undefined) changeParts.push("truck number");
-    if (payload.remarks !== undefined) changeParts.push("remarks");
-    if (payload.manualParchiNumber !== undefined)
-      changeParts.push("manual parchi number");
-    if (payload.stockFilter !== undefined) changeParts.push("stock filter");
-    if (payload.customMarka !== undefined) changeParts.push("custom marka");
-    if (payload.bagSizes !== undefined)
-      changeParts.push("quantities (initial & current)");
-    if (hasRentAmountUpdate) changeParts.push("rent entry amount");
-    const changeSummary = `Incoming gate pass updated: ${changeParts.join(", ")}`;
-
-    await recordEditHistory({
-      entityType: EditHistoryEntityType.INCOMING_GATE_PASS,
-      documentId: idObj,
-      coldStorageId: new mongoose.Types.ObjectId(linkColdStorageId),
+    await recordIncomingGatePassAudit({
+      incomingGatePassId: idObj,
       editedById,
-      action: EditHistoryAction.UPDATE,
-      changeSummary,
-      snapshotBefore,
-      snapshotAfter,
+      previousState,
+      modifiedState,
+      ipAddress: auditContext?.ipAddress,
+      userAgent: auditContext?.userAgent,
       session,
       logger,
     });
@@ -821,10 +767,10 @@ export async function updateIncomingGatePass(
     const populated = await IncomingGatePass.findById(idObj)
       .populate({
         path: "farmerStorageLinkId",
-        select: "accountNumber farmerId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
         populate: {
           path: "farmerId",
-          select: "name address mobileNumber",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
         },
       })
       .populate({ path: "createdBy", select: "name" })
@@ -835,28 +781,17 @@ export async function updateIncomingGatePass(
     }
 
     const raw = populated as unknown as Record<string, unknown>;
-    type PopulatedLink = {
-      accountNumber: number;
-      farmerId: { name: string; address: string; mobileNumber: string };
-    };
     type PopulatedAdmin = { _id: unknown; name: string };
     const populatedLink = raw.farmerStorageLinkId as
-      | PopulatedLink
+      | PopulatedFarmerStorageLink
       | null
       | undefined;
     const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+    const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
 
     return {
       ...raw,
-      farmerStorageLinkId:
-        populatedLink && populatedLink.farmerId
-          ? {
-              name: populatedLink.farmerId.name,
-              accountNumber: populatedLink.accountNumber,
-              address: populatedLink.farmerId.address,
-              mobileNumber: populatedLink.farmerId.mobileNumber,
-            }
-          : raw.farmerStorageLinkId,
+      farmerStorageLinkId: linkDisplay ?? raw.farmerStorageLinkId,
       createdBy: populatedAdmin
         ? { _id: populatedAdmin._id, name: populatedAdmin.name }
         : raw.createdBy,

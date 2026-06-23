@@ -1,29 +1,22 @@
 import { FastifyInstance } from "fastify";
 import {
   createStoreAdminHandler,
-  getStoreAdminByIdHandler,
-  updateStoreAdminHandler,
+  getStoreAdminProfileHandler,
+  updateStoreAdminProfileHandler,
   deleteStoreAdminHandler,
   checkMobileNumberHandler,
   loginStoreAdminHandler,
   logoutStoreAdminHandler,
-  quickRegisterFarmerHandler,
-  updateFarmerStorageLinkHandler,
-  getFarmerStorageLinksByColdStorageHandler,
-  getGatePassesByFarmerStorageLinkHandler,
   getNextVoucherNumberHandler,
   getDaybookHandler,
   searchOrderByReceiptNumberHandler,
 } from "./store-admin.controller.js";
 import {
   createStoreAdminSchema,
-  getStoreAdminByIdParamsSchema,
-  updateStoreAdminSchema,
+  updateStoreAdminProfileSchema,
   deleteStoreAdminParamsSchema,
   checkMobileNumberQuerySchema,
   loginStoreAdminSchema,
-  quickRegisterFarmerSchema,
-  updateFarmerStorageLinkSchema,
   nextVoucherNumberQuerySchema,
   getDaybookQuerySchema,
 } from "./store-admin.schema.js";
@@ -109,179 +102,6 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
     createStoreAdminHandler as never,
   );
 
-  // Get farmer-storage-links for authenticated user's cold storage (farmerId populated with name, address, mobileNumber)
-  fastify.get(
-    "/farmer-storage-links",
-    {
-      schema: {
-        description:
-          "Get all farmer-storage-links for the authenticated store admin's cold storage with farmer details (name, address, mobileNumber) populated",
-        tags: ["Store Admin"],
-        summary: "Get farmer-storage-links for my cold storage",
-        response: {
-          200: {
-            description: "List of farmer-storage-links with populated farmer",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              data: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    _id: { type: "string" },
-                    farmerId: {
-                      type: "object",
-                      properties: {
-                        _id: { type: "string" },
-                        name: { type: "string" },
-                        address: { type: "string" },
-                        mobileNumber: { type: "string" },
-                      },
-                    },
-                    coldStorageId: { type: "string" },
-                    accountNumber: { type: "number" },
-                    isActive: { type: "boolean" },
-                    notes: { type: "string" },
-                    costPerBag: { type: "number" },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      preHandler: [authenticate],
-      config: {
-        rateLimit: {
-          max: 200,
-          timeWindow: "1 minute",
-        },
-      },
-    },
-    getFarmerStorageLinksByColdStorageHandler as never,
-  );
-
-  // Get all incoming and outgoing gate passes for a single farmer-storage-link (same response format as daybook)
-  fastify.get(
-    "/farmer-storage-links/:farmerStorageLinkId/gate-passes",
-    {
-      schema: {
-        description:
-          "Get gate passes for a farmer-storage-link. Same response format as daybook: status, data (array), pagination (single page). Query: from, to (YYYY-MM-DD), type (all | incoming | outgoing), sortBy (latest | oldest) — sorts by gatePassNo (desc for latest, asc for oldest).",
-        tags: ["Store Admin"],
-        summary: "Get gate passes by farmer-storage-link",
-        params: {
-          type: "object",
-          required: ["farmerStorageLinkId"],
-          properties: {
-            farmerStorageLinkId: {
-              type: "string",
-              description: "Farmer-storage-link ID",
-            },
-          },
-        },
-        querystring: {
-          type: "object",
-          properties: {
-            from: {
-              type: "string",
-              description: "Start date (YYYY-MM-DD) inclusive",
-            },
-            to: {
-              type: "string",
-              description: "End date (YYYY-MM-DD) inclusive",
-            },
-            type: {
-              type: "string",
-              enum: ["all", "incoming", "outgoing"],
-              description:
-                "all = merged list; incoming or outgoing = filter by type (default all)",
-            },
-            sortBy: {
-              type: "string",
-              description:
-                "latest = highest gatePassNo first; otherwise = lowest gatePassNo first (default latest)",
-            },
-          },
-        },
-        response: {
-          200: {
-            description:
-              "status Success with data (full array of gate passes, farmer populated) and pagination (single page); or status Fail with message and pagination when no orders",
-            type: "object",
-            properties: {
-              status: { type: "string", enum: ["Success", "Fail"] },
-              message: { type: "string" },
-              data: {
-                type: "array",
-                items: { type: "object", additionalProperties: true },
-              },
-              pagination: {
-                type: "object",
-                properties: {
-                  currentPage: { type: "number" },
-                  totalPages: { type: "number" },
-                  totalItems: { type: "number" },
-                  itemsPerPage: { type: "number" },
-                  hasNextPage: { type: "boolean" },
-                  hasPreviousPage: { type: "boolean" },
-                  nextPage: { type: ["number", "null"] },
-                  previousPage: { type: ["number", "null"] },
-                },
-              },
-            },
-          },
-          400: {
-            description: "Invalid type or validation error",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-              message: { type: "string" },
-            },
-          },
-          401: {
-            description: "Unauthorized or missing cold storage",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-          404: {
-            description: "Farmer-storage-link not found",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-      },
-      preHandler: [authenticate],
-    },
-    getGatePassesByFarmerStorageLinkHandler as never,
-  );
-
   // Get daybook: list of incoming and/or outgoing gate passes with farmer populated, pagination, sort
   fastify.get(
     "/daybook",
@@ -289,7 +109,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
       schema: {
         ...getDaybookQuerySchema,
         description:
-          "Get daybook: list of incoming and/or outgoing gate passes. type=all returns merged list sorted by createdAt; type=incoming or type=outgoing filters. sortBy=latest (newest first) or oldest. Pagination: page, limit.",
+          "Get daybook: list of incoming and/or outgoing gate passes. type=all returns merged list sorted by createdAt; type=incoming or type=outgoing filters. sortBy=latest (newest first) or oldest. Pagination: page, limit. Each item's farmerStorageLinkId is a flat object with name, accountNumber, address, mobileNumber (no nested farmerId). Outgoing items include isNull when nulled (dwarf pass).",
         tags: ["Store Admin"],
         summary: "Get daybook",
         querystring: {
@@ -316,7 +136,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
         response: {
           200: {
             description:
-              "Daybook: status Success with data (array of incoming/outgoing gate passes, farmer populated, bagSizes/orderDetails sorted) and pagination; or status Fail with message and pagination when no orders",
+              "Daybook: status Success with data (array of incoming/outgoing gate passes; farmerStorageLinkId is flat: name, accountNumber, address, mobileNumber; outgoing items include isNull; bagSizes/orderDetails sorted) and pagination; or status Fail with message and pagination when no orders",
             type: "object",
             properties: {
               status: { type: "string", enum: ["Success", "Fail"] },
@@ -327,6 +147,17 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                   type: "object",
                   additionalProperties: true,
                   properties: {
+                    farmerStorageLinkId: {
+                      type: "object",
+                      description:
+                        "Flat farmer display: name, accountNumber, address, mobileNumber",
+                      properties: {
+                        name: { type: "string" },
+                        accountNumber: { type: "number" },
+                        address: { type: "string" },
+                        mobileNumber: { type: "string" },
+                      },
+                    },
                     truckNumber: {
                       type: "string",
                       description:
@@ -408,11 +239,11 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
 
   // Search incoming and outgoing gate passes by receipt number (gate pass / voucher number)
   fastify.post(
-    "/search-order-by-receipt",
+    "/search",
     {
       schema: {
         description:
-          "Search for orders (incoming and outgoing gate passes). searchBy: gatePassNumber (default); manualParchiNumber; marka; customMarka (incoming only); remarks = case-insensitive substring on remarks (incoming + outgoing; regex metacharacters treated literally).",
+          "Search for orders (incoming and outgoing gate passes). searchBy: gatePassNumber (default); manualParchiNumber; marka (gatePassNo/totalBags and/or customMarka on incoming); customMarka (incoming only, legacy); remarks = case-insensitive substring on remarks (incoming + outgoing; regex metacharacters treated literally).",
         tags: ["Store Admin"],
         summary: "Search order by receipt number",
         body: {
@@ -422,7 +253,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
             receiptNumber: {
               type: "string",
               description:
-                "Value to match per searchBy (gate pass no, manual parchi, marka, customMarka, or remarks search phrase)",
+                "Value to match per searchBy (gate pass no, manual parchi, marka, customMarka, or remarks search phrase). For marka: use gatePassNo/totalBags (e.g. 42/300) and/or a customMarka value.",
             },
             searchBy: {
               type: "string",
@@ -435,7 +266,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
               ],
               default: "gatePassNumber",
               description:
-                "gatePassNumber | manualParchiNumber | marka | customMarka | remarks (substring).",
+                "gatePassNumber | manualParchiNumber | marka (gatePassNo/totalBags + customMarka) | customMarka | remarks (substring).",
             },
           },
         },
@@ -519,7 +350,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
 
   // Get next voucher number for a voucher type (incoming or outgoing only)
   fastify.get(
-    "/voucher-number",
+    "/gate-pass-number",
     {
       schema: {
         ...nextVoucherNumberQuerySchema,
@@ -581,26 +412,32 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
     },
     getNextVoucherNumberHandler as never,
   );
-  // Get store admin by ID
+  // Get authenticated store admin profile with cold storage
   fastify.get(
-    "/:id",
+    "/profile",
     {
       schema: {
-        ...getStoreAdminByIdParamsSchema,
-        description: "Get a store admin by ID",
+        description:
+          "Get the authenticated store admin profile with linked cold storage details",
         tags: ["Store Admin"],
-        summary: "Get store admin by ID",
+        summary: "Get store admin profile",
         response: {
           200: {
-            description: "Store admin details",
+            description: "Store admin profile with cold storage",
             type: "object",
             properties: {
               success: { type: "boolean" },
-              data: { type: "object" },
+              data: {
+                type: "object",
+                properties: {
+                  storeAdmin: { type: "object", additionalProperties: true },
+                  coldStorage: { type: "object", additionalProperties: true },
+                },
+              },
             },
           },
-          400: {
-            description: "Bad request - invalid ID format",
+          401: {
+            description: "Unauthorized",
             type: "object",
             properties: {
               success: { type: "boolean" },
@@ -614,7 +451,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
             },
           },
           404: {
-            description: "Store admin not found",
+            description: "Store admin or cold storage not found",
             type: "object",
             properties: {
               success: { type: "boolean" },
@@ -629,33 +466,40 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
           },
         },
       },
-      preHandler: [authenticate], // Require authentication
+      preHandler: [authenticate],
       config: {
         rateLimit: {
-          max: 200, // 200 requests per minute
+          max: 200,
           timeWindow: "1 minute",
         },
       },
     },
-    getStoreAdminByIdHandler as never,
+    getStoreAdminProfileHandler as never,
   );
 
-  // Update store admin
+  // Update authenticated store admin profile and cold storage
   fastify.put(
-    "/:id",
+    "/profile",
     {
       schema: {
-        ...updateStoreAdminSchema,
-        description: "Update a store admin",
+        ...updateStoreAdminProfileSchema,
+        description:
+          "Update the authenticated store admin profile and optionally linked cold storage details",
         tags: ["Store Admin"],
-        summary: "Update store admin",
+        summary: "Update store admin profile",
         response: {
           200: {
-            description: "Store admin updated successfully",
+            description: "Profile updated successfully",
             type: "object",
             properties: {
               success: { type: "boolean" },
-              data: { type: "object" },
+              data: {
+                type: "object",
+                properties: {
+                  storeAdmin: { type: "object", additionalProperties: true },
+                  coldStorage: { type: "object", additionalProperties: true },
+                },
+              },
               message: { type: "string" },
             },
           },
@@ -673,8 +517,22 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
               },
             },
           },
+          401: {
+            description: "Unauthorized",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
           404: {
-            description: "Store admin not found",
+            description: "Store admin or cold storage not found",
             type: "object",
             properties: {
               success: { type: "boolean" },
@@ -703,15 +561,15 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
           },
         },
       },
-      preHandler: [authenticate], // Require authentication
+      preHandler: [authenticate],
       config: {
         rateLimit: {
-          max: 60, // 60 requests per minute
+          max: 60,
           timeWindow: "1 minute",
         },
       },
     },
-    updateStoreAdminHandler as never,
+    updateStoreAdminProfileHandler as never,
   );
 
   // Delete store admin
@@ -952,171 +810,5 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
       },
     },
     logoutStoreAdminHandler as never,
-  );
-
-  // Quick register farmer
-  fastify.post(
-    "/quick-register-farmer",
-    {
-      schema: {
-        ...quickRegisterFarmerSchema,
-        description: "Quick register a farmer and create farmer-storage-link",
-        tags: ["Store Admin"],
-        summary: "Quick register farmer",
-        response: {
-          201: {
-            description: "Farmer registered successfully",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              data: {
-                type: "object",
-                properties: {
-                  farmer: { type: "object", additionalProperties: true },
-                  farmerStorageLink: {
-                    type: "object",
-                    additionalProperties: true,
-                  },
-                },
-              },
-              message: { type: "string" },
-            },
-          },
-          400: {
-            description: "Bad request",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-          404: {
-            description: "Cold storage or store admin not found",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-          409: {
-            description: "Conflict - resource already exists",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-      },
-      preHandler: [authenticate], // Require authentication
-      config: {
-        rateLimit: {
-          max: 60, // 60 requests per minute
-          timeWindow: "1 minute",
-        },
-      },
-    },
-    quickRegisterFarmerHandler as never,
-  );
-
-  // Update farmer-storage-link
-  fastify.put(
-    "/farmer-storage-link/:id",
-    {
-      schema: {
-        ...updateFarmerStorageLinkSchema,
-        description: "Update a farmer-storage-link and associated farmer",
-        tags: ["Store Admin"],
-        summary: "Update farmer-storage-link",
-        response: {
-          200: {
-            description: "Farmer-storage-link updated successfully",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              data: {
-                type: "object",
-                properties: {
-                  farmer: { type: "object", additionalProperties: true },
-                  farmerStorageLink: {
-                    type: "object",
-                    additionalProperties: true,
-                  },
-                },
-              },
-              message: { type: "string" },
-            },
-          },
-          400: {
-            description: "Bad request",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-          404: {
-            description: "Farmer-storage-link not found",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-          409: {
-            description: "Conflict - resource already exists",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              error: {
-                type: "object",
-                properties: {
-                  code: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-      },
-      preHandler: [authenticate], // Require authentication
-      config: {
-        rateLimit: {
-          max: 60, // 60 requests per minute
-          timeWindow: "1 minute",
-        },
-      },
-    },
-    updateFarmerStorageLinkHandler as never,
   );
 }

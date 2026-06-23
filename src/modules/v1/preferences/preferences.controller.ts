@@ -1,5 +1,9 @@
 import { FastifyReply, FastifyRequest } from "fastify";
-import { getPreferencesByColdStorageId } from "./preferences.service.js";
+import {
+  getPreferencesByColdStorageId,
+  updatePreferencesByColdStorageId,
+  type UpdatePreferencesInput,
+} from "./preferences.service.js";
 import { AppError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
 
@@ -37,13 +41,7 @@ export async function getMyPreferencesHandler(
   reply: FastifyReply,
 ) {
   try {
-    const req = request as AuthenticatedRequest;
-    const coldStorageId =
-      typeof req.user.coldStorageId === "object" &&
-      req.user.coldStorageId !== null &&
-      "_id" in req.user.coldStorageId
-        ? req.user.coldStorageId._id
-        : (req.user.coldStorageId as string);
+    const coldStorageId = getColdStorageIdFromRequest(request);
 
     if (!coldStorageId) {
       return reply.code(401).send({
@@ -66,6 +64,55 @@ export async function getMyPreferencesHandler(
     });
   } catch (error) {
     request.log.error({ error }, "getMyPreferencesHandler");
+    return sendErrorReply(reply, error);
+  }
+}
+
+function getColdStorageIdFromRequest(request: FastifyRequest): string | null {
+  const req = request as AuthenticatedRequest;
+  const coldStorageId =
+    typeof req.user.coldStorageId === "object" &&
+    req.user.coldStorageId !== null &&
+    "_id" in req.user.coldStorageId
+      ? req.user.coldStorageId._id
+      : (req.user.coldStorageId as string);
+
+  return coldStorageId || null;
+}
+
+/**
+ * Update preferences for the current logged-in store-admin's cold storage.
+ */
+export async function updateMyPreferencesHandler(
+  request: FastifyRequest<{ Body: UpdatePreferencesInput }>,
+  reply: FastifyReply,
+) {
+  try {
+    const coldStorageId = getColdStorageIdFromRequest(request);
+
+    if (!coldStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Cold storage not associated with this account",
+        },
+      });
+    }
+
+    const preferences = await updatePreferencesByColdStorageId(
+      coldStorageId,
+      request.body,
+      request.log,
+    );
+
+    return reply.send({
+      success: true,
+      data: preferences,
+      message: "Preferences updated successfully",
+    });
+  } catch (error) {
+    request.log.error({ error }, "updateMyPreferencesHandler");
     return sendErrorReply(reply, error);
   }
 }

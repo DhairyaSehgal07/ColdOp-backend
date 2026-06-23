@@ -58,6 +58,40 @@ export const getColdStorageByIdParamsSchema = z.object({
   }),
 });
 
+export const updateColdStorageBodySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, "Name must be at least 2 characters long")
+    .max(100, "Name must not exceed 100 characters")
+    .optional(),
+
+  address: z
+    .string()
+    .trim()
+    .min(5, "Address must be at least 5 characters long")
+    .max(255, "Address must not exceed 255 characters")
+    .optional(),
+
+  mobileNumber: z
+    .string()
+    .trim()
+    .regex(
+      /^[6-9]\d{9}$/,
+      "Mobile number must be a valid 10-digit Indian mobile number",
+    )
+    .optional(),
+
+  capacity: z.coerce
+    .number()
+    .positive("Capacity must be greater than zero")
+    .optional(),
+
+  imageUrl: z.string().trim().url("Image URL must be a valid URL").optional(),
+
+  plan: z.nativeEnum(Plan).optional(),
+});
+
 export type CreateColdStorageInput = z.infer<
   typeof createColdStorageSchema
 >["body"];
@@ -69,3 +103,7 @@ export type GetColdStoragesQuery = z.infer<
 export type GetColdStorageByIdParams = z.infer<
   typeof getColdStorageByIdParamsSchema
 >["params"];
+
+export type UpdateColdStorageInput = z.infer<
+  typeof updateColdStorageBodySchema
+>;
