@@ -114,6 +114,195 @@ export async function getIncomingGatePassesByFarmerStorageLinkId(
     };
   });
 }
+
+export interface IncomingGatePassReportOptions {
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+type PopulatedAdmin = { _id: unknown; name: string };
+
+type PopulatedLinkWithId = PopulatedFarmerStorageLink & { _id?: unknown };
+
+function mapIncomingGatePassToReport(
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  const populatedLink = raw.farmerStorageLinkId as
+    | PopulatedLinkWithId
+    | null
+    | undefined;
+  const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+  const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
+
+  const bagSizes = (raw.bagSizes as { initialQuantity?: number }[]) ?? [];
+  const totalBags = bagSizes.reduce(
+    (sum, bag) => sum + (bag.initialQuantity ?? 0),
+    0,
+  );
+
+  const report: Record<string, unknown> = {
+    _id:
+      typeof raw._id === "object" && raw._id !== null && "toString" in raw._id
+        ? (raw._id as { toString: () => string }).toString()
+        : raw._id,
+    gatePassNo: raw.gatePassNo,
+    date:
+      raw.date instanceof Date
+        ? raw.date.toISOString()
+        : raw.date,
+    type: raw.type,
+    variety: raw.variety,
+    status: raw.status,
+    bagSizes: raw.bagSizes,
+    totalBags,
+    farmerStorageLinkId: linkDisplay
+      ? {
+          _id:
+            populatedLink?._id != null
+              ? typeof populatedLink._id === "object" &&
+                populatedLink._id !== null &&
+                "toString" in populatedLink._id
+                ? (
+                    populatedLink._id as { toString: () => string }
+                  ).toString()
+                : populatedLink._id
+              : undefined,
+          ...linkDisplay,
+        }
+      : raw.farmerStorageLinkId,
+  };
+
+  if (raw.manualParchiNumber != null && raw.manualParchiNumber !== "") {
+    report.manualParchiNumber = raw.manualParchiNumber;
+  }
+  if (raw.truckNumber != null && raw.truckNumber !== "") {
+    report.truckNumber = raw.truckNumber;
+  }
+  if (raw.remarks != null && raw.remarks !== "") {
+    report.remarks = raw.remarks;
+  }
+  if (raw.stockFilter != null && raw.stockFilter !== "") {
+    report.stockFilter = raw.stockFilter;
+  }
+  if (raw.customMarka != null && raw.customMarka !== "") {
+    report.customMarka = raw.customMarka;
+  }
+  if (populatedAdmin) {
+    report.createdBy = {
+      _id: populatedAdmin._id,
+      name: populatedAdmin.name,
+    };
+  }
+
+  return report;
+}
+
+/**
+ * Get all incoming gate passes for a cold storage as a report (no pagination).
+ * Optional dateFrom/dateTo filter on gate pass date (UTC day boundaries).
+ */
+export async function getIncomingGatePassReport(
+  coldStorageId: string,
+  options: IncomingGatePassReportOptions = {},
+  logger?: FastifyBaseLogger,
+): Promise<Record<string, unknown>[]> {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+      throw new ValidationError(
+        "Invalid cold storage ID format",
+        "INVALID_COLD_STORAGE_ID",
+      );
+    }
+
+    const { dateFrom, dateTo } = options;
+    const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (dateFrom != null && dateFrom !== "" && !isoDateRegex.test(dateFrom)) {
+      throw new ValidationError(
+        "Invalid dateFrom format. Use ISO date, e.g. 2026-03-01",
+        "INVALID_DATE_FROM",
+      );
+    }
+    if (dateTo != null && dateTo !== "" && !isoDateRegex.test(dateTo)) {
+      throw new ValidationError(
+        "Invalid dateTo format. Use ISO date, e.g. 2026-03-07",
+        "INVALID_DATE_TO",
+      );
+    }
+
+    const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+    const linkIds = await FarmerStorageLink.distinct("_id", {
+      coldStorageId: coldStorageObjectId,
+    });
+
+    if (linkIds.length === 0) {
+      logger?.info(
+        { coldStorageId, dateFrom, dateTo },
+        "Incoming gate pass report: no farmer-storage links",
+      );
+      return [];
+    }
+
+    const filter: Record<string, unknown> = {
+      farmerStorageLinkId: { $in: linkIds },
+    };
+
+    if (dateFrom || dateTo) {
+      const dateConditions: Record<string, Date> = {};
+      if (dateFrom) {
+        const from = new Date(dateFrom);
+        from.setUTCHours(0, 0, 0, 0);
+        dateConditions.$gte = from;
+      }
+      if (dateTo) {
+        const to = new Date(dateTo);
+        to.setUTCHours(23, 59, 59, 999);
+        dateConditions.$lte = to;
+      }
+      filter.date = dateConditions;
+    }
+
+    const list = await IncomingGatePass.find(filter)
+      .sort({ gatePassNo: -1, date: -1 })
+      .populate({
+        path: "farmerStorageLinkId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
+        populate: {
+          path: "farmerId",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
+        },
+      })
+      .populate({ path: "createdBy", select: "name" })
+      .lean();
+
+    const report = list.map((raw) =>
+      mapIncomingGatePassToReport(raw as unknown as Record<string, unknown>),
+    );
+
+    logger?.info(
+      {
+        coldStorageId,
+        count: report.length,
+        dateFrom,
+        dateTo,
+      },
+      "Incoming gate pass report retrieved",
+    );
+
+    return report;
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
+    logger?.error({ error, coldStorageId }, "Error retrieving incoming gate pass report");
+    throw new AppError(
+      "Failed to retrieve incoming gate pass report",
+      500,
+      "GET_INCOMING_GATE_PASS_REPORT_ERROR",
+    );
+  }
+}
+
 import { ColdStorage } from "../cold-storage/cold-storage.model.js";
 import Ledger from "../ledger/ledger.model.js";
 import { Preferences } from "../preferences/preferences.model.js";

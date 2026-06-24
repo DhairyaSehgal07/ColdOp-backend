@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import {
   createOutgoingGatePassHandler,
   getOutgoingGatePassByIdHandler,
+  getOutgoingGatePassReportHandler,
   nullOutgoingGatePassHandler,
   updateOutgoingGatePassHandler,
 } from "./outgoing-gate-pass.controller.js";
@@ -12,6 +13,104 @@ import { authenticate } from "../../../utils/auth.js";
  * @param fastify - Fastify instance
  */
 export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
+  // Report – all outgoing gate passes for cold storage (optional date range, no pagination)
+  fastify.get(
+    "/report",
+    {
+      schema: {
+        description:
+          "Get all outgoing gate pass records for the authenticated store admin's cold storage without pagination. Optional dateFrom/dateTo filter (YYYY-MM-DD, UTC day boundaries).",
+        tags: ["Outgoing Gate Pass"],
+        summary: "Get outgoing gate pass report",
+        querystring: {
+          type: "object",
+          properties: {
+            dateFrom: {
+              type: "string",
+              description:
+                "Filter by date range start (inclusive), ISO date YYYY-MM-DD",
+            },
+            dateTo: {
+              type: "string",
+              description:
+                "Filter by date range end (inclusive), ISO date YYYY-MM-DD",
+            },
+          },
+        },
+        response: {
+          200: {
+            description: "Outgoing gate pass report",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  outgoingGatePasses: {
+                    type: "array",
+                    items: { type: "object", additionalProperties: true },
+                  },
+                },
+                required: ["outgoingGatePasses"],
+              },
+              message: { type: "string" },
+            },
+          },
+          400: {
+            description: "Bad request - invalid date format",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          500: {
+            description: "Server error",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getOutgoingGatePassReportHandler as never,
+  );
+
   fastify.post(
     "/",
     {

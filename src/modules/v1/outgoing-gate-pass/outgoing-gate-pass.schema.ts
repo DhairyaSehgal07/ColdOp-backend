@@ -197,3 +197,28 @@ export const nullOutgoingGatePassSchema = z.object({
 export type NullOutgoingGatePassBody = z.infer<
   typeof nullOutgoingGatePassSchema
 >["body"];
+
+const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Query params for GET /report */
+export const getOutgoingGatePassReportQuerySchema = z.object({
+  querystring: z.object({
+    dateFrom: z
+      .string()
+      .trim()
+      .regex(
+        isoDateRegex,
+        "dateFrom must be an ISO date, e.g. 2026-03-01",
+      )
+      .optional(),
+    dateTo: z
+      .string()
+      .trim()
+      .regex(isoDateRegex, "dateTo must be an ISO date, e.g. 2026-03-07")
+      .optional(),
+  }),
+});
+
+export type GetOutgoingGatePassReportQuery = z.infer<
+  typeof getOutgoingGatePassReportQuerySchema
+>["querystring"];

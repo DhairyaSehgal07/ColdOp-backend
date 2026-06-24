@@ -1430,6 +1430,216 @@ export async function getOutgoingGatePassById(
   }
 }
 
+export interface OutgoingGatePassReportOptions {
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+type OutgoingReportPopulatedAdmin = { _id: unknown; name: string };
+
+type OutgoingReportPopulatedLinkWithId = PopulatedFarmerStorageLink & {
+  _id?: unknown;
+};
+
+function mapOutgoingGatePassToReport(
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  const populatedLink = raw.farmerStorageLinkId as
+    | OutgoingReportPopulatedLinkWithId
+    | null
+    | undefined;
+  const populatedAdmin = raw.createdBy as
+    | OutgoingReportPopulatedAdmin
+    | null
+    | undefined;
+  const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
+
+  const orderDetails =
+    (raw.orderDetails as { quantityIssued?: number }[]) ?? [];
+  const totalBags = orderDetails.reduce(
+    (sum, detail) => sum + (detail.quantityIssued ?? 0),
+    0,
+  );
+
+  const report: Record<string, unknown> = {
+    _id:
+      typeof raw._id === "object" && raw._id !== null && "toString" in raw._id
+        ? (raw._id as { toString: () => string }).toString()
+        : raw._id,
+    gatePassNo: raw.gatePassNo,
+    date:
+      raw.date instanceof Date ? raw.date.toISOString() : raw.date,
+    orderDetails: raw.orderDetails,
+    totalBags,
+    farmerStorageLinkId: linkDisplay
+      ? {
+          _id:
+            populatedLink?._id != null
+              ? typeof populatedLink._id === "object" &&
+                populatedLink._id !== null &&
+                "toString" in populatedLink._id
+                ? (
+                    populatedLink._id as { toString: () => string }
+                  ).toString()
+                : populatedLink._id
+              : undefined,
+          ...linkDisplay,
+        }
+      : raw.farmerStorageLinkId,
+  };
+
+  if (raw.type != null && raw.type !== "") {
+    report.type = raw.type;
+  }
+  if (raw.variety != null && raw.variety !== "") {
+    report.variety = raw.variety;
+  }
+  if (raw.from != null && raw.from !== "") {
+    report.from = raw.from;
+  }
+  if (raw.to != null && raw.to !== "") {
+    report.to = raw.to;
+  }
+  if (raw.truckNumber != null && raw.truckNumber !== "") {
+    report.truckNumber = raw.truckNumber;
+  }
+  if (raw.manualParchiNumber != null) {
+    report.manualParchiNumber = raw.manualParchiNumber;
+  }
+  if (raw.remarks != null && raw.remarks !== "") {
+    report.remarks = raw.remarks;
+  }
+  if (raw.incomingGatePassSnapshots != null) {
+    report.incomingGatePassSnapshots = raw.incomingGatePassSnapshots;
+  }
+  if (raw.isNull === true) {
+    report.isNull = true;
+  }
+  if (raw.nulledAt != null) {
+    report.nulledAt =
+      raw.nulledAt instanceof Date
+        ? raw.nulledAt.toISOString()
+        : raw.nulledAt;
+  }
+  if (populatedAdmin) {
+    report.createdBy = {
+      _id: populatedAdmin._id,
+      name: populatedAdmin.name,
+    };
+  }
+
+  return report;
+}
+
+/**
+ * Get all outgoing gate passes for a cold storage as a report (no pagination).
+ * Optional dateFrom/dateTo filter on gate pass date (UTC day boundaries).
+ */
+export async function getOutgoingGatePassReport(
+  coldStorageId: string,
+  options: OutgoingGatePassReportOptions = {},
+  logger?: FastifyBaseLogger,
+): Promise<Record<string, unknown>[]> {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+      throw new ValidationError(
+        "Invalid cold storage ID format",
+        "INVALID_COLD_STORAGE_ID",
+      );
+    }
+
+    const { dateFrom, dateTo } = options;
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (dateFrom != null && dateFrom !== "" && !dateRegex.test(dateFrom)) {
+      throw new ValidationError(
+        "Invalid dateFrom format. Use ISO date, e.g. 2026-03-01",
+        "INVALID_DATE_FROM",
+      );
+    }
+    if (dateTo != null && dateTo !== "" && !dateRegex.test(dateTo)) {
+      throw new ValidationError(
+        "Invalid dateTo format. Use ISO date, e.g. 2026-03-07",
+        "INVALID_DATE_TO",
+      );
+    }
+
+    const coldStorageObjectId = new Types.ObjectId(coldStorageId);
+    const linkIds = await FarmerStorageLink.distinct("_id", {
+      coldStorageId: coldStorageObjectId,
+    });
+
+    if (linkIds.length === 0) {
+      logger?.info(
+        { coldStorageId, dateFrom, dateTo },
+        "Outgoing gate pass report: no farmer-storage links",
+      );
+      return [];
+    }
+
+    const filter: Record<string, unknown> = {
+      farmerStorageLinkId: { $in: linkIds },
+    };
+
+    if (dateFrom || dateTo) {
+      const dateConditions: Record<string, Date> = {};
+      if (dateFrom) {
+        const from = new Date(dateFrom);
+        from.setUTCHours(0, 0, 0, 0);
+        dateConditions.$gte = from;
+      }
+      if (dateTo) {
+        const to = new Date(dateTo);
+        to.setUTCHours(23, 59, 59, 999);
+        dateConditions.$lte = to;
+      }
+      filter.date = dateConditions;
+    }
+
+    const list = await OutgoingGatePass.find(filter)
+      .sort({ gatePassNo: -1, date: -1 })
+      .populate({
+        path: "farmerStorageLinkId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
+        populate: {
+          path: "farmerId",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
+        },
+      })
+      .populate({ path: "createdBy", select: "name" })
+      .lean();
+
+    const report = list.map((raw) =>
+      mapOutgoingGatePassToReport(raw as unknown as Record<string, unknown>),
+    );
+
+    logger?.info(
+      {
+        coldStorageId,
+        count: report.length,
+        dateFrom,
+        dateTo,
+      },
+      "Outgoing gate pass report retrieved",
+    );
+
+    return report;
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
+    logger?.error(
+      { error, coldStorageId },
+      "Error retrieving outgoing gate pass report",
+    );
+    throw new AppError(
+      "Failed to retrieve outgoing gate pass report",
+      500,
+      "GET_OUTGOING_GATE_PASS_REPORT_ERROR",
+    );
+  }
+}
+
 function buildDwarfOutgoingPassFields(
   existing: Pick<IOutgoingGatePass, "orderDetails">,
 ): {

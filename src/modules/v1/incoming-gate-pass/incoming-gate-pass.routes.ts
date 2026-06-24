@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import {
   createIncomingGatePassHandler,
   getIncomingGatePassesByFarmerStorageLinkIdHandler,
+  getIncomingGatePassReportHandler,
   updateIncomingGatePassHandler,
   getIncomingGatePassEditHistoryHandler,
 } from "./incoming-gate-pass.controller.js";
@@ -133,6 +134,104 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
       },
     },
     getIncomingGatePassEditHistoryHandler as never,
+  );
+
+  // Report – all incoming gate passes for cold storage (optional date range, no pagination)
+  fastify.get(
+    "/report",
+    {
+      schema: {
+        description:
+          "Get all incoming gate pass records for the authenticated store admin's cold storage without pagination. Optional dateFrom/dateTo filter (YYYY-MM-DD, UTC day boundaries).",
+        tags: ["Incoming Gate Pass"],
+        summary: "Get incoming gate pass report",
+        querystring: {
+          type: "object",
+          properties: {
+            dateFrom: {
+              type: "string",
+              description:
+                "Filter by date range start (inclusive), ISO date YYYY-MM-DD",
+            },
+            dateTo: {
+              type: "string",
+              description:
+                "Filter by date range end (inclusive), ISO date YYYY-MM-DD",
+            },
+          },
+        },
+        response: {
+          200: {
+            description: "Incoming gate pass report",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: {
+                type: "object",
+                properties: {
+                  incomingGatePasses: {
+                    type: "array",
+                    items: { type: "object", additionalProperties: true },
+                  },
+                },
+                required: ["incomingGatePasses"],
+              },
+              message: { type: "string" },
+            },
+          },
+          400: {
+            description: "Bad request - invalid date format",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          500: {
+            description: "Server error",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getIncomingGatePassReportHandler as never,
   );
 
   // Get all incoming gate passes for a farmer-storage-link

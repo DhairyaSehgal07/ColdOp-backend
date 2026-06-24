@@ -2,6 +2,7 @@ import { FastifyReply, FastifyRequest } from "fastify";
 import {
   createIncomingGatePass,
   getIncomingGatePassesByFarmerStorageLinkId,
+  getIncomingGatePassReport,
   updateIncomingGatePass,
 } from "./incoming-gate-pass.service.js";
 import { getIncomingGatePassAudits } from "./incoming-gate-pass-audit.service.js";
@@ -10,6 +11,7 @@ import {
   UpdateIncomingGatePassBody,
   updateIncomingGatePassSchema,
   getIncomingGatePassEditHistoryQuerySchema,
+  getIncomingGatePassReportQuerySchema,
 } from "./incoming-gate-pass.schema.js";
 import { AppError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
@@ -235,6 +237,71 @@ export async function getIncomingGatePassEditHistoryHandler(
     request.log.error(
       { error, query: request.query },
       "Error in getIncomingGatePassEditHistoryHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * Handler for GET /report – all incoming gate passes for the cold storage with optional date range.
+ */
+export async function getIncomingGatePassReportHandler(
+  request: FastifyRequest<{
+    Querystring: { dateFrom?: string; dateTo?: string };
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+    if (!loggedInUserColdStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    const parsed = getIncomingGatePassReportQuerySchema.safeParse({
+      querystring: request.query,
+    });
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      const field = firstIssue?.path.join(".") ?? "";
+      const isDateFrom = field.includes("dateFrom");
+      const isDateTo = field.includes("dateTo");
+      const code = isDateFrom
+        ? "INVALID_DATE_FROM"
+        : isDateTo
+          ? "INVALID_DATE_TO"
+          : "VALIDATION_ERROR";
+      const message =
+        parsed.error.issues
+          ?.map((i) => i.message)
+          .join("; ") ?? parsed.error.message;
+      return reply.code(400).send({
+        success: false,
+        error: { code, message },
+      });
+    }
+
+    const { dateFrom, dateTo } = parsed.data.querystring;
+    const incomingGatePasses = await getIncomingGatePassReport(
+      loggedInUserColdStorageId,
+      { dateFrom, dateTo },
+      request.log,
+    );
+
+    return reply.code(200).send({
+      success: true,
+      data: { incomingGatePasses },
+      message: "Incoming gate pass report retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error(
+      { error, query: request.query },
+      "Error in getIncomingGatePassReportHandler",
     );
     return sendErrorReply(reply, error);
   }

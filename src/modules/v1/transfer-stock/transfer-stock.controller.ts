@@ -2,9 +2,11 @@ import { FastifyReply, FastifyRequest } from "fastify";
 import {
   createTransferStock,
   getTransferStockGatePassesForColdStorage,
+  getTransferStockReport,
 } from "./transfer-stock.service.js";
 import {
   createTransferStockSchema,
+  getTransferStockReportQuerySchema,
   type CreateTransferStockInput,
 } from "./transfer-stock.schema.js";
 import {
@@ -26,6 +28,30 @@ function getLoggedInUserColdStorageId(
     "_id" in req.user.coldStorageId
     ? (req.user.coldStorageId as { _id: string })._id
     : (req.user.coldStorageId as string);
+}
+
+function sendReportErrorReply(
+  reply: FastifyReply,
+  error: unknown,
+): ReturnType<FastifyReply["send"]> {
+  if (error instanceof AppError) {
+    return reply.code(error.statusCode).send({
+      success: false,
+      error: { code: error.code, message: error.message },
+    });
+  }
+  const message =
+    error instanceof Error ? error.message : "An unexpected error occurred";
+  return reply.code(500).send({
+    success: false,
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message:
+        process.env.NODE_ENV === "development"
+          ? message
+          : "An unexpected error occurred",
+    },
+  });
 }
 
 /**
@@ -220,5 +246,70 @@ export async function getTransferStockGatePassesForCurrentStoreHandler(
             : "An unexpected error occurred"
           : "An unexpected error occurred",
     });
+  }
+}
+
+/**
+ * Handler for GET /report – all transfer stock gate passes for the cold storage with optional date range.
+ */
+export async function getTransferStockReportHandler(
+  request: FastifyRequest<{
+    Querystring: { dateFrom?: string; dateTo?: string };
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+    if (!loggedInUserColdStorageId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: "MISSING_COLD_STORAGE",
+          message: "Cold storage not found in token",
+        },
+      });
+    }
+
+    const parsed = getTransferStockReportQuerySchema.safeParse({
+      querystring: request.query,
+    });
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      const field = firstIssue?.path.join(".") ?? "";
+      const isDateFrom = field.includes("dateFrom");
+      const isDateTo = field.includes("dateTo");
+      const code = isDateFrom
+        ? "INVALID_DATE_FROM"
+        : isDateTo
+          ? "INVALID_DATE_TO"
+          : "VALIDATION_ERROR";
+      const message =
+        parsed.error.issues
+          ?.map((i) => i.message)
+          .join("; ") ?? parsed.error.message;
+      return reply.code(400).send({
+        success: false,
+        error: { code, message },
+      });
+    }
+
+    const { dateFrom, dateTo } = parsed.data.querystring;
+    const transferStockGatePasses = await getTransferStockReport(
+      loggedInUserColdStorageId,
+      { dateFrom, dateTo },
+      request.log,
+    );
+
+    return reply.code(200).send({
+      success: true,
+      data: { transferStockGatePasses },
+      message: "Transfer stock report retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error(
+      { error, query: request.query },
+      "Error in getTransferStockReportHandler",
+    );
+    return sendReportErrorReply(reply, error);
   }
 }

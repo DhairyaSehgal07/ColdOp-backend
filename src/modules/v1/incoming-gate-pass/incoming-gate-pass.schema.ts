@@ -169,3 +169,28 @@ export type GetIncomingGatePassEditHistoryQuery = z.infer<
   typeof getIncomingGatePassEditHistoryQuerySchema
 >["querystring"];
 
+const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Query params for GET /report */
+export const getIncomingGatePassReportQuerySchema = z.object({
+  querystring: z.object({
+    dateFrom: z
+      .string()
+      .trim()
+      .regex(
+        isoDateRegex,
+        "dateFrom must be an ISO date, e.g. 2026-03-01",
+      )
+      .optional(),
+    dateTo: z
+      .string()
+      .trim()
+      .regex(isoDateRegex, "dateTo must be an ISO date, e.g. 2026-03-07")
+      .optional(),
+  }),
+});
+
+export type GetIncomingGatePassReportQuery = z.infer<
+  typeof getIncomingGatePassReportQuerySchema
+>["querystring"];
+

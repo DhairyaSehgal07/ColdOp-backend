@@ -647,3 +647,211 @@ export async function getTransferStockGatePassesForColdStorage(
     };
   });
 }
+
+export interface TransferStockReportOptions {
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+type TransferReportPopulatedAdmin = { _id: unknown; name: string };
+
+type TransferReportPopulatedLinkWithId = PopulatedFarmerStorageLink & {
+  _id?: unknown;
+};
+
+function stringifyObjectId(value: unknown): unknown {
+  if (value == null) return value;
+  if (typeof value === "object" && value !== null && "toString" in value) {
+    return (value as { toString: () => string }).toString();
+  }
+  return value;
+}
+
+function formatReportFarmerStorageLink(
+  populatedLink: TransferReportPopulatedLinkWithId | null | undefined,
+): Record<string, unknown> | unknown {
+  const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
+  if (!linkDisplay) {
+    return populatedLink != null
+      ? stringifyObjectId(populatedLink)
+      : populatedLink;
+  }
+  return {
+    _id: stringifyObjectId(populatedLink?._id),
+    ...linkDisplay,
+  };
+}
+
+function mapTransferStockToReport(
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  const fromLinkPop = raw.fromFarmerStorageLinkId as
+    | TransferReportPopulatedLinkWithId
+    | null
+    | undefined;
+  const toLinkPop = raw.toFarmerStorageLinkId as
+    | TransferReportPopulatedLinkWithId
+    | null
+    | undefined;
+  const populatedAdmin = raw.createdBy as
+    | TransferReportPopulatedAdmin
+    | null
+    | undefined;
+
+  const items = (raw.items as { quantity?: number }[]) ?? [];
+  const totalBags = items.reduce((sum, item) => sum + (item.quantity ?? 0), 0);
+
+  const report: Record<string, unknown> = {
+    _id: stringifyObjectId(raw._id),
+    gatePassNo: raw.gatePassNo,
+    date: raw.date instanceof Date ? raw.date.toISOString() : raw.date,
+    items: raw.items,
+    totalBags,
+    fromFarmerStorageLinkId: formatReportFarmerStorageLink(fromLinkPop),
+    toFarmerStorageLinkId: formatReportFarmerStorageLink(toLinkPop),
+    createdIncomingGatePassId: stringifyObjectId(raw.createdIncomingGatePassId),
+  };
+
+  if (raw.createdOutgoingGatePassId != null) {
+    report.createdOutgoingGatePassId = stringifyObjectId(
+      raw.createdOutgoingGatePassId,
+    );
+  }
+  if (raw.truckNumber != null && raw.truckNumber !== "") {
+    report.truckNumber = raw.truckNumber;
+  }
+  if (raw.remarks != null && raw.remarks !== "") {
+    report.remarks = raw.remarks;
+  }
+  if (raw.customMarka != null && raw.customMarka !== "") {
+    report.customMarka = raw.customMarka;
+  }
+  if (populatedAdmin) {
+    report.createdBy = {
+      _id: populatedAdmin._id,
+      name: populatedAdmin.name,
+    };
+  }
+
+  return report;
+}
+
+/**
+ * Get all transfer stock gate passes for a cold storage as a report (no pagination).
+ * Optional dateFrom/dateTo filter on gate pass date (UTC day boundaries).
+ */
+export async function getTransferStockReport(
+  coldStorageId: string,
+  options: TransferStockReportOptions = {},
+  logger?: FastifyBaseLogger,
+): Promise<Record<string, unknown>[]> {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
+      throw new ValidationError(
+        "Invalid cold storage ID format",
+        "INVALID_COLD_STORAGE_ID",
+      );
+    }
+
+    const { dateFrom, dateTo } = options;
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (dateFrom != null && dateFrom !== "" && !dateRegex.test(dateFrom)) {
+      throw new ValidationError(
+        "Invalid dateFrom format. Use ISO date, e.g. 2026-03-01",
+        "INVALID_DATE_FROM",
+      );
+    }
+    if (dateTo != null && dateTo !== "" && !dateRegex.test(dateTo)) {
+      throw new ValidationError(
+        "Invalid dateTo format. Use ISO date, e.g. 2026-03-07",
+        "INVALID_DATE_TO",
+      );
+    }
+
+    const coldStorageObjectId = new Types.ObjectId(coldStorageId);
+    const farmerStorageLinkIds = await FarmerStorageLink.distinct("_id", {
+      coldStorageId: coldStorageObjectId,
+    });
+
+    if (farmerStorageLinkIds.length === 0) {
+      logger?.info(
+        { coldStorageId, dateFrom, dateTo },
+        "Transfer stock report: no farmer-storage links",
+      );
+      return [];
+    }
+
+    const filter: Record<string, unknown> = {
+      $or: [
+        { fromFarmerStorageLinkId: { $in: farmerStorageLinkIds } },
+        { toFarmerStorageLinkId: { $in: farmerStorageLinkIds } },
+      ],
+    };
+
+    if (dateFrom || dateTo) {
+      const dateConditions: Record<string, Date> = {};
+      if (dateFrom) {
+        const from = new Date(dateFrom);
+        from.setUTCHours(0, 0, 0, 0);
+        dateConditions.$gte = from;
+      }
+      if (dateTo) {
+        const to = new Date(dateTo);
+        to.setUTCHours(23, 59, 59, 999);
+        dateConditions.$lte = to;
+      }
+      filter.date = dateConditions;
+    }
+
+    const list = await TransferStockGatePass.find(filter)
+      .sort({ gatePassNo: -1, date: -1 })
+      .populate({
+        path: "fromFarmerStorageLinkId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
+        populate: {
+          path: "farmerId",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
+        },
+      })
+      .populate({
+        path: "toFarmerStorageLinkId",
+        select: FARMER_STORAGE_LINK_POPULATE_SELECT,
+        populate: {
+          path: "farmerId",
+          select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
+        },
+      })
+      .populate({ path: "createdBy", select: "name" })
+      .lean();
+
+    const report = list.map((raw) =>
+      mapTransferStockToReport(raw as unknown as Record<string, unknown>),
+    );
+
+    logger?.info(
+      {
+        coldStorageId,
+        count: report.length,
+        dateFrom,
+        dateTo,
+      },
+      "Transfer stock report retrieved",
+    );
+
+    return report;
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
+    logger?.error(
+      { error, coldStorageId },
+      "Error retrieving transfer stock report",
+    );
+    throw new AppError(
+      "Failed to retrieve transfer stock report",
+      500,
+      "GET_TRANSFER_STOCK_REPORT_ERROR",
+    );
+  }
+}
