@@ -28,6 +28,10 @@ import {
 import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
 import { createOutgoingGatePassForTransferStock } from "../outgoing-gate-pass/outgoing-gate-pass.service.js";
 import type { IIncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
+import { ColdStorage } from "../cold-storage/cold-storage.model.js";
+import Ledger from "../ledger/ledger.model.js";
+import { Preferences } from "../preferences/preferences.model.js";
+import { createVoucher } from "../../../utils/accounting/helper-fns.js";
 
 /* =======================
    HELPERS (location / bag matching)
@@ -196,6 +200,7 @@ function formatTransferStockGatePassResponse(
 export async function createTransferStock(
   payload: CreateTransferStockInput,
   createdById: string | undefined,
+  loggedInUserColdStorageId: string | undefined,
   logger?: FastifyBaseLogger,
 ) {
   const session = await mongoose.startSession();
@@ -428,6 +433,123 @@ export async function createTransferStock(
         session,
       );
 
+    const isBuyPotato = payload.isBuyPotato ?? false;
+    const isSellPotato = payload.isSellPotato ?? false;
+    let potatoVoucherId: Types.ObjectId | undefined;
+    let potatoAmount: number | undefined;
+
+    if ((isBuyPotato || isSellPotato) && loggedInUserColdStorageId) {
+      const coldStorage = await ColdStorage.findById(loggedInUserColdStorageId)
+        .select("preferencesId")
+        .session(session)
+        .lean();
+      const preferences = coldStorage?.preferencesId
+        ? await Preferences.findById(coldStorage.preferencesId)
+            .session(session)
+            .lean()
+        : null;
+
+      if (preferences?.showFinances) {
+        const totalBags = payload.items.reduce(
+          (sum, item) => sum + item.quantity,
+          0,
+        );
+
+        if (!createdById) {
+          throw new ValidationError(
+            "Created by (store admin) is required to create potato voucher",
+            "CREATED_BY_REQUIRED",
+          );
+        }
+
+        const costPerBag = isBuyPotato
+          ? (fromLink as { costPerBag?: number }).costPerBag
+          : (toLink as { costPerBag?: number }).costPerBag;
+
+        if (costPerBag == null || costPerBag <= 0) {
+          throw new ValidationError(
+            "costPerBag must be set on the farmer storage link to create a potato voucher",
+            "COST_PER_BAG_REQUIRED",
+          );
+        }
+
+        potatoAmount = costPerBag * totalBags;
+        const createdByObjId = new Types.ObjectId(createdById);
+        const farmerLinkId = isBuyPotato ? fromLinkId : toLinkId;
+
+        const farmerLedger = await Ledger.findOne({
+          coldStorageId: fromColdStorageId,
+          farmerStorageLinkId: farmerLinkId,
+          category: "Debtors",
+        })
+          .session(session)
+          .select("_id")
+          .lean();
+
+        if (!farmerLedger) {
+          throw new NotFoundError(
+            "Farmer ledger not found for this farmer storage link",
+            "FARMER_LEDGER_NOT_FOUND",
+          );
+        }
+
+        const systemLedgerName = isBuyPotato
+          ? "Potato Purchase"
+          : "Potato Sales";
+        const systemLedger = await Ledger.findOne({
+          coldStorageId: fromColdStorageId,
+          name: systemLedgerName,
+          farmerStorageLinkId: null,
+          isSystemLedger: true,
+        })
+          .session(session)
+          .select("_id")
+          .lean();
+
+        if (!systemLedger) {
+          throw new NotFoundError(
+            `${systemLedgerName} ledger not found for the current store`,
+            isBuyPotato
+              ? "POTATO_PURCHASE_LEDGER_NOT_FOUND"
+              : "POTATO_SALES_LEDGER_NOT_FOUND",
+          );
+        }
+
+        const narration = isBuyPotato
+          ? `Potato purchase for transfer gate pass no. ${transferGatePassNo}`
+          : `Potato sales for transfer gate pass no. ${transferGatePassNo}`;
+
+        const voucher = await createVoucher({
+          debitLedgerId: isBuyPotato
+            ? new Types.ObjectId(systemLedger._id)
+            : new Types.ObjectId(farmerLedger._id),
+          creditLedgerId: isBuyPotato
+            ? new Types.ObjectId(farmerLedger._id)
+            : new Types.ObjectId(systemLedger._id),
+          amount: potatoAmount,
+          narration,
+          coldStorageId: fromColdStorageId,
+          farmerStorageLinkId: farmerLinkId,
+          createdBy: createdByObjId,
+          date: payload.date,
+          session,
+        });
+
+        potatoVoucherId = voucher._id;
+
+        logger?.info(
+          {
+            voucherId: voucher._id,
+            transferGatePassNo,
+            isBuyPotato,
+            isSellPotato,
+            potatoAmount,
+          },
+          "Potato voucher created for transfer stock",
+        );
+      }
+    }
+
     const newBagSizes = Array.from(newGatePassBagSizesMap.values()).map(
       (acc) => ({
         name: acc.name,
@@ -502,6 +624,10 @@ export async function createTransferStock(
           }),
           createdIncomingGatePassId: newIncomingDoc._id,
           createdOutgoingGatePassId: outgoingForFrom._id,
+          ...(potatoVoucherId ? { potatoVoucherId } : {}),
+          ...(isBuyPotato ? { isBuyPotato: true } : {}),
+          ...(isSellPotato ? { isSellPotato: true } : {}),
+          ...(potatoAmount != null ? { amount: potatoAmount } : {}),
         },
       ],
       { session },

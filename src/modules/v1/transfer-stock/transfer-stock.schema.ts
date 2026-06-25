@@ -29,31 +29,42 @@ const transferStockItemSchema = z.object({
 });
 
 export const createTransferStockSchema = z.object({
-  body: z.object({
-    fromFarmerStorageLinkId: z
-      .string()
-      .trim()
-      .min(1, "From farmer storage link ID is required")
-      .refine(
-        (val) => mongoose.Types.ObjectId.isValid(val),
-        "Invalid from farmer storage link ID format",
-      ),
-    toFarmerStorageLinkId: z
-      .string()
-      .trim()
-      .min(1, "To farmer storage link ID is required")
-      .refine(
-        (val) => mongoose.Types.ObjectId.isValid(val),
-        "Invalid to farmer storage link ID format",
-      ),
-    date: z.coerce.date(),
-    truckNumber: z.string().trim().optional(),
-    items: z
-      .array(transferStockItemSchema)
-      .min(1, "At least one item is required"),
-    remarks: z.string().trim().optional(),
-    customMarka: z.string().trim().optional(),
-  }),
+  body: z
+    .object({
+      fromFarmerStorageLinkId: z
+        .string()
+        .trim()
+        .min(1, "From farmer storage link ID is required")
+        .refine(
+          (val) => mongoose.Types.ObjectId.isValid(val),
+          "Invalid from farmer storage link ID format",
+        ),
+      toFarmerStorageLinkId: z
+        .string()
+        .trim()
+        .min(1, "To farmer storage link ID is required")
+        .refine(
+          (val) => mongoose.Types.ObjectId.isValid(val),
+          "Invalid to farmer storage link ID format",
+        ),
+      date: z.coerce.date(),
+      truckNumber: z.string().trim().optional(),
+      items: z
+        .array(transferStockItemSchema)
+        .min(1, "At least one item is required"),
+      remarks: z.string().trim().optional(),
+      customMarka: z.string().trim().optional(),
+      amount: z.coerce
+        .number()
+        .positive("Amount must be greater than 0")
+        .optional(),
+      isBuyPotato: z.boolean().optional().default(false),
+      isSellPotato: z.boolean().optional().default(false),
+    })
+    .refine((data) => !(data.isBuyPotato && data.isSellPotato), {
+      message: "isBuyPotato and isSellPotato cannot both be true",
+      path: ["isBuyPotato"],
+    }),
 });
 
 export type CreateTransferStockInput = z.infer<

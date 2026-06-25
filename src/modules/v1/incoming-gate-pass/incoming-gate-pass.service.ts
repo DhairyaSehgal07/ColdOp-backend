@@ -777,6 +777,7 @@ export async function updateIncomingGatePass(
     ).rentEntryVoucherId;
 
     const updateFields: Record<string, unknown> = {};
+    let rentCostLink = storageLink;
 
     if (payload.farmerStorageLinkId !== undefined) {
       const newLinkIdObj = new mongoose.Types.ObjectId(
@@ -791,6 +792,7 @@ export async function updateIncomingGatePass(
           "FARMER_STORAGE_LINK_NOT_FOUND",
         );
       }
+      rentCostLink = newLink;
       const newLinkColdStorageId =
         typeof newLink.coldStorageId === "object" &&
         newLink.coldStorageId !== null
@@ -830,11 +832,14 @@ export async function updateIncomingGatePass(
       }));
     }
 
-    const hasRentAmountUpdate =
+    const bagSizesChanged = payload.bagSizes !== undefined;
+    const explicitAmountUpdate =
+      payload.amount !== undefined && payload.amount > 0;
+
+    const shouldUpdateRentVoucher =
       preferences?.showFinances === true &&
-      payload.amount !== undefined &&
-      payload.amount > 0 &&
-      rentEntryVoucherId != null;
+      rentEntryVoucherId != null &&
+      (bagSizesChanged || explicitAmountUpdate);
 
     // Only validate or update amount/voucher when cold storage has showFinances enabled
     if (preferences?.showFinances === true) {
@@ -854,6 +859,31 @@ export async function updateIncomingGatePass(
 
     let rentAmountBefore: number | undefined;
     let rentAmountAfter: number | undefined;
+    let newRentAmount: number | undefined;
+
+    if (shouldUpdateRentVoucher) {
+      if (bagSizesChanged) {
+        const costPerBag = (rentCostLink as { costPerBag?: number }).costPerBag;
+        if (costPerBag == null || costPerBag <= 0) {
+          throw new ValidationError(
+            "costPerBag must be set on the farmer storage link to recalculate rent voucher amount",
+            "COST_PER_BAG_REQUIRED",
+          );
+        }
+        const totalBags = payload.bagSizes!.reduce(
+          (sum, b) => sum + (b.initialQuantity ?? 0),
+          0,
+        );
+        newRentAmount = costPerBag * totalBags;
+      } else if (explicitAmountUpdate) {
+        newRentAmount = payload.amount as number;
+      }
+    }
+
+    const hasRentAmountUpdate =
+      shouldUpdateRentVoucher &&
+      newRentAmount != null &&
+      newRentAmount > 0;
 
     if (hasRentAmountUpdate) {
       const rentVoucher = await Voucher.findById(rentEntryVoucherId)
@@ -877,7 +907,7 @@ export async function updateIncomingGatePass(
           ? (rentVoucher.creditLedger as mongoose.Types.ObjectId)
           : new mongoose.Types.ObjectId(rentVoucher.creditLedger);
       const oldAmount = Number(rentVoucher.amount);
-      const newAmount = payload.amount as number;
+      const newAmount = newRentAmount as number;
       rentAmountBefore = oldAmount;
       rentAmountAfter = newAmount;
 

@@ -95,7 +95,13 @@ export async function createTransferStockHandler(
     );
 
     const createdById = (request as AuthenticatedRequest).user?.id;
-    const result = await createTransferStock(body, createdById, request.log);
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+    const result = await createTransferStock(
+      body,
+      createdById,
+      loggedInUserColdStorageId,
+      request.log,
+    );
 
     return reply.code(201).send({
       status: "Success",

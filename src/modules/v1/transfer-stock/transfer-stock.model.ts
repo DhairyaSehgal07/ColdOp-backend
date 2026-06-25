@@ -34,6 +34,12 @@ export interface ITransferStockGatePass {
   /** Present for transfers created after outgoing gate pass was added for the from farmer */
   createdOutgoingGatePassId?: Types.ObjectId;
 
+  /** Potato purchase/sale journal voucher when showFinances is enabled */
+  potatoVoucherId?: Types.ObjectId;
+  isBuyPotato?: boolean;
+  isSellPotato?: boolean;
+  amount?: number;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -151,6 +157,28 @@ const TransferStockGatePassSchema = new Schema<ITransferStockGatePass>(
       type: Schema.Types.ObjectId,
       ref: "OutgoingGatePass",
       required: false,
+    },
+
+    potatoVoucherId: {
+      type: Schema.Types.ObjectId,
+      ref: "Voucher",
+      required: false,
+    },
+
+    isBuyPotato: {
+      type: Boolean,
+      required: false,
+    },
+
+    isSellPotato: {
+      type: Boolean,
+      required: false,
+    },
+
+    amount: {
+      type: Number,
+      required: false,
+      min: 0,
     },
   },
   {

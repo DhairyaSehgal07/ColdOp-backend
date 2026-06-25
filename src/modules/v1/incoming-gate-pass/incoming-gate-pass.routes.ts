@@ -417,7 +417,7 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
               type: "number",
               minimum: 0.01,
               description:
-                "Rent entry voucher amount (only when gate pass has an associated rent voucher)",
+                "Rent entry voucher amount (only when gate pass has an associated rent voucher). When bagSizes is also sent, amount is auto-derived from costPerBag × total bags.",
             },
             bagSizes: {
               type: "array",

@@ -1,4 +1,4 @@
-import mongoose, { Types } from "mongoose";
+import mongoose, { ClientSession, Types } from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
 import Ledger, { LedgerType } from "../../modules/v1/ledger/ledger.model.js";
 import Voucher, {
@@ -63,6 +63,8 @@ export interface CreateVoucherParams {
   createdBy: Types.ObjectId;
   /** Voucher date. Defaults to current date if omitted. */
   date?: Date;
+  /** When provided, voucher creation runs inside the caller's transaction. */
+  session?: ClientSession;
 }
 
 /**
@@ -79,13 +81,19 @@ export async function createVoucher({
   farmerStorageLinkId = null,
   createdBy,
   date = new Date(),
+  session: externalSession,
 }: CreateVoucherParams) {
   if (amount <= 0) {
     throw new Error("Voucher amount must be greater than 0");
   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const ownsSession = externalSession == null;
+  const session = externalSession ?? (await mongoose.startSession());
+
+  if (ownsSession) {
+    session.startTransaction();
+  }
+
   try {
     const voucherNumber = await getNextGeneralVoucherNumber(
       coldStorageId.toString(),
@@ -113,13 +121,19 @@ export async function createVoucher({
 
     await applyVoucherBalances(debitLedgerId, creditLedgerId, amount, session);
 
-    await session.commitTransaction();
+    if (ownsSession) {
+      await session.commitTransaction();
+    }
     return voucher;
   } catch (error) {
-    await session.abortTransaction();
+    if (ownsSession) {
+      await session.abortTransaction();
+    }
     throw error;
   } finally {
-    await session.endSession();
+    if (ownsSession) {
+      await session.endSession();
+    }
   }
 }
 
