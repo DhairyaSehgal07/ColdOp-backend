@@ -5,12 +5,18 @@ export enum Plan {
   BASE = "base",
 }
 
+export interface ChamberObj {
+  name: string;
+  capacity: number;
+}
+
 // Interface for ColdStorage document
 export interface IColdStorage extends Document {
   name: string;
   address: string;
   mobileNumber: string;
   capacity: number;
+  chambers?: ChamberObj[];
   imageUrl?: string;
   isPaid: boolean;
   isActive: boolean;
@@ -22,6 +28,14 @@ export interface IColdStorage extends Document {
   // preferences?: Preferences; // You can populate this if you have Preferences model
 }
 
+const ChamberSchema = new Schema<ChamberObj>(
+  {
+    name: { type: String, required: true, trim: true },
+    capacity: { type: Number, required: true, min: 0 },
+  },
+  { _id: false },
+);
+
 // Mongoose schema
 const ColdStorageSchema = new Schema<IColdStorage>(
   {
@@ -29,6 +43,7 @@ const ColdStorageSchema = new Schema<IColdStorage>(
     address: { type: String, required: true },
     mobileNumber: { type: String, required: true, unique: true },
     capacity: { type: Number, required: true },
+    chambers: { type: [ChamberSchema], default: undefined },
     imageUrl: { type: String, default: "" },
     isPaid: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },

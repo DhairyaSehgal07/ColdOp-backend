@@ -12,6 +12,7 @@ export interface UpdatePreferencesInput {
   commodities?: CommodityObj[];
   reportFormat?: string;
   showFinances?: boolean;
+  showViewFilters?: boolean;
   labourCost?: number;
   stockFilter?: StockFilterObj;
   customMarka?: boolean;
@@ -131,6 +132,7 @@ export async function updatePreferencesByColdStorageId(
       "commodities",
       "reportFormat",
       "showFinances",
+      "showViewFilters",
       "labourCost",
       "stockFilter",
       "customMarka",

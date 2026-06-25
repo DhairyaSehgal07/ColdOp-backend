@@ -7,7 +7,9 @@ import {
   getPreferencesHandler,
   updatePreferencesHandler,
 } from "../preferences/preferences.controller.js";
+import { Plan } from "./cold-storage.model.js";
 import {
+  chambersJsonSchema,
   createColdStorageSchema,
   getColdStoragesQuerySchema,
 } from "./cold-storage.schema.js";
@@ -40,6 +42,22 @@ export async function coldStorageRoutes(fastify: FastifyInstance) {
     {
       schema: {
         ...createColdStorageSchema,
+        body: {
+          type: "object",
+          required: ["name", "address", "mobileNumber", "capacity"],
+          properties: {
+            name: { type: "string", minLength: 2, maxLength: 100 },
+            address: { type: "string", minLength: 5, maxLength: 255 },
+            mobileNumber: {
+              type: "string",
+              pattern: "^[6-9]\\d{9}$",
+            },
+            capacity: { type: "number", exclusiveMinimum: 0 },
+            imageUrl: { type: "string", format: "uri" },
+            chambers: chambersJsonSchema,
+            plan: { type: "string", enum: Object.values(Plan) },
+          },
+        },
         description: "Create a new cold storage",
         tags: ["Cold Storage"],
         summary: "Create cold storage",

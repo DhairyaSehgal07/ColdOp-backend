@@ -3,7 +3,6 @@ import type { FastifyBaseLogger } from "fastify";
 import { Farmer } from "../farmer/farmer-model.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
 import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
-import { OutgoingGatePass } from "../outgoing-gate-pass/outgoing-gate-pass.model.js";
 import { StoreAdmin } from "../store-admin/store-admin.model.js";
 import { ValidationError } from "../../../utils/errors.js";
 
@@ -709,71 +708,6 @@ export async function getVarietyBreakdown(
   };
 }
 
-/** Sort bagSizes by name on incoming docs; sort orderDetails by size on outgoing docs (report/daybook style). */
-function sortOrderDetailsForReport(
-  orders: Array<
-    | { bagSizes?: { name: string }[]; orderDetails?: { size: string }[] }
-    | {
-        toObject: () => Record<string, unknown>;
-        bagSizes?: unknown;
-        orderDetails?: unknown;
-      }
-  >,
-): Record<string, unknown>[] {
-  return orders.map((order) => {
-    const hasToObject =
-      typeof (order as { toObject?: () => Record<string, unknown> })
-        .toObject === "function";
-    const obj = hasToObject
-      ? (order as { toObject: () => Record<string, unknown> }).toObject()
-      : { ...(order as Record<string, unknown>) };
-    if (Array.isArray(obj.bagSizes)) {
-      (obj as { bagSizes: { name: string }[] }).bagSizes = [
-        ...(obj.bagSizes as { name: string }[]),
-      ].sort((a, b) => a.name.localeCompare(b.name));
-    }
-    if (Array.isArray(obj.orderDetails)) {
-      (obj as { orderDetails: { size: string }[] }).orderDetails = [
-        ...(obj.orderDetails as { size: string }[]),
-      ].sort((a, b) => a.size.localeCompare(b.size));
-    }
-    return obj as Record<string, unknown>;
-  });
-}
-
-/** Report response when groupByFarmers is false: flat incoming/outgoing arrays (daybook-style for react-pdf). */
-export interface ReportsDataFlat {
-  from: string;
-  to: string;
-  incoming: Record<string, unknown>[];
-  outgoing: Record<string, unknown>[];
-}
-
-/** Farmer info for grouped report (minimal for PDF display). */
-export interface ReportFarmerInfo {
-  name: string;
-  mobileNumber?: string;
-  address?: string;
-  accountNumber?: number;
-}
-
-/** One farmer's block when groupByFarmers is true. */
-export interface ReportFarmerBlock {
-  farmer: ReportFarmerInfo;
-  incoming: Record<string, unknown>[];
-  outgoing: Record<string, unknown>[];
-}
-
-/** Report response when groupByFarmers is true: grouped by farmer for react-pdf. */
-export interface ReportsDataGroupedByFarmer {
-  from: string;
-  to: string;
-  groupedByFarmer: true;
-  farmers: ReportFarmerBlock[];
-}
-
-export type GetReportsResult = ReportsDataFlat | ReportsDataGroupedByFarmer;
-
 /**
  * Get all incoming gate passes for the logged-in cold storage.
  * Returns documents with populated farmerStorageLinkId (farmerId, accountNumber) and farmer details.
@@ -835,180 +769,269 @@ export async function getIncomingGatePassesForStorage(
   return list as unknown as Record<string, unknown>[];
 }
 
-/**
- * Get reports: all incoming and outgoing orders for the storage in a date range.
- * Response is daybook-style (same document shape as daybook) for use in react-pdf.
- * Optional groupByFarmers: when true, groups documents by farmer (incoming/outgoing per farmer).
- */
-export async function getReports(
-  coldStorageId: string,
-  options: { from: string; to: string; groupByFarmers?: boolean },
-  logger?: FastifyBaseLogger,
-): Promise<GetReportsResult> {
-  if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
-    throw new ValidationError(
-      "Invalid cold storage ID format",
-      "INVALID_COLD_STORAGE_ID",
-    );
-  }
+/* =======================
+   Advanced analytics
+======================= */
 
-  const { from, to, groupByFarmers = false } = options;
-  const fromRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!from?.trim() || !fromRegex.test(from)) {
-    throw new ValidationError("from must be YYYY-MM-DD", "INVALID_FROM_DATE");
-  }
-  if (!to?.trim() || !fromRegex.test(to)) {
-    throw new ValidationError("to must be YYYY-MM-DD", "INVALID_TO_DATE");
-  }
+const EMPTY_CHAMBER = "(No chamber)";
+const EMPTY_FLOOR = "(No floor)";
 
-  const fromDate = new Date(from);
-  const toEnd = new Date(to);
-  toEnd.setHours(23, 59, 59, 999);
-  const dateFilter = { date: { $gte: fromDate, $lte: toEnd } };
+function normalizeChamber(v?: string | null): string {
+  return (v ?? "").trim() || EMPTY_CHAMBER;
+}
 
-  const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
-  const farmerStorageLinkIds = await FarmerStorageLink.find(
-    { coldStorageId: coldStorageObjectId },
-    { _id: 1, farmerId: 1, accountNumber: 1 },
-  )
-    .lean()
-    .then((links) => links.map((l) => l._id));
+function normalizeFloor(v?: string | null): string {
+  return (v ?? "").trim() || EMPTY_FLOOR;
+}
 
-  if (farmerStorageLinkIds.length === 0) {
-    logger?.info(
-      { coldStorageId, from, to },
-      "Reports: no farmer-storage links",
-    );
-    return groupByFarmers
-      ? { from, to, groupedByFarmer: true, farmers: [] }
-      : { from, to, incoming: [], outgoing: [] };
-  }
-
-  const incomingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber stockFilter customMarka createdAt";
-  const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots createdAt";
-
-  const populateLink = [
-    {
-      path: "farmerStorageLinkId",
-      select: "farmerId accountNumber",
-      populate: {
-        path: "farmerId",
-        model: Farmer,
-        select: "name mobileNumber address",
-      },
-    },
-    {
-      path: "createdBy",
-      model: StoreAdmin,
-      select: "name",
-    },
-  ];
-
-  const [incomingList, outgoingList] = await Promise.all([
-    IncomingGatePass.find({
-      farmerStorageLinkId: { $in: farmerStorageLinkIds },
-      ...dateFilter,
-    })
-      .sort({ createdAt: 1 })
-      .select(incomingSelect)
-      .populate(populateLink)
-      .lean(),
-    OutgoingGatePass.find({
-      farmerStorageLinkId: { $in: farmerStorageLinkIds },
-      ...dateFilter,
-    })
-      .sort({ createdAt: 1 })
-      .select(outgoingSelect)
-      .populate(populateLink)
-      .lean(),
-  ]);
-
-  const incomingSorted = sortOrderDetailsForReport(
-    incomingList as { bagSizes?: { name: string }[] }[],
-  );
-  const outgoingSorted = sortOrderDetailsForReport(
-    outgoingList as { orderDetails?: { size: string }[] }[],
-  );
-
-  if (!groupByFarmers) {
-    logger?.info(
-      {
-        coldStorageId,
-        from,
-        to,
-        incomingCount: incomingSorted.length,
-        outgoingCount: outgoingSorted.length,
-      },
-      "Reports (flat) retrieved",
-    );
-    return { from, to, incoming: incomingSorted, outgoing: outgoingSorted };
-  }
-
-  type PopulatedLink = {
-    _id: mongoose.Types.ObjectId;
-    farmerId: { name: string; mobileNumber?: string; address?: string };
-    accountNumber: number;
+export interface AdvancedAnalyticsBag {
+  name: string;
+  initialQuantity: number;
+  currentQuantity: number;
+  location: {
+    chamber: string;
+    floor: string;
+    row: string;
   };
+}
 
-  const farmerBlocks = new Map<
+export interface AdvancedAnalyticsOrderSummary {
+  _id: string;
+  gatePassNo: number;
+  date: string;
+  variety: string;
+  farmerId: string;
+  farmerName: string;
+  bagSizes: AdvancedAnalyticsBag[];
+}
+
+export interface AdvancedAnalyticsFloor {
+  floor: string;
+  initialTotal: number;
+  currentTotal: number;
+}
+
+export interface AdvancedAnalyticsChamber {
+  chamber: string;
+  initialTotal: number;
+  currentTotal: number;
+  orderCount: number;
+  floors: AdvancedAnalyticsFloor[];
+  orders: AdvancedAnalyticsOrderSummary[];
+}
+
+export interface AdvancedAnalyticsFarmer {
+  farmerId: string;
+  farmerName: string;
+  accountNumber: number | null;
+  orderCount: number;
+  orders: AdvancedAnalyticsOrderSummary[];
+}
+
+export interface AdvancedAnalyticsData {
+  byLocation: {
+    chambers: AdvancedAnalyticsChamber[];
+  };
+  byFarmer: AdvancedAnalyticsFarmer[];
+}
+
+interface AdvancedAnalyticsPassBag {
+  name: string;
+  initialQuantity: number;
+  currentQuantity: number;
+  location?: {
+    chamber?: string;
+    floor?: string;
+    row?: string;
+  };
+}
+
+interface AdvancedAnalyticsPassFarmer {
+  _id?: string;
+  name?: string;
+}
+
+interface AdvancedAnalyticsPassLink {
+  farmerId?: AdvancedAnalyticsPassFarmer | string;
+  accountNumber?: number;
+}
+
+interface AdvancedAnalyticsPass {
+  _id: string | { toString(): string };
+  gatePassNo: number;
+  date: Date | string;
+  variety: string;
+  farmerStorageLinkId?: AdvancedAnalyticsPassLink;
+  bagSizes?: AdvancedAnalyticsPassBag[];
+}
+
+type ChamberEntry = {
+  pass: AdvancedAnalyticsPass;
+  bagSizesInChamber: AdvancedAnalyticsPassBag[];
+};
+
+function passId(pass: AdvancedAnalyticsPass): string {
+  if (typeof pass._id === "string") return pass._id;
+  return pass._id.toString();
+}
+
+function passDateIso(pass: AdvancedAnalyticsPass): string {
+  const d = pass.date;
+  return d instanceof Date ? d.toISOString() : String(d);
+}
+
+function farmerIdFromPass(pass: AdvancedAnalyticsPass): string {
+  const farmer = pass.farmerStorageLinkId?.farmerId;
+  if (farmer && typeof farmer === "object" && farmer._id) {
+    return String(farmer._id);
+  }
+  return "(Unknown)";
+}
+
+function farmerNameFromPass(pass: AdvancedAnalyticsPass): string {
+  const farmer = pass.farmerStorageLinkId?.farmerId;
+  if (farmer && typeof farmer === "object" && farmer.name) {
+    return farmer.name;
+  }
+  return "Unknown";
+}
+
+function toAdvancedAnalyticsBag(bag: AdvancedAnalyticsPassBag): AdvancedAnalyticsBag {
+  return {
+    name: bag.name,
+    initialQuantity: bag.initialQuantity,
+    currentQuantity: bag.currentQuantity,
+    location: {
+      chamber: normalizeChamber(bag.location?.chamber),
+      floor: normalizeFloor(bag.location?.floor),
+      row: bag.location?.row ?? "",
+    },
+  };
+}
+
+function sumBags(
+  entries: ChamberEntry[],
+  getQty: (bag: AdvancedAnalyticsPassBag) => number,
+): number {
+  let total = 0;
+  for (const entry of entries) {
+    for (const bag of entry.bagSizesInChamber) {
+      total += getQty(bag);
+    }
+  }
+  return total;
+}
+
+function groupBagsByChamber(
+  bagSizes: AdvancedAnalyticsPassBag[],
+): Map<string, AdvancedAnalyticsPassBag[]> {
+  const byChamber = new Map<string, AdvancedAnalyticsPassBag[]>();
+  for (const bag of bagSizes) {
+    const chamber = normalizeChamber(bag.location?.chamber);
+    const list = byChamber.get(chamber) ?? [];
+    list.push(bag);
+    byChamber.set(chamber, list);
+  }
+  return byChamber;
+}
+
+function buildAdvancedAnalytics(
+  passes: AdvancedAnalyticsPass[],
+): AdvancedAnalyticsData {
+  const chamberMap = new Map<
     string,
     {
-      farmer: ReportFarmerInfo;
-      incoming: Record<string, unknown>[];
-      outgoing: Record<string, unknown>[];
+      entries: ChamberEntry[];
+      floorTotals: Map<string, { initial: number; current: number }>;
     }
   >();
 
-  function getLinkKey(doc: Record<string, unknown>): string | null {
-    const link = doc.farmerStorageLinkId as PopulatedLink | undefined;
-    if (!link?._id) return null;
-    return link._id.toString();
-  }
+  for (const pass of passes) {
+    const byChamber = groupBagsByChamber(pass.bagSizes ?? []);
+    for (const [chamber, bags] of byChamber) {
+      if (bags.length === 0) continue;
 
-  function farmerFromDoc(doc: Record<string, unknown>): ReportFarmerInfo {
-    const link = doc.farmerStorageLinkId as PopulatedLink | undefined;
-    const f = link?.farmerId;
-    return {
-      name: f?.name ?? "—",
-      mobileNumber: f?.mobileNumber,
-      address: f?.address,
-      accountNumber: (link as { accountNumber?: number })?.accountNumber,
-    };
-  }
+      if (!chamberMap.has(chamber)) {
+        chamberMap.set(chamber, { entries: [], floorTotals: new Map() });
+      }
+      const bucket = chamberMap.get(chamber)!;
+      bucket.entries.push({ pass, bagSizesInChamber: bags });
 
-  for (const doc of incomingSorted) {
-    const key = getLinkKey(doc);
-    if (!key) continue;
-    if (!farmerBlocks.has(key)) {
-      farmerBlocks.set(key, {
-        farmer: farmerFromDoc(doc),
-        incoming: [],
-        outgoing: [],
-      });
+      for (const bag of bags) {
+        const floor = normalizeFloor(bag.location?.floor);
+        const prev = bucket.floorTotals.get(floor) ?? { initial: 0, current: 0 };
+        prev.initial += bag.initialQuantity;
+        prev.current += bag.currentQuantity;
+        bucket.floorTotals.set(floor, prev);
+      }
     }
-    farmerBlocks.get(key)!.incoming.push(doc);
-  }
-  for (const doc of outgoingSorted) {
-    const key = getLinkKey(doc);
-    if (!key) continue;
-    if (!farmerBlocks.has(key)) {
-      farmerBlocks.set(key, {
-        farmer: farmerFromDoc(doc),
-        incoming: [],
-        outgoing: [],
-      });
-    }
-    farmerBlocks.get(key)!.outgoing.push(doc);
   }
 
-  const farmers = Array.from(farmerBlocks.values());
+  const chambers: AdvancedAnalyticsChamber[] = [...chamberMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([chamber, { entries, floorTotals }]) => ({
+      chamber,
+      orderCount: entries.length,
+      initialTotal: sumBags(entries, (b) => b.initialQuantity),
+      currentTotal: sumBags(entries, (b) => b.currentQuantity),
+      floors: [...floorTotals.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([floor, t]) => ({
+          floor,
+          initialTotal: t.initial,
+          currentTotal: t.current,
+        })),
+      orders: entries.map((entry) => ({
+        _id: passId(entry.pass),
+        gatePassNo: entry.pass.gatePassNo,
+        date: passDateIso(entry.pass),
+        variety: entry.pass.variety,
+        farmerId: farmerIdFromPass(entry.pass),
+        farmerName: farmerNameFromPass(entry.pass),
+        bagSizes: entry.bagSizesInChamber.map(toAdvancedAnalyticsBag),
+      })),
+    }));
 
-  logger?.info(
-    { coldStorageId, from, to, farmerCount: farmers.length },
-    "Reports (grouped by farmer) retrieved",
-  );
+  const farmerMap = new Map<string, AdvancedAnalyticsPass[]>();
+  for (const pass of passes) {
+    const id = farmerIdFromPass(pass);
+    const list = farmerMap.get(id) ?? [];
+    list.push(pass);
+    farmerMap.set(id, list);
+  }
 
-  return { from, to, groupedByFarmer: true, farmers };
+  const byFarmer: AdvancedAnalyticsFarmer[] = [...farmerMap.entries()]
+    .sort(([, a], [, b]) =>
+      farmerNameFromPass(a[0]!).localeCompare(farmerNameFromPass(b[0]!)),
+    )
+    .map(([farmerId, farmerPasses]) => ({
+      farmerId,
+      farmerName: farmerNameFromPass(farmerPasses[0]!),
+      accountNumber: farmerPasses[0]?.farmerStorageLinkId?.accountNumber ?? null,
+      orderCount: farmerPasses.length,
+      orders: farmerPasses.map((pass) => ({
+        _id: passId(pass),
+        gatePassNo: pass.gatePassNo,
+        date: passDateIso(pass),
+        variety: pass.variety,
+        farmerId,
+        farmerName: farmerNameFromPass(pass),
+        bagSizes: (pass.bagSizes ?? []).map(toAdvancedAnalyticsBag),
+      })),
+    }));
+
+  return { byLocation: { chambers }, byFarmer };
+}
+
+/**
+ * Get advanced analytics for a cold storage: location drill-down (chambers → floors → orders)
+ * and farmer grouping. Aggregates incoming gate passes server-side.
+ */
+export async function getAdvancedAnalytics(
+  coldStorageId: string,
+  logger?: FastifyBaseLogger,
+): Promise<AdvancedAnalyticsData> {
+  const rawPasses = await getIncomingGatePassesForStorage(coldStorageId, logger);
+  const passes = rawPasses as unknown as AdvancedAnalyticsPass[];
+  return buildAdvancedAnalytics(passes);
 }

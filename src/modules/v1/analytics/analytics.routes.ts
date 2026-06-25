@@ -3,8 +3,8 @@ import {
   getSummaryHandler,
   getTopFarmersHandler,
   getVarietyBreakdownHandler,
-  getReportsHandler,
   getIncomingGatePassesHandler,
+  getAdvancedAnalyticsHandler,
 } from "./analytics.controller.js";
 import { authenticate } from "../../../utils/auth.js";
 
@@ -161,6 +161,124 @@ const varietyBreakdownResultSchema = {
     },
   },
   required: ["variety", "sizes"],
+};
+
+const advancedAnalyticsLocationSchema = {
+  type: "object" as const,
+  properties: {
+    chamber: { type: "string" },
+    floor: { type: "string" },
+    row: { type: "string" },
+  },
+  required: ["chamber", "floor", "row"],
+};
+
+const advancedAnalyticsBagSchema = {
+  type: "object" as const,
+  properties: {
+    name: { type: "string" },
+    initialQuantity: { type: "number" },
+    currentQuantity: { type: "number" },
+    location: advancedAnalyticsLocationSchema,
+  },
+  required: ["name", "initialQuantity", "currentQuantity", "location"],
+};
+
+const advancedAnalyticsOrderSummarySchema = {
+  type: "object" as const,
+  properties: {
+    _id: { type: "string" },
+    gatePassNo: { type: "number" },
+    date: { type: "string" },
+    variety: { type: "string" },
+    farmerId: { type: "string" },
+    farmerName: { type: "string" },
+    bagSizes: {
+      type: "array" as const,
+      items: advancedAnalyticsBagSchema,
+    },
+  },
+  required: [
+    "_id",
+    "gatePassNo",
+    "date",
+    "variety",
+    "farmerId",
+    "farmerName",
+    "bagSizes",
+  ],
+};
+
+const advancedAnalyticsFloorSchema = {
+  type: "object" as const,
+  properties: {
+    floor: { type: "string" },
+    initialTotal: { type: "number" },
+    currentTotal: { type: "number" },
+  },
+  required: ["floor", "initialTotal", "currentTotal"],
+};
+
+const advancedAnalyticsChamberSchema = {
+  type: "object" as const,
+  properties: {
+    chamber: { type: "string" },
+    initialTotal: { type: "number" },
+    currentTotal: { type: "number" },
+    orderCount: { type: "number" },
+    floors: {
+      type: "array" as const,
+      items: advancedAnalyticsFloorSchema,
+    },
+    orders: {
+      type: "array" as const,
+      items: advancedAnalyticsOrderSummarySchema,
+    },
+  },
+  required: [
+    "chamber",
+    "initialTotal",
+    "currentTotal",
+    "orderCount",
+    "floors",
+    "orders",
+  ],
+};
+
+const advancedAnalyticsFarmerSchema = {
+  type: "object" as const,
+  properties: {
+    farmerId: { type: "string" },
+    farmerName: { type: "string" },
+    accountNumber: { oneOf: [{ type: "number" }, { type: "null" }] },
+    orderCount: { type: "number" },
+    orders: {
+      type: "array" as const,
+      items: advancedAnalyticsOrderSummarySchema,
+    },
+  },
+  required: ["farmerId", "farmerName", "accountNumber", "orderCount", "orders"],
+};
+
+const advancedAnalyticsDataSchema = {
+  type: "object" as const,
+  properties: {
+    byLocation: {
+      type: "object" as const,
+      properties: {
+        chambers: {
+          type: "array" as const,
+          items: advancedAnalyticsChamberSchema,
+        },
+      },
+      required: ["chambers"],
+    },
+    byFarmer: {
+      type: "array" as const,
+      items: advancedAnalyticsFarmerSchema,
+    },
+  },
+  required: ["byLocation", "byFarmer"],
 };
 
 /**
@@ -450,6 +568,47 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     getIncomingGatePassesHandler as never,
   );
 
+  // GET /location-analytics – pre-computed location drill-down and farmer grouping
+  fastify.get(
+    "/location-analytics",
+    {
+      schema: {
+        description:
+          "Get location analytics for the authenticated cold storage: chamber-wise location drill-down (chambers, floors, orders) and farmer grouping. Returns both initial and current quantities; the client toggles display mode. Aggregated from IncomingGatePass bag locations.",
+        tags: ["Analytics"],
+        summary: "Get location analytics (location + farmer)",
+        response: {
+          200: {
+            description: "Location analytics data",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: advancedAnalyticsDataSchema,
+              message: { type: "string" },
+            },
+            required: ["success", "data", "message"],
+          },
+          401: {
+            description: "Unauthorized or missing cold storage in token",
+            ...errorResponse,
+          },
+          500: {
+            description: "Server error",
+            ...errorResponse,
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getAdvancedAnalyticsHandler as never,
+  );
+
   // GET /variety-breakdown?variety=... – sizes and per-farmer contribution for a variety
   fastify.get(
     "/variety-breakdown",
@@ -510,145 +669,5 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
       },
     },
     getVarietyBreakdownHandler as never,
-  );
-
-  // GET /get-reports – incoming and outgoing orders in date range (daybook-style for react-pdf); optional groupByFarmers
-  fastify.get(
-    "/get-reports",
-    {
-      schema: {
-        description:
-          "Get all incoming and outgoing orders for the storage between from and to dates. Response is daybook-style (same document shape as daybook) for display in react-pdf. If groupByFarmers=true, documents are grouped by farmer with incoming/outgoing arrays per farmer.",
-        tags: ["Analytics"],
-        summary: "Get reports (incoming/outgoing orders by date range)",
-        querystring: {
-          type: "object",
-          required: ["from", "to"],
-          properties: {
-            from: {
-              type: "string",
-              description: "Start date (YYYY-MM-DD)",
-            },
-            to: {
-              type: "string",
-              description: "End date (YYYY-MM-DD)",
-            },
-            groupByFarmers: {
-              type: "string",
-              description:
-                "If 'true', group incoming and outgoing documents by farmer",
-              enum: ["true", "false"],
-            },
-          },
-        },
-        response: {
-          200: {
-            description:
-              "Reports: flat incoming/outgoing arrays or grouped by farmer",
-            type: "object",
-            properties: {
-              success: { type: "boolean" },
-              data: {
-                oneOf: [
-                  {
-                    type: "object",
-                    properties: {
-                      from: { type: "string" },
-                      to: { type: "string" },
-                      incoming: {
-                        type: "array",
-                        items: {
-                          type: "object",
-                          properties: {
-                            customMarka: { type: "string" },
-                            stockFilter: { type: "string" },
-                          },
-                          additionalProperties: true,
-                        },
-                      },
-                      outgoing: {
-                        type: "array",
-                        items: {
-                          type: "object",
-                          additionalProperties: true,
-                        },
-                      },
-                    },
-                    required: ["from", "to", "incoming", "outgoing"],
-                  },
-                  {
-                    type: "object",
-                    properties: {
-                      from: { type: "string" },
-                      to: { type: "string" },
-                      groupedByFarmer: { type: "boolean", const: true },
-                      farmers: {
-                        type: "array",
-                        items: {
-                          type: "object",
-                          properties: {
-                            farmer: {
-                              type: "object",
-                              properties: {
-                                name: { type: "string" },
-                                mobileNumber: { type: "string" },
-                                address: { type: "string" },
-                                accountNumber: { type: "number" },
-                              },
-                            },
-                            incoming: {
-                              type: "array",
-                              items: {
-                                type: "object",
-                                properties: {
-                                  customMarka: { type: "string" },
-                                  stockFilter: { type: "string" },
-                                },
-                                additionalProperties: true,
-                              },
-                            },
-                            outgoing: {
-                              type: "array",
-                              items: {
-                                type: "object",
-                                additionalProperties: true,
-                              },
-                            },
-                          },
-                          required: ["farmer", "incoming", "outgoing"],
-                        },
-                      },
-                    },
-                    required: ["from", "to", "groupedByFarmer", "farmers"],
-                  },
-                ],
-              },
-              message: { type: "string" },
-            },
-            required: ["success", "data", "message"],
-          },
-          401: {
-            description: "Unauthorized or missing cold storage in token",
-            ...errorResponse,
-          },
-          400: {
-            description: "Invalid from/to date format (must be YYYY-MM-DD)",
-            ...errorResponse,
-          },
-          500: {
-            description: "Server error",
-            ...errorResponse,
-          },
-        },
-      },
-      preHandler: [authenticate],
-      config: {
-        rateLimit: {
-          max: 100,
-          timeWindow: "1 minute",
-        },
-      },
-    },
-    getReportsHandler as never,
   );
 }

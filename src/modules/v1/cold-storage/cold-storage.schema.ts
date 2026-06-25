@@ -2,6 +2,29 @@ import { z } from "zod";
 import { Plan } from "./cold-storage.model.js";
 import mongoose from "mongoose";
 
+const chamberSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Chamber name is required")
+    .max(100, "Chamber name must not exceed 100 characters"),
+  capacity: z.coerce
+    .number()
+    .positive("Chamber capacity must be greater than zero"),
+});
+
+export const chambersJsonSchema = {
+  type: "array" as const,
+  items: {
+    type: "object" as const,
+    required: ["name", "capacity"],
+    properties: {
+      name: { type: "string" as const, minLength: 1, maxLength: 100 },
+      capacity: { type: "number" as const, exclusiveMinimum: 0 },
+    },
+  },
+};
+
 export const createColdStorageSchema = z.object({
   body: z.object({
     name: z
@@ -28,6 +51,8 @@ export const createColdStorageSchema = z.object({
     capacity: z.coerce.number().positive("Capacity must be greater than zero"),
 
     imageUrl: z.string().trim().url("Image URL must be a valid URL").optional(),
+
+    chambers: z.array(chamberSchema).optional(),
 
     plan: z.nativeEnum(Plan).optional(),
   }),
@@ -88,6 +113,8 @@ export const updateColdStorageBodySchema = z.object({
     .optional(),
 
   imageUrl: z.string().trim().url("Image URL must be a valid URL").optional(),
+
+  chambers: z.array(chamberSchema).optional(),
 
   plan: z.nativeEnum(Plan).optional(),
 });

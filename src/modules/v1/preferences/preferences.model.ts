@@ -26,6 +26,9 @@ export interface IPreferences extends Document {
   /** Whether financial data should be visible */
   showFinances: boolean;
 
+  /** Whether view filters should be shown in the UI */
+  showViewFilters?: boolean;
+
   /** Labour cost (default 0) */
   labourCost: number;
 
@@ -94,6 +97,10 @@ const PreferencesSchema = new Schema<IPreferences>(
     showFinances: {
       type: Boolean,
       default: true,
+    },
+
+    showViewFilters: {
+      type: Boolean,
     },
 
     labourCost: {

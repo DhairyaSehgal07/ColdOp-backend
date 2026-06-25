@@ -22,6 +22,13 @@ import {
 } from "./store-admin.schema.js";
 import { authenticate, authorize } from "../../../utils/auth.js";
 import { Role } from "./store-admin.model.js";
+import { preferencesDataProperties } from "../preferences/preferences.schema.js";
+
+const populatedPreferencesProperty = {
+  type: "object",
+  description: "Cold storage preferences (populated preferencesId)",
+  properties: preferencesDataProperties,
+};
 
 /**
  * Register store admin routes
@@ -431,7 +438,13 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                 type: "object",
                 properties: {
                   storeAdmin: { type: "object", additionalProperties: true },
-                  coldStorage: { type: "object", additionalProperties: true },
+                  coldStorage: {
+                    type: "object",
+                    additionalProperties: true,
+                    properties: {
+                      preferencesId: populatedPreferencesProperty,
+                    },
+                  },
                 },
               },
             },
@@ -497,7 +510,13 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                 type: "object",
                 properties: {
                   storeAdmin: { type: "object", additionalProperties: true },
-                  coldStorage: { type: "object", additionalProperties: true },
+                  coldStorage: {
+                    type: "object",
+                    additionalProperties: true,
+                    properties: {
+                      preferencesId: populatedPreferencesProperty,
+                    },
+                  },
                 },
               },
               message: { type: "string" },
@@ -706,6 +725,15 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                     additionalProperties: true,
                     description:
                       "Store admin with coldStorageId and coldStorageId.preferencesId populated",
+                    properties: {
+                      coldStorageId: {
+                        type: "object",
+                        additionalProperties: true,
+                        properties: {
+                          preferencesId: populatedPreferencesProperty,
+                        },
+                      },
+                    },
                   },
                   token: { type: "string" },
                 },

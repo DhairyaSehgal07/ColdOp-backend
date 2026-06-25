@@ -3,8 +3,8 @@ import {
   getStockSummary,
   getTopFarmersForStore,
   getVarietyBreakdown,
-  getReports,
   getIncomingGatePassesForStorage,
+  getAdvancedAnalytics,
 } from "./analytics.service.js";
 import { AppError, ValidationError } from "../../../utils/errors.js";
 import type { AuthenticatedRequest } from "../../../utils/auth.js";
@@ -261,13 +261,11 @@ export async function getIncomingGatePassesHandler(
 }
 
 /**
- * GET /get-reports – incoming and outgoing orders for the storage in a date range.
- * Same document shape as daybook for react-pdf. Optional groupByFarmers groups by farmer.
+ * GET /location-analytics – pre-computed location drill-down (chambers → floors → orders)
+ * and farmer grouping for the Advanced Analytics page.
  */
-export async function getReportsHandler(
-  request: FastifyRequest<{
-    Querystring: { from: string; to: string; groupByFarmers?: string };
-  }>,
+export async function getAdvancedAnalyticsHandler(
+  request: FastifyRequest,
   reply: FastifyReply,
 ) {
   try {
@@ -289,24 +287,15 @@ export async function getReportsHandler(
       });
     }
 
-    const from = (request.query as { from?: string }).from;
-    const to = (request.query as { to?: string }).to;
-    const groupByFarmers =
-      (request.query as { groupByFarmers?: string }).groupByFarmers === "true";
-
-    const result = await getReports(
-      coldStorageId,
-      { from: from ?? "", to: to ?? "", groupByFarmers },
-      request.log,
-    );
+    const data = await getAdvancedAnalytics(coldStorageId, request.log);
 
     return reply.code(200).send({
       success: true,
-      data: result,
-      message: "Reports retrieved successfully",
+      data,
+      message: "Location analytics retrieved successfully",
     });
   } catch (error) {
-    request.log.error({ error }, "Error in getReportsHandler");
+    request.log.error({ error }, "Error in getAdvancedAnalyticsHandler");
     if (error instanceof ValidationError) {
       return reply.code(error.statusCode).send({
         success: false,
