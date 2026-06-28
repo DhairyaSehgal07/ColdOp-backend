@@ -997,7 +997,7 @@ export async function searchOrdersByReceiptNumber(
   const incomingSelect =
     "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber stockFilter customMarka createdAt";
   const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots isNull createdAt";
+    "_id farmerStorageLinkId createdBy gatePassNo date type from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots isNull createdAt";
   const populateLink = [
     {
       path: "farmerStorageLinkId",

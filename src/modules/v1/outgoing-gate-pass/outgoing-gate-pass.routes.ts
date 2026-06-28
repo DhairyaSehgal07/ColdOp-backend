@@ -9,6 +9,48 @@ import {
 import { createOutgoingGatePassSchema } from "./outgoing-gate-pass.schema.js";
 import { authenticate } from "../../../utils/auth.js";
 
+const outgoingOrderDetailItemSchema = {
+  type: "object",
+  properties: {
+    variety: { type: "string" },
+    size: { type: "string" },
+    quantityAvailable: { type: "number" },
+    quantityIssued: { type: "number" },
+    location: {
+      type: "object",
+      properties: {
+        chamber: { type: "string" },
+        floor: { type: "string" },
+        row: { type: "string" },
+      },
+    },
+  },
+  required: ["variety", "size", "quantityAvailable", "quantityIssued"],
+} as const;
+
+const outgoingGatePassDataSchema = {
+  type: "object",
+  properties: {
+    _id: { type: "string" },
+    gatePassNo: { type: "number" },
+    date: { type: "string" },
+    from: { type: "string" },
+    to: { type: "string" },
+    truckNumber: { type: "string" },
+    orderDetails: {
+      type: "array",
+      items: outgoingOrderDetailItemSchema,
+    },
+    incomingGatePassSnapshots: { type: "array", items: { type: "object" } },
+    remarks: { type: "string" },
+    manualParchiNumber: { type: "number" },
+    isNull: { type: "boolean" },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+  additionalProperties: true,
+} as const;
+
 /**
  * @param fastify - Fastify instance
  */
@@ -117,7 +159,7 @@ export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
       schema: {
         ...createOutgoingGatePassSchema,
         description:
-          "Create a new outgoing gate pass from incoming gate pass allocations",
+          "Create a new outgoing gate pass from incoming gate pass allocations. Multiple varieties are supported via multiple incomingGatePasses entries; each orderDetails line includes variety.",
         tags: ["Outgoing Gate Pass"],
         summary: "Create outgoing gate pass",
         response: {
@@ -127,7 +169,7 @@ export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
             properties: {
               status: { type: "string" },
               message: { type: "string" },
-              data: { type: "object", additionalProperties: true },
+              data: outgoingGatePassDataSchema,
             },
           },
           400: {
@@ -269,7 +311,7 @@ export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
             properties: {
               status: { type: "string" },
               message: { type: "string" },
-              data: { type: "object", additionalProperties: true },
+              data: outgoingGatePassDataSchema,
             },
           },
           400: {

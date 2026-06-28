@@ -37,7 +37,7 @@ export const GATE_PASS_LIST_INCOMING_SELECT =
   "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber stockFilter customMarka createdAt";
 
 export const GATE_PASS_LIST_OUTGOING_SELECT =
-  "_id farmerStorageLinkId createdBy gatePassNo date type variety from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots isNull createdAt";
+  "_id farmerStorageLinkId createdBy gatePassNo date type from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots isNull createdAt";
 
 /** Populate config shared with daybook gate-pass list responses. */
 export const GATE_PASS_LIST_POPULATE_LINK = [
@@ -235,9 +235,12 @@ export function sortGatePassOrderDetails(
       ].sort((a, b) => a.name.localeCompare(b.name));
     }
     if (Array.isArray(obj.orderDetails)) {
-      (obj as { orderDetails: { size: string }[] }).orderDetails = [
-        ...(obj.orderDetails as { size: string }[]),
-      ].sort((a, b) => a.size.localeCompare(b.size));
+      (obj as { orderDetails: { variety?: string; size: string }[] }).orderDetails = [
+        ...(obj.orderDetails as { variety?: string; size: string }[]),
+      ].sort((a, b) => {
+        const varietyCmp = (a.variety ?? "").localeCompare(b.variety ?? "");
+        return varietyCmp !== 0 ? varietyCmp : a.size.localeCompare(b.size);
+      });
     }
     return obj as Record<string, unknown>;
   });

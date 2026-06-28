@@ -37,6 +37,7 @@ export const outgoingIncomingGatePassAllocationSchema = z.object({
       (val) => mongoose.Types.ObjectId.isValid(val),
       "Invalid incoming gate pass ID format",
     ),
+  /** Validated against incoming pass; persisted on aggregated orderDetails lines. */
   variety: z
     .string()
     .trim()

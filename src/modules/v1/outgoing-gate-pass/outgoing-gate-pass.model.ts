@@ -5,6 +5,7 @@ import mongoose, { Schema, Types, Model } from "mongoose";
 ======================= */
 
 export interface IOutgoingOrderDetail {
+  variety: string;
   size: string;
   quantityAvailable: number;
   quantityIssued: number;
@@ -64,8 +65,6 @@ export interface IOutgoingGatePass extends mongoose.Document {
 
   type: GatePassType;
 
-  variety?: string;
-
   from?: string;
   to?: string;
 
@@ -103,6 +102,12 @@ const OutgoingOrderDetailLocationSchema = new Schema(
 
 const OutgoingOrderDetailSchema = new Schema<IOutgoingOrderDetail>(
   {
+    variety: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
     size: {
       type: String,
       required: true,
@@ -252,12 +257,6 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
       type: String,
       enum: Object.values(GatePassType),
       required: false,
-    },
-
-    variety: {
-      type: String,
-      required: false,
-      trim: true,
     },
 
     from: {

@@ -372,7 +372,12 @@ function prepareBulkOperationsForOutgoing(
 function snapshotRowMatchesOrderDetail(
   row: IOutgoingIncomingGatePassSnapshotBagSize,
   detail: IOutgoingOrderDetail,
+  snapVariety: string,
 ): boolean {
+  const detailVariety = detail.variety?.trim();
+  if (detailVariety) {
+    if (detailVariety !== snapVariety.trim()) return false;
+  }
   if (normalizeSize(detail.size) !== normalizeSize(row.name)) return false;
   if (row.location && detail.location) {
     return locationMatches(row.location, detail.location);
@@ -383,8 +388,11 @@ function snapshotRowMatchesOrderDetail(
 function findOrderDetailForSnapshotRow(
   row: IOutgoingIncomingGatePassSnapshotBagSize,
   orderDetails: IOutgoingOrderDetail[],
+  snapVariety: string,
 ): IOutgoingOrderDetail | undefined {
-  const exact = orderDetails.find((d) => snapshotRowMatchesOrderDetail(row, d));
+  const exact = orderDetails.find((d) =>
+    snapshotRowMatchesOrderDetail(row, d, snapVariety),
+  );
   if (exact) return exact;
 
   if (row.location) {
@@ -403,7 +411,7 @@ function countSnapshotRowsByAllocationKey(
   const counts = new Map<string, number>();
   for (const snap of snapshots) {
     for (const row of snap.bagSizes) {
-      const key = allocationLocationKey(row.name, row.location);
+      const key = `${snap.variety.trim()}|${allocationLocationKey(row.name, row.location)}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
@@ -418,12 +426,17 @@ function resolveQuantityIssuedForRestore(
   row: IOutgoingIncomingGatePassSnapshotBagSize,
   orderDetails: IOutgoingOrderDetail[],
   rowCountByAllocationKey: Map<string, number>,
+  snapVariety: string,
 ): number {
   if (row.quantityIssued != null) {
     return row.quantityIssued;
   }
 
-  const detail = findOrderDetailForSnapshotRow(row, orderDetails);
+  const detail = findOrderDetailForSnapshotRow(
+    row,
+    orderDetails,
+    snapVariety,
+  );
 
   if (!detail || detail.quantityIssued <= 0) {
     throw new ValidationError(
@@ -432,13 +445,13 @@ function resolveQuantityIssuedForRestore(
     );
   }
 
-  const key = allocationLocationKey(row.name, row.location);
+  const key = `${snapVariety.trim()}|${allocationLocationKey(row.name, row.location)}`;
   const rowCount = rowCountByAllocationKey.get(key) ?? 1;
   if (rowCount <= 1) {
     return detail.quantityIssued;
   }
 
-  // Same size/location from multiple incoming passes (aggregated in orderDetails).
+  // Same variety/size/location from multiple incoming passes (aggregated in orderDetails).
   return Math.floor(detail.quantityIssued / rowCount);
 }
 
@@ -455,6 +468,7 @@ function buildPreviouslyIssuedMap(
         row,
         orderDetails,
         rowCountByAllocationKey,
+        snap.variety,
       );
       const key = allocationMapKey(snap._id.toString(), row.name, row.location);
       map.set(key, (map.get(key) ?? 0) + issued);
@@ -688,6 +702,7 @@ function buildIncomingGatePassSnapshots(
 ======================= */
 
 type OrderDetailEntry = {
+  variety: string;
   size: string;
   quantityAvailable: number;
   quantityIssued: number;
@@ -702,6 +717,7 @@ function buildOrderDetails(
   const byKey = new Map<
     string,
     {
+      variety: string;
       quantityIssued: number;
       quantityAvailable: number;
       location?: { chamber: string; floor: string; row: string };
@@ -724,12 +740,13 @@ function buildOrderDetails(
       const locPart = alloc.location
         ? `|${alloc.location.chamber}|${alloc.location.floor}|${alloc.location.row}`
         : "";
-      const key = `${alloc.size}${locPart}`;
+      const key = `${item.variety}|${alloc.size}${locPart}`;
 
       const existing = byKey.get(key);
       const location = alloc.location;
       if (existing) {
         byKey.set(key, {
+          variety: item.variety,
           quantityIssued: existing.quantityIssued + alloc.quantityToAllocate,
           quantityAvailable: options?.stockAlreadyAdjusted
             ? existing.quantityAvailable
@@ -738,6 +755,7 @@ function buildOrderDetails(
         });
       } else {
         byKey.set(key, {
+          variety: item.variety,
           quantityIssued: alloc.quantityToAllocate,
           quantityAvailable: remaining,
           location,
@@ -747,8 +765,11 @@ function buildOrderDetails(
   }
 
   return Array.from(byKey.entries()).map(([key, v]) => {
-    const size = key.includes("|") ? key.slice(0, key.indexOf("|")) : key;
+    const afterVariety = key.indexOf("|") + 1;
+    const rest = key.slice(afterVariety);
+    const size = rest.includes("|") ? rest.slice(0, rest.indexOf("|")) : rest;
     const entry: OrderDetailEntry = {
+      variety: v.variety,
       size,
       quantityAvailable: v.quantityAvailable,
       quantityIssued: v.quantityIssued,
@@ -1490,9 +1511,6 @@ function mapOutgoingGatePassToReport(
 
   if (raw.type != null && raw.type !== "") {
     report.type = raw.type;
-  }
-  if (raw.variety != null && raw.variety !== "") {
-    report.variety = raw.variety;
   }
   if (raw.from != null && raw.from !== "") {
     report.from = raw.from;
