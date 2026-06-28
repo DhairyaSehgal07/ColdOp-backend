@@ -51,6 +51,37 @@ const outgoingGatePassDataSchema = {
   additionalProperties: true,
 } as const;
 
+const outgoingAllocationItemSchema = {
+  type: "object",
+  required: ["size", "quantityToAllocate"],
+  properties: {
+    size: { type: "string" },
+    quantityToAllocate: { type: "number", minimum: 0 },
+    location: {
+      type: "object",
+      properties: {
+        chamber: { type: "string" },
+        floor: { type: "string" },
+        row: { type: "string" },
+      },
+    },
+  },
+} as const;
+
+const outgoingIncomingGatePassAllocationBodySchema = {
+  type: "object",
+  required: ["incomingGatePassId", "variety", "allocations"],
+  properties: {
+    incomingGatePassId: { type: "string" },
+    variety: { type: "string" },
+    allocations: {
+      type: "array",
+      minItems: 1,
+      items: outgoingAllocationItemSchema,
+    },
+  },
+} as const;
+
 /**
  * @param fastify - Fastify instance
  */
@@ -352,7 +383,7 @@ export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Update outgoing gate pass header fields only (date, from, to, truck number, remarks, manual parchi number). Stock allocations cannot be edited.",
+          "Update outgoing gate pass header fields and/or allocation quantities. Send incomingGatePasses (same shape as create) to change allocations: previous issued quantities are restored on incoming gate passes, then new quantities are deducted (applied as net delta). Omit incomingGatePasses to change header fields only.",
         tags: ["Outgoing Gate Pass"],
         summary: "Edit outgoing gate pass",
         params: {
@@ -366,12 +397,24 @@ export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
           type: "object",
           minProperties: 1,
           properties: {
+            farmerStorageLinkId: {
+              type: "string",
+              description:
+                "Farmer-storage-link ID (must belong to same cold storage)",
+            },
             date: { type: "string", format: "date-time" },
             from: { type: "string" },
             to: { type: "string" },
             truckNumber: { type: "string" },
             remarks: { type: "string" },
             manualParchiNumber: { type: "number" },
+            incomingGatePasses: {
+              type: "array",
+              minItems: 1,
+              description:
+                "Replaces full allocation set; same shape as create outgoing gate pass",
+              items: outgoingIncomingGatePassAllocationBodySchema,
+            },
           },
         },
         response: {

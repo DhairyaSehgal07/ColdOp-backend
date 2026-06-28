@@ -1170,8 +1170,8 @@ export async function createOutgoingGatePass(
 }
 
 /**
- * Updates outgoing gate pass header fields only (date, from, to, truck number,
- * remarks, manual parchi number). Stock allocations are not editable.
+ * Updates outgoing gate pass header fields and/or allocation quantities.
+ * When incomingGatePasses is sent, stock is adjusted by net delta on incoming passes.
  */
 export async function updateOutgoingGatePass(
   id: string,
@@ -1263,6 +1263,187 @@ export async function updateOutgoingGatePass(
     if (payload.remarks !== undefined) updateFields.remarks = payload.remarks;
     if (payload.manualParchiNumber !== undefined)
       updateFields.manualParchiNumber = payload.manualParchiNumber;
+
+    if (payload.farmerStorageLinkId !== undefined) {
+      if (!mongoose.Types.ObjectId.isValid(payload.farmerStorageLinkId)) {
+        throw new ValidationError(
+          "Invalid farmer storage link ID format",
+          "INVALID_FARMER_STORAGE_LINK_ID",
+        );
+      }
+
+      const newLink = await FarmerStorageLink.findById(
+        payload.farmerStorageLinkId,
+      )
+        .session(session)
+        .lean();
+
+      if (!newLink) {
+        throw new NotFoundError(
+          "Farmer-storage-link not found",
+          "FARMER_STORAGE_LINK_NOT_FOUND",
+        );
+      }
+
+      const newLinkColdStorageId =
+        typeof newLink.coldStorageId === "object" && newLink.coldStorageId !== null
+          ? (newLink.coldStorageId as { _id: Types.ObjectId })._id.toString()
+          : (newLink.coldStorageId as string);
+
+      if (newLinkColdStorageId !== linkColdStorageId) {
+        throw new NotFoundError(
+          "Farmer-storage-link not found",
+          "FARMER_STORAGE_LINK_NOT_FOUND",
+        );
+      }
+
+      updateFields.farmerStorageLinkId = new Types.ObjectId(
+        payload.farmerStorageLinkId,
+      );
+    }
+
+    if (payload.incomingGatePasses !== undefined) {
+      const snapshots = existing.incomingGatePassSnapshots ?? [];
+      if (snapshots.length === 0) {
+        throw new ValidationError(
+          "This outgoing gate pass has no allocation snapshot; quantities cannot be edited.",
+          "OUTGOING_SNAPSHOT_MISSING",
+        );
+      }
+
+      const previouslyIssuedMap = buildPreviouslyIssuedMap(
+        snapshots,
+        existing.orderDetails,
+      );
+
+      const fakeCreate: CreateOutgoingGatePassInput = {
+        farmerStorageLinkId:
+          payload.farmerStorageLinkId ?? existingLinkIdObj.toString(),
+        gatePassNo: existing.gatePassNo,
+        date: payload.date ?? existing.date,
+        from: payload.from ?? existing.from,
+        to: payload.to ?? existing.to,
+        truckNumber: payload.truckNumber ?? existing.truckNumber,
+        remarks: payload.remarks ?? existing.remarks,
+        manualParchiNumber:
+          payload.manualParchiNumber ?? existing.manualParchiNumber,
+        incomingGatePasses: payload.incomingGatePasses,
+      };
+
+      const validated = validateOutgoingGatePassInput(fakeCreate, logger);
+      const requestedMap = buildRequestedAllocationMap(validated);
+
+      const incomingPassMap = await fetchAndValidateIncomingGatePasses(
+        fakeCreate,
+        validated,
+        session,
+        logger,
+        previouslyIssuedMap,
+      );
+
+      const snapshotIncomingIds = [
+        ...new Set(snapshots.map((snap) => snap._id.toString())),
+      ];
+      const missingSnapshotIds = snapshotIncomingIds.filter(
+        (incomingId) => !incomingPassMap.has(incomingId),
+      );
+
+      if (missingSnapshotIds.length > 0) {
+        const extraFetched = await IncomingGatePass.find({
+          _id: {
+            $in: missingSnapshotIds.map((incomingId) => new Types.ObjectId(incomingId)),
+          },
+        })
+          .session(session)
+          .lean();
+
+        for (const pass of extraFetched) {
+          incomingPassMap.set(
+            (pass as { _id: Types.ObjectId })._id.toString(),
+            pass as IIncomingGatePass & { _id: Types.ObjectId },
+          );
+        }
+      }
+
+      const bulkOps = prepareNetDeltaBulkOperationsForUpdate(
+        previouslyIssuedMap,
+        requestedMap,
+        incomingPassMap,
+      );
+
+      if (bulkOps.length === 0) {
+        throw new ValidationError(
+          "No allocation changes to apply; incoming gate passes and quantities match the current pass.",
+          "INVALID_ALLOCATION_QUANTITY",
+        );
+      }
+
+      const updateResult = await IncomingGatePass.bulkWrite(
+        bulkOps as Parameters<typeof IncomingGatePass.bulkWrite>[0],
+        { session },
+      );
+
+      if (updateResult.modifiedCount !== bulkOps.length) {
+        throw new ConflictError(
+          `Expected ${bulkOps.length} incoming updates, got ${updateResult.modifiedCount}. Concurrent modification detected.`,
+          "CONCURRENT_MODIFICATION",
+        );
+      }
+
+      const affectedIncomingIds = [
+        ...new Set(
+          bulkOps.map((op) => {
+            const filter = (op as { updateOne: { filter: { _id: Types.ObjectId } } })
+              .updateOne.filter;
+            return filter._id.toString();
+          }),
+        ),
+      ];
+
+      await recordEditHistoryBulk(
+        affectedIncomingIds.map((incomingId) => ({
+          entityType: EditHistoryEntityType.INCOMING_GATE_PASS,
+          documentId: new Types.ObjectId(incomingId),
+          coldStorageId,
+          editedById,
+          action: EditHistoryAction.QUANTITY_ADJUSTMENT,
+          changeSummary: `Quantities adjusted by editing outgoing gate pass #${existing.gatePassNo}`,
+          logger,
+        })),
+        session,
+        logger,
+      );
+
+      const newIncomingIds = [
+        ...new Set(validated.map((v) => v.incomingGatePassId)),
+      ].map((incomingId) => new Types.ObjectId(incomingId));
+
+      const refetched = await IncomingGatePass.find({
+        _id: { $in: newIncomingIds },
+      })
+        .session(session)
+        .lean();
+
+      const refetchedMap = new Map<
+        string,
+        IIncomingGatePass & { _id: Types.ObjectId }
+      >();
+      for (const pass of refetched) {
+        refetchedMap.set(
+          (pass as { _id: Types.ObjectId })._id.toString(),
+          pass as IIncomingGatePass & { _id: Types.ObjectId },
+        );
+      }
+
+      updateFields.incomingGatePassSnapshots = buildIncomingGatePassSnapshots(
+        validated,
+        refetchedMap,
+        { stockAlreadyAdjusted: true },
+      );
+      updateFields.orderDetails = buildOrderDetails(validated, refetchedMap, {
+        stockAlreadyAdjusted: true,
+      });
+    }
 
     if (Object.keys(updateFields).length === 0) {
       throw new ValidationError(

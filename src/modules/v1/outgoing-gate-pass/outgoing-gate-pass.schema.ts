@@ -132,11 +132,20 @@ export type GetOutgoingGatePassByIdParams = z.infer<
   typeof getOutgoingGatePassByIdSchema
 >["params"];
 
-/** Update payload: header fields only; at least one required. */
+/** Update payload: header fields and/or allocation replace; at least one required. */
 export const updateOutgoingGatePassSchema = z.object({
   params: outgoingGatePassIdParamsSchema,
   body: z
     .object({
+      farmerStorageLinkId: z
+        .string()
+        .trim()
+        .min(1, "Farmer storage link ID cannot be empty")
+        .refine(
+          (val) => mongoose.Types.ObjectId.isValid(val),
+          "Invalid farmer storage link ID format",
+        )
+        .optional(),
       date: z.coerce.date().optional(),
       from: z
         .string()
@@ -163,15 +172,21 @@ export const updateOutgoingGatePassSchema = z.object({
         .int("Manual parchi number must be an integer")
         .positive("Manual parchi number must be a positive number")
         .optional(),
+      incomingGatePasses: z
+        .array(outgoingIncomingGatePassAllocationSchema)
+        .min(1, "At least one incoming gate pass with allocations is required")
+        .optional(),
     })
     .refine(
       (data) =>
+        data.farmerStorageLinkId !== undefined ||
         data.date !== undefined ||
         data.from !== undefined ||
         data.to !== undefined ||
         data.truckNumber !== undefined ||
         data.remarks !== undefined ||
-        data.manualParchiNumber !== undefined,
+        data.manualParchiNumber !== undefined ||
+        data.incomingGatePasses !== undefined,
       "At least one field must be provided for update",
     ),
 });

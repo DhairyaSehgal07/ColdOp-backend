@@ -244,7 +244,7 @@ export async function getOutgoingGatePassByIdHandler(
 }
 
 /**
- * Handler for updating outgoing gate pass header fields only.
+ * Handler for updating outgoing gate pass header fields and/or allocations.
  */
 export async function updateOutgoingGatePassHandler(
   request: FastifyRequest<{
