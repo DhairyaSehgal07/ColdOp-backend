@@ -238,3 +238,34 @@ export const getOutgoingGatePassReportQuerySchema = z.object({
 export type GetOutgoingGatePassReportQuery = z.infer<
   typeof getOutgoingGatePassReportQuerySchema
 >["querystring"];
+
+/** Query params for GET /edit-history */
+export const getOutgoingGatePassEditHistoryQuerySchema = z.object({
+  querystring: z.object({
+    outgoingGatePassId: z
+      .string()
+      .trim()
+      .refine(
+        (val) => !val || mongoose.Types.ObjectId.isValid(val),
+        "Invalid outgoing gate pass ID format",
+      )
+      .optional(),
+    page: z.coerce
+      .number()
+      .int()
+      .min(1, "Page must be at least 1")
+      .optional()
+      .default(1),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1, "Limit must be at least 1")
+      .max(100, "Limit must not exceed 100")
+      .optional()
+      .default(10),
+  }),
+});
+
+export type GetOutgoingGatePassEditHistoryQuery = z.infer<
+  typeof getOutgoingGatePassEditHistoryQuerySchema
+>["querystring"];

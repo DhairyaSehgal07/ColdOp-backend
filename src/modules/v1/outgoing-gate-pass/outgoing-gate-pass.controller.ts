@@ -13,8 +13,10 @@ import {
   getOutgoingGatePassByIdSchema,
   nullOutgoingGatePassSchema,
   getOutgoingGatePassReportQuerySchema,
+  getOutgoingGatePassEditHistoryQuerySchema,
   updateOutgoingGatePassSchema,
 } from "./outgoing-gate-pass.schema.js";
+import { getOutgoingGatePassAudits } from "./outgoing-gate-pass-audit.service.js";
 import {
   AppError,
   ConflictError,
@@ -280,12 +282,24 @@ export async function updateOutgoingGatePassHandler(
     const editedById = req.user?.id;
     const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
 
+    const userAgentHeader = request.headers["user-agent"];
+    const userAgent =
+      typeof userAgentHeader === "string"
+        ? userAgentHeader
+        : Array.isArray(userAgentHeader)
+          ? userAgentHeader[0]
+          : undefined;
+
     const result = await updateOutgoingGatePass(
       parsed.data.params.id,
       parsed.data.body,
       editedById,
       loggedInUserColdStorageId,
       request.log,
+      {
+        ipAddress: request.ip,
+        userAgent,
+      },
     );
 
     return reply.code(200).send({
@@ -454,6 +468,62 @@ export async function nullOutgoingGatePassHandler(
             : "An unexpected error occurred"
           : "An unexpected error occurred",
     });
+  }
+}
+
+/**
+ * Handler for GET /report – all outgoing gate passes for the cold storage with optional date range.
+ */
+export async function getOutgoingGatePassEditHistoryHandler(
+  request: FastifyRequest<{
+    Querystring: {
+      outgoingGatePassId?: string;
+      page?: number;
+      limit?: number;
+    };
+  }>,
+  reply: FastifyReply,
+) {
+  try {
+    const parsed = getOutgoingGatePassEditHistoryQuerySchema.safeParse({
+      querystring: request.query,
+    });
+    if (!parsed.success) {
+      const message =
+        parsed.error.issues
+          ?.map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ") ?? parsed.error.message;
+      return reply.code(400).send({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message },
+      });
+    }
+
+    const { querystring } = parsed.data;
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+
+    const result = await getOutgoingGatePassAudits(
+      loggedInUserColdStorageId,
+      {
+        outgoingGatePassId: querystring.outgoingGatePassId,
+        page: querystring.page,
+        limit: querystring.limit,
+      },
+      request.log,
+    );
+
+    return reply.code(200).send({
+      success: true,
+      data: result.data,
+      pagination: result.pagination,
+      message: "Outgoing gate pass edit history retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error(
+      { error, query: request.query },
+      "Error in getOutgoingGatePassEditHistoryHandler",
+    );
+    return sendReportErrorReply(reply, error);
   }
 }
 

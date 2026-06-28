@@ -45,6 +45,10 @@ import {
   createVoucher,
   type CreateVoucherParams,
 } from "../../../utils/accounting/helper-fns.js";
+import {
+  buildOutgoingGatePassAuditStates,
+  recordOutgoingGatePassAudit,
+} from "./outgoing-gate-pass-audit.service.js";
 
 /* =======================
    TYPES (internal)
@@ -1169,6 +1173,11 @@ export async function createOutgoingGatePass(
   }
 }
 
+export interface UpdateOutgoingGatePassAuditContext {
+  ipAddress?: string;
+  userAgent?: string;
+}
+
 /**
  * Updates outgoing gate pass header fields and/or allocation quantities.
  * When incomingGatePasses is sent, stock is adjusted by net delta on incoming passes.
@@ -1179,6 +1188,7 @@ export async function updateOutgoingGatePass(
   editedById: string | undefined,
   loggedInUserColdStorageId: string | undefined,
   logger?: FastifyBaseLogger,
+  auditContext?: UpdateOutgoingGatePassAuditContext,
 ) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new ValidationError(
@@ -1464,6 +1474,23 @@ export async function updateOutgoingGatePass(
         "OUTGOING_GATE_PASS_NOT_FOUND",
       );
     }
+
+    const { previousState, modifiedState } = buildOutgoingGatePassAuditStates({
+      existing: existing as unknown as Record<string, unknown>,
+      updated: updated as unknown as Record<string, unknown>,
+      changedGatePassFields: Object.keys(updateFields),
+    });
+
+    await recordOutgoingGatePassAudit({
+      outgoingGatePassId: idObj,
+      editedById,
+      previousState,
+      modifiedState,
+      ipAddress: auditContext?.ipAddress,
+      userAgent: auditContext?.userAgent,
+      session,
+      logger,
+    });
 
     await session.commitTransaction();
 

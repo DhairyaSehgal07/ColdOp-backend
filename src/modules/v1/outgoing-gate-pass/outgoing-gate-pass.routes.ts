@@ -3,6 +3,7 @@ import {
   createOutgoingGatePassHandler,
   getOutgoingGatePassByIdHandler,
   getOutgoingGatePassReportHandler,
+  getOutgoingGatePassEditHistoryHandler,
   nullOutgoingGatePassHandler,
   updateOutgoingGatePassHandler,
 } from "./outgoing-gate-pass.controller.js";
@@ -86,6 +87,128 @@ const outgoingIncomingGatePassAllocationBodySchema = {
  * @param fastify - Fastify instance
  */
 export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
+  const auditItemSchema = {
+    type: "object",
+    properties: {
+      _id: { type: "string" },
+      outgoingGatePassId: { type: "string" },
+      editedBy: {
+        type: "object",
+        properties: {
+          _id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+      previousState: {
+        type: "object",
+        additionalProperties: true,
+        description: "Field values before the edit (changed fields only)",
+      },
+      modifiedState: {
+        type: "object",
+        additionalProperties: true,
+        description: "Field values after the edit (changed fields only)",
+      },
+      ipAddress: { type: "string" },
+      userAgent: { type: "string" },
+      createdAt: { type: "string", format: "date-time" },
+    },
+  };
+
+  // Edit history (audit entries) — must be registered before /:id routes
+  fastify.get(
+    "/edit-history",
+    {
+      schema: {
+        description:
+          "Get outgoing gate pass edit history (audit entries) for the current user's cold storage. Optionally filter by outgoingGatePassId. Supports pagination via page and limit.",
+        tags: ["Outgoing Gate Pass"],
+        summary: "Get outgoing gate pass edit history",
+        querystring: {
+          type: "object",
+          properties: {
+            outgoingGatePassId: {
+              type: "string",
+              description:
+                "Optional outgoing gate pass ID to filter audit entries",
+            },
+            page: {
+              type: "number",
+              minimum: 1,
+              default: 1,
+              description: "Page number (default 1)",
+            },
+            limit: {
+              type: "number",
+              minimum: 1,
+              maximum: 100,
+              default: 10,
+              description: "Items per page (default 10, max 100)",
+            },
+          },
+        },
+        response: {
+          200: {
+            description: "Outgoing gate pass edit history list",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: { type: "array", items: auditItemSchema },
+              pagination: {
+                type: "object",
+                properties: {
+                  page: { type: "number" },
+                  limit: { type: "number" },
+                  total: { type: "number" },
+                  totalPages: { type: "number" },
+                  hasNextPage: { type: "boolean" },
+                  hasPreviousPage: { type: "boolean" },
+                },
+              },
+              message: { type: "string" },
+            },
+          },
+          400: {
+            description: "Bad request",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          404: {
+            description: "Outgoing gate pass not found",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 120,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getOutgoingGatePassEditHistoryHandler as never,
+  );
+
   // Report – all outgoing gate passes for cold storage (optional date range, no pagination)
   fastify.get(
     "/report",
@@ -383,7 +506,7 @@ export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Update outgoing gate pass header fields and/or allocation quantities. Send incomingGatePasses (same shape as create) to change allocations: previous issued quantities are restored on incoming gate passes, then new quantities are deducted (applied as net delta). Omit incomingGatePasses to change header fields only.",
+          "Update outgoing gate pass header fields and/or allocation quantities. Send incomingGatePasses (same shape as create) to change allocations: previous issued quantities are restored on incoming gate passes, then new quantities are deducted (applied as net delta). Omit incomingGatePasses to change header fields only. An audit entry is created.",
         tags: ["Outgoing Gate Pass"],
         summary: "Edit outgoing gate pass",
         params: {
