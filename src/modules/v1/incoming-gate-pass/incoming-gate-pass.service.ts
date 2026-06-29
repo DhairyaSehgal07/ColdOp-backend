@@ -120,6 +120,12 @@ export interface IncomingGatePassReportOptions {
   dateTo?: string;
 }
 
+export interface IncomingGatePassReportResult {
+  incomingGatePasses: Record<string, unknown>[];
+  initialTotal: number;
+  currentTotal: number;
+}
+
 type PopulatedAdmin = { _id: unknown; name: string };
 
 type PopulatedLinkWithId = PopulatedFarmerStorageLink & { _id?: unknown };
@@ -134,9 +140,17 @@ function mapIncomingGatePassToReport(
   const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
   const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
 
-  const bagSizes = (raw.bagSizes as { initialQuantity?: number }[]) ?? [];
-  const totalBags = bagSizes.reduce(
+  const bagSizes =
+    (raw.bagSizes as {
+      initialQuantity?: number;
+      currentQuantity?: number;
+    }[]) ?? [];
+  const initialTotal = bagSizes.reduce(
     (sum, bag) => sum + (bag.initialQuantity ?? 0),
+    0,
+  );
+  const currentTotal = bagSizes.reduce(
+    (sum, bag) => sum + (bag.currentQuantity ?? 0),
     0,
   );
 
@@ -154,7 +168,8 @@ function mapIncomingGatePassToReport(
     variety: raw.variety,
     status: raw.status,
     bagSizes: raw.bagSizes,
-    totalBags,
+    initialTotal,
+    currentTotal,
     farmerStorageLinkId: linkDisplay
       ? {
           _id:
@@ -201,11 +216,24 @@ function mapIncomingGatePassToReport(
  * Get all incoming gate passes for a cold storage as a report (no pagination).
  * Optional dateFrom/dateTo filter on gate pass date (UTC day boundaries).
  */
+function sumBagQuantityAcrossPasses(
+  passes: { bagSizes?: { initialQuantity?: number; currentQuantity?: number }[] }[],
+  field: "initialQuantity" | "currentQuantity",
+): number {
+  return passes.reduce((sum, pass) => {
+    const bagSizes = pass.bagSizes ?? [];
+    return (
+      sum +
+      bagSizes.reduce((bagSum, bag) => bagSum + (bag[field] ?? 0), 0)
+    );
+  }, 0);
+}
+
 export async function getIncomingGatePassReport(
   coldStorageId: string,
   options: IncomingGatePassReportOptions = {},
   logger?: FastifyBaseLogger,
-): Promise<Record<string, unknown>[]> {
+): Promise<IncomingGatePassReportResult> {
   try {
     if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
       throw new ValidationError(
@@ -240,7 +268,7 @@ export async function getIncomingGatePassReport(
         { coldStorageId, dateFrom, dateTo },
         "Incoming gate pass report: no farmer-storage links",
       );
-      return [];
+      return { incomingGatePasses: [], initialTotal: 0, currentTotal: 0 };
     }
 
     const filter: Record<string, unknown> = {
@@ -275,21 +303,26 @@ export async function getIncomingGatePassReport(
       .populate({ path: "createdBy", select: "name" })
       .lean();
 
-    const report = list.map((raw) =>
+    const incomingGatePasses = list.map((raw) =>
       mapIncomingGatePassToReport(raw as unknown as Record<string, unknown>),
     );
+
+    const initialTotal = sumBagQuantityAcrossPasses(list, "initialQuantity");
+    const currentTotal = sumBagQuantityAcrossPasses(list, "currentQuantity");
 
     logger?.info(
       {
         coldStorageId,
-        count: report.length,
+        count: incomingGatePasses.length,
+        initialTotal,
+        currentTotal,
         dateFrom,
         dateTo,
       },
       "Incoming gate pass report retrieved",
     );
 
-    return report;
+    return { incomingGatePasses, initialTotal, currentTotal };
   } catch (error) {
     if (error instanceof ValidationError) {
       throw error;

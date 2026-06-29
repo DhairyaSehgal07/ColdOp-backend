@@ -287,7 +287,7 @@ export async function getIncomingGatePassReportHandler(
     }
 
     const { dateFrom, dateTo } = parsed.data.querystring;
-    const incomingGatePasses = await getIncomingGatePassReport(
+    const report = await getIncomingGatePassReport(
       loggedInUserColdStorageId,
       { dateFrom, dateTo },
       request.log,
@@ -295,7 +295,7 @@ export async function getIncomingGatePassReportHandler(
 
     return reply.code(200).send({
       success: true,
-      data: { incomingGatePasses },
+      data: report,
       message: "Incoming gate pass report retrieved successfully",
     });
   } catch (error) {

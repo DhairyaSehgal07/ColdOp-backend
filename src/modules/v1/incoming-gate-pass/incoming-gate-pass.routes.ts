@@ -173,8 +173,18 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
                     type: "array",
                     items: { type: "object", additionalProperties: true },
                   },
+                  initialTotal: {
+                    type: "number",
+                    description:
+                      "Sum of initialQuantity across all bag sizes in the report",
+                  },
+                  currentTotal: {
+                    type: "number",
+                    description:
+                      "Sum of currentQuantity across all bag sizes in the report",
+                  },
                 },
-                required: ["incomingGatePasses"],
+                required: ["incomingGatePasses", "initialTotal", "currentTotal"],
               },
               message: { type: "string" },
             },
