@@ -37,7 +37,7 @@ export const GATE_PASS_LIST_INCOMING_SELECT =
   "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber stockFilter customMarka createdAt";
 
 export const GATE_PASS_LIST_OUTGOING_SELECT =
-  "_id farmerStorageLinkId createdBy gatePassNo date type from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots isNull createdAt";
+  "_id farmerStorageLinkId createdBy gatePassNo date type from to truckNumber orderDetails remarks manualParchiNumber stockFilter incomingGatePassSnapshots isNull createdAt";
 
 /** Populate config shared with daybook gate-pass list responses. */
 export const GATE_PASS_LIST_POPULATE_LINK = [

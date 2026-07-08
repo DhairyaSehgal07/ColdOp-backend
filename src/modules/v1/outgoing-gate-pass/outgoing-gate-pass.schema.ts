@@ -100,6 +100,8 @@ export const createOutgoingGatePassSchema = z.object({
       .max(500, "Remarks must not exceed 500 characters")
       .optional(),
 
+    stockFilter: z.string().trim().optional(),
+
     idempotencyKey: z
       .string()
       .trim()
@@ -172,6 +174,7 @@ export const updateOutgoingGatePassSchema = z.object({
         .int("Manual parchi number must be an integer")
         .positive("Manual parchi number must be a positive number")
         .optional(),
+      stockFilter: z.string().trim().optional(),
       incomingGatePasses: z
         .array(outgoingIncomingGatePassAllocationSchema)
         .min(1, "At least one incoming gate pass with allocations is required")
@@ -186,6 +189,7 @@ export const updateOutgoingGatePassSchema = z.object({
         data.truckNumber !== undefined ||
         data.remarks !== undefined ||
         data.manualParchiNumber !== undefined ||
+        data.stockFilter !== undefined ||
         data.incomingGatePasses !== undefined,
       "At least one field must be provided for update",
     ),
@@ -232,6 +236,7 @@ export const getOutgoingGatePassReportQuerySchema = z.object({
       .trim()
       .regex(isoDateRegex, "dateTo must be an ISO date, e.g. 2026-03-07")
       .optional(),
+    stockFilter: z.string().trim().optional(),
   }),
 });
 

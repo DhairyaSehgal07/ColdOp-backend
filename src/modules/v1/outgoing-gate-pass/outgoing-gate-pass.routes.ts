@@ -44,6 +44,7 @@ const outgoingGatePassDataSchema = {
     },
     incomingGatePassSnapshots: { type: "array", items: { type: "object" } },
     remarks: { type: "string" },
+    stockFilter: { type: "string" },
     manualParchiNumber: { type: "number" },
     isNull: { type: "boolean" },
     createdAt: { type: "string" },
@@ -230,6 +231,11 @@ export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
               type: "string",
               description:
                 "Filter by date range end (inclusive), ISO date YYYY-MM-DD",
+            },
+            stockFilter: {
+              type: "string",
+              description:
+                "Optional stock filter. Use FARMER or OWNED to filter report data.",
             },
           },
         },
@@ -530,6 +536,7 @@ export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
             to: { type: "string" },
             truckNumber: { type: "string" },
             remarks: { type: "string" },
+            stockFilter: { type: "string" },
             manualParchiNumber: { type: "number" },
             incomingGatePasses: {
               type: "array",

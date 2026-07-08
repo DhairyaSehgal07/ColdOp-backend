@@ -1090,6 +1090,9 @@ export async function createOutgoingGatePass(
           ...(payload.manualParchiNumber !== undefined && {
             manualParchiNumber: payload.manualParchiNumber,
           }),
+          ...(payload.stockFilter !== undefined && {
+            stockFilter: payload.stockFilter,
+          }),
           remarks: payload.remarks,
           idempotencyKey: payload.idempotencyKey,
         },
@@ -1273,6 +1276,8 @@ export async function updateOutgoingGatePass(
     if (payload.remarks !== undefined) updateFields.remarks = payload.remarks;
     if (payload.manualParchiNumber !== undefined)
       updateFields.manualParchiNumber = payload.manualParchiNumber;
+    if (payload.stockFilter !== undefined)
+      updateFields.stockFilter = payload.stockFilter;
 
     if (payload.farmerStorageLinkId !== undefined) {
       if (!mongoose.Types.ObjectId.isValid(payload.farmerStorageLinkId)) {
@@ -1662,6 +1667,35 @@ export async function getOutgoingGatePassById(
 export interface OutgoingGatePassReportOptions {
   dateFrom?: string;
   dateTo?: string;
+  stockFilter?: string;
+}
+
+const STOCK_FILTER_FARMER = "FARMER";
+const STOCK_FILTER_OWNED = "OWNED";
+
+function buildOutgoingStockFilterQuery(
+  stockFilter?: string,
+): Record<string, unknown> | undefined {
+  const trimmed = stockFilter?.trim();
+  if (!trimmed) return undefined;
+
+  if (trimmed === STOCK_FILTER_FARMER) {
+    return { stockFilter: STOCK_FILTER_FARMER };
+  }
+  if (trimmed === STOCK_FILTER_OWNED) {
+    return {
+      $or: [
+        { stockFilter: STOCK_FILTER_OWNED },
+        { stockFilter: { $in: [null, ""] } },
+        { stockFilter: { $exists: false } },
+      ],
+    };
+  }
+
+  throw new ValidationError(
+    "stockFilter must be either FARMER or OWNED",
+    "INVALID_STOCK_FILTER",
+  );
 }
 
 type OutgoingReportPopulatedAdmin = { _id: unknown; name: string };
@@ -1735,6 +1769,9 @@ function mapOutgoingGatePassToReport(
   if (raw.remarks != null && raw.remarks !== "") {
     report.remarks = raw.remarks;
   }
+  if (raw.stockFilter != null && raw.stockFilter !== "") {
+    report.stockFilter = raw.stockFilter;
+  }
   if (raw.incomingGatePassSnapshots != null) {
     report.incomingGatePassSnapshots = raw.incomingGatePassSnapshots;
   }
@@ -1774,7 +1811,7 @@ export async function getOutgoingGatePassReport(
       );
     }
 
-    const { dateFrom, dateTo } = options;
+    const { dateFrom, dateTo, stockFilter } = options;
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
     if (dateFrom != null && dateFrom !== "" && !dateRegex.test(dateFrom)) {
@@ -1806,6 +1843,11 @@ export async function getOutgoingGatePassReport(
     const filter: Record<string, unknown> = {
       farmerStorageLinkId: { $in: linkIds },
     };
+
+    const stockFilterQuery = buildOutgoingStockFilterQuery(stockFilter);
+    if (stockFilterQuery) {
+      Object.assign(filter, stockFilterQuery);
+    }
 
     if (dateFrom || dateTo) {
       const dateConditions: Record<string, Date> = {};
@@ -1845,6 +1887,7 @@ export async function getOutgoingGatePassReport(
         count: report.length,
         dateFrom,
         dateTo,
+        stockFilter,
       },
       "Outgoing gate pass report retrieved",
     );

@@ -250,7 +250,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Search for orders (incoming and outgoing gate passes). searchBy: gatePassNumber (default); manualParchiNumber; marka (gatePassNo/totalBags and/or customMarka on incoming); customMarka (incoming only, legacy); remarks = case-insensitive substring on remarks (incoming + outgoing; regex metacharacters treated literally).",
+          "Search for orders (incoming and outgoing gate passes). searchBy: gatePassNumber (default); manualParchiNumber; marka (gatePassNo/totalBags and/or customMarka on incoming); customMarka (incoming only, legacy); remarks = case-insensitive substring on remarks (incoming + outgoing; regex metacharacters treated literally). Each item's farmerStorageLinkId is a flat object with name, accountNumber, address, mobileNumber (no nested farmerId). Outgoing items include isNull when nulled (dwarf pass).",
         tags: ["Store Admin"],
         summary: "Search order by receipt number",
         body: {
@@ -279,7 +279,8 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
         },
         response: {
           200: {
-            description: "Orders found",
+            description:
+              "Orders found. Each item's farmerStorageLinkId is flat: name, accountNumber, address, mobileNumber; outgoing items include isNull.",
             type: "object",
             properties: {
               status: { type: "string", enum: ["Success"] },
@@ -288,11 +289,48 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                 properties: {
                   incoming: {
                     type: "array",
-                    items: { type: "object", additionalProperties: true },
+                    items: {
+                      type: "object",
+                      additionalProperties: true,
+                      properties: {
+                        farmerStorageLinkId: {
+                          type: "object",
+                          description:
+                            "Flat farmer display: name, accountNumber, address, mobileNumber",
+                          properties: {
+                            name: { type: "string" },
+                            accountNumber: { type: "number" },
+                            address: { type: "string" },
+                            mobileNumber: { type: "string" },
+                          },
+                        },
+                      },
+                    },
                   },
                   outgoing: {
                     type: "array",
-                    items: { type: "object", additionalProperties: true },
+                    items: {
+                      type: "object",
+                      additionalProperties: true,
+                      properties: {
+                        farmerStorageLinkId: {
+                          type: "object",
+                          description:
+                            "Flat farmer display: name, accountNumber, address, mobileNumber",
+                          properties: {
+                            name: { type: "string" },
+                            accountNumber: { type: "number" },
+                            address: { type: "string" },
+                            mobileNumber: { type: "string" },
+                          },
+                        },
+                        isNull: {
+                          type: "boolean",
+                          description:
+                            "True when outgoing pass is nulled (dwarf pass)",
+                        },
+                      },
+                    },
                   },
                 },
               },

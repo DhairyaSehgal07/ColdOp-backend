@@ -74,6 +74,8 @@ export interface IOutgoingGatePass extends mongoose.Document {
 
   remarks?: string;
 
+  stockFilter?: string;
+
   idempotencyKey?: string;
 
   /** When true, the pass is voided and stock has been restored to incoming gate passes */
@@ -286,6 +288,12 @@ const OutgoingGatePassSchema = new Schema<IOutgoingGatePass>(
 
     remarks: {
       type: String,
+      trim: true,
+    },
+
+    stockFilter: {
+      type: String,
+      required: false,
       trim: true,
     },
 

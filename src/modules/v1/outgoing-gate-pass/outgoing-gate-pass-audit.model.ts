@@ -18,6 +18,7 @@ export type OutgoingGatePassAuditState = Partial<
     | "incomingGatePassSnapshots"
     | "remarks"
     | "manualParchiNumber"
+    | "stockFilter"
   >
 > &
   Record<string, unknown>;

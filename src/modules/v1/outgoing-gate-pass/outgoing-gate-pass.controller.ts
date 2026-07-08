@@ -532,7 +532,7 @@ export async function getOutgoingGatePassEditHistoryHandler(
  */
 export async function getOutgoingGatePassReportHandler(
   request: FastifyRequest<{
-    Querystring: { dateFrom?: string; dateTo?: string };
+    Querystring: { dateFrom?: string; dateTo?: string; stockFilter?: string };
   }>,
   reply: FastifyReply,
 ) {
@@ -571,10 +571,10 @@ export async function getOutgoingGatePassReportHandler(
       });
     }
 
-    const { dateFrom, dateTo } = parsed.data.querystring;
+    const { dateFrom, dateTo, stockFilter } = parsed.data.querystring;
     const outgoingGatePasses = await getOutgoingGatePassReport(
       loggedInUserColdStorageId,
-      { dateFrom, dateTo },
+      { dateFrom, dateTo, stockFilter },
       request.log,
     );
 

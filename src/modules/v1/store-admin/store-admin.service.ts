@@ -21,8 +21,6 @@ import bcrypt from "bcryptjs";
 import { Farmer } from "../farmer/farmer-model.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
 import {
-  FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
-  FARMER_STORAGE_LINK_POPULATE_SELECT,
   GATE_PASS_LIST_INCOMING_SELECT,
   GATE_PASS_LIST_OUTGOING_SELECT,
   GATE_PASS_LIST_POPULATE_LINK,
@@ -275,9 +273,8 @@ export async function updateStoreAdminProfile(
   }
 
   if (coldStoragePayload && Object.keys(coldStoragePayload).length > 0) {
-    const existing = await StoreAdmin.findById(storeAdminId).select(
-      "coldStorageId",
-    );
+    const existing =
+      await StoreAdmin.findById(storeAdminId).select("coldStorageId");
 
     if (!existing) {
       throw new NotFoundError("Store admin not found", "STORE_ADMIN_NOT_FOUND");
@@ -705,7 +702,8 @@ export interface DaybookPagination {
 }
 
 /** Pagination meta for daybook orders list (all / incoming / outgoing) */
-export type DaybookOrdersPaginationMeta = import("../farmer-storage-link/farmer-storage-link.utils.js").GatePassListPaginationMeta;
+export type DaybookOrdersPaginationMeta =
+  import("../farmer-storage-link/farmer-storage-link.utils.js").GatePassListPaginationMeta;
 
 export type GetDaybookOrdersResult = GatePassListPaginationResult;
 
@@ -916,11 +914,7 @@ export interface SearchOrdersByReceiptNumberResult {
 }
 
 export type SearchOrdersByReceiptSearchBy =
-  | "gatePassNumber"
-  | "manualParchiNumber"
-  | "marka"
-  | "customMarka"
-  | "remarks";
+  "gatePassNumber" | "manualParchiNumber" | "marka" | "customMarka" | "remarks";
 
 /** Escape user input for safe literal substring match in MongoDB $regex. */
 function escapeRegexLiteral(value: string): string {
@@ -994,21 +988,9 @@ export async function searchOrdersByReceiptNumber(
 
   const trimmed = receiptNumber.trim();
 
-  const incomingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type variety truckNumber bagSizes status remarks manualParchiNumber stockFilter customMarka createdAt";
-  const outgoingSelect =
-    "_id farmerStorageLinkId createdBy gatePassNo date type from to truckNumber orderDetails remarks manualParchiNumber incomingGatePassSnapshots isNull createdAt";
-  const populateLink = [
-    {
-      path: "farmerStorageLinkId",
-      select: FARMER_STORAGE_LINK_POPULATE_SELECT,
-      populate: {
-        path: "farmerId",
-        model: Farmer,
-        select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
-      },
-    },
-  ];
+  const incomingSelect = GATE_PASS_LIST_INCOMING_SELECT;
+  const outgoingSelect = GATE_PASS_LIST_OUTGOING_SELECT;
+  const populateLink = GATE_PASS_LIST_POPULATE_LINK;
 
   if (searchBy === "marka") {
     const linkMatch = { farmerStorageLinkId: { $in: farmerStorageLinkIds } };
@@ -1106,13 +1088,13 @@ export async function searchOrdersByReceiptNumber(
         bagSizes?: { name: string }[];
         orderDetails?: { size: string }[];
       }[],
-    );
+    ).map(mapGatePassListLinkDisplay);
     const processedOutgoing = sortGatePassOrderDetails(
       outgoingOrders as unknown as {
         bagSizes?: { name: string }[];
         orderDetails?: { size: string }[];
       }[],
-    );
+    ).map(mapGatePassListLinkDisplay);
 
     logger?.info(
       {
@@ -1215,13 +1197,13 @@ export async function searchOrdersByReceiptNumber(
       bagSizes?: { name: string }[];
       orderDetails?: { size: string }[];
     }[],
-  );
+  ).map(mapGatePassListLinkDisplay);
   const processedOutgoing = sortGatePassOrderDetails(
     outgoingOrders as unknown as {
       bagSizes?: { name: string }[];
       orderDetails?: { size: string }[];
     }[],
-  );
+  ).map(mapGatePassListLinkDisplay);
 
   logger?.info(
     {
