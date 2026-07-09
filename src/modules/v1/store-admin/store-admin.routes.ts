@@ -23,6 +23,7 @@ import {
 import { authenticate, authorize } from "../../../utils/auth.js";
 import { Role } from "./store-admin.model.js";
 import { preferencesDataProperties } from "../preferences/preferences.schema.js";
+import { storageLayoutJsonSchema } from "../cold-storage/cold-storage.schema.js";
 
 const populatedPreferencesProperty = {
   type: "object",
@@ -481,6 +482,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                     additionalProperties: true,
                     properties: {
                       preferencesId: populatedPreferencesProperty,
+                      storageLayout: storageLayoutJsonSchema,
                     },
                   },
                 },
@@ -553,6 +555,7 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                     additionalProperties: true,
                     properties: {
                       preferencesId: populatedPreferencesProperty,
+                      storageLayout: storageLayoutJsonSchema,
                     },
                   },
                 },

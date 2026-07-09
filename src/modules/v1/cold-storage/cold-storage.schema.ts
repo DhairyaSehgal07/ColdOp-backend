@@ -13,6 +13,38 @@ const chamberSchema = z.object({
     .positive("Chamber capacity must be greater than zero"),
 });
 
+const objectIdString = z
+  .string()
+  .trim()
+  .refine(
+    (val) => mongoose.Types.ObjectId.isValid(val),
+    "Invalid ID format",
+  );
+
+const storageFloorSchema = z.object({
+  _id: objectIdString.optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Floor name is required")
+    .max(100, "Floor name must not exceed 100 characters"),
+  capacity: z.coerce
+    .number()
+    .positive("Floor capacity must be greater than zero"),
+});
+
+const storageChamberSchema = z.object({
+  _id: objectIdString.optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Chamber name is required")
+    .max(100, "Chamber name must not exceed 100 characters"),
+  floors: z.array(storageFloorSchema),
+});
+
+const storageLayoutSchema = z.array(storageChamberSchema);
+
 export const chambersJsonSchema = {
   type: "array" as const,
   items: {
@@ -21,6 +53,30 @@ export const chambersJsonSchema = {
     properties: {
       name: { type: "string" as const, minLength: 1, maxLength: 100 },
       capacity: { type: "number" as const, exclusiveMinimum: 0 },
+    },
+  },
+};
+
+export const storageLayoutJsonSchema = {
+  type: "array" as const,
+  items: {
+    type: "object" as const,
+    required: ["name", "floors"],
+    properties: {
+      _id: { type: "string" as const },
+      name: { type: "string" as const, minLength: 1, maxLength: 100 },
+      floors: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          required: ["name", "capacity"],
+          properties: {
+            _id: { type: "string" as const },
+            name: { type: "string" as const, minLength: 1, maxLength: 100 },
+            capacity: { type: "number" as const, exclusiveMinimum: 0 },
+          },
+        },
+      },
     },
   },
 };
@@ -53,6 +109,8 @@ export const createColdStorageSchema = z.object({
     imageUrl: z.string().trim().url("Image URL must be a valid URL").optional(),
 
     chambers: z.array(chamberSchema).optional(),
+
+    storageLayout: storageLayoutSchema.optional(),
 
     plan: z.nativeEnum(Plan).optional(),
   }),
@@ -115,6 +173,8 @@ export const updateColdStorageBodySchema = z.object({
   imageUrl: z.string().trim().url("Image URL must be a valid URL").optional(),
 
   chambers: z.array(chamberSchema).optional(),
+
+  storageLayout: storageLayoutSchema.optional(),
 
   plan: z.nativeEnum(Plan).optional(),
 });

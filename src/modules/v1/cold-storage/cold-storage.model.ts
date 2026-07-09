@@ -10,6 +10,18 @@ export interface ChamberObj {
   capacity: number;
 }
 
+export interface StorageFloorObj {
+  _id: Types.ObjectId;
+  name: string;
+  capacity: number;
+}
+
+export interface StorageChamberObj {
+  _id: Types.ObjectId;
+  name: string;
+  floors: StorageFloorObj[];
+}
+
 // Interface for ColdStorage document
 export interface IColdStorage extends Document {
   name: string;
@@ -17,6 +29,7 @@ export interface IColdStorage extends Document {
   mobileNumber: string;
   capacity: number;
   chambers?: ChamberObj[];
+  storageLayout?: StorageChamberObj[];
   imageUrl?: string;
   isPaid: boolean;
   isActive: boolean;
@@ -36,6 +49,20 @@ const ChamberSchema = new Schema<ChamberObj>(
   { _id: false },
 );
 
+const StorageFloorSchema = new Schema<StorageFloorObj>(
+  {
+    name: { type: String, required: true, trim: true },
+    capacity: { type: Number, required: true, min: 0 },
+  },
+);
+
+const StorageChamberSchema = new Schema<StorageChamberObj>(
+  {
+    name: { type: String, required: true, trim: true },
+    floors: { type: [StorageFloorSchema], default: [] },
+  },
+);
+
 // Mongoose schema
 const ColdStorageSchema = new Schema<IColdStorage>(
   {
@@ -44,6 +71,7 @@ const ColdStorageSchema = new Schema<IColdStorage>(
     mobileNumber: { type: String, required: true, unique: true },
     capacity: { type: Number, required: true },
     chambers: { type: [ChamberSchema], default: undefined },
+    storageLayout: { type: [StorageChamberSchema], default: undefined },
     imageUrl: { type: String, default: "" },
     isPaid: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },

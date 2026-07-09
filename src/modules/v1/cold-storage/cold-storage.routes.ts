@@ -12,6 +12,7 @@ import {
   chambersJsonSchema,
   createColdStorageSchema,
   getColdStoragesQuerySchema,
+  storageLayoutJsonSchema,
 } from "./cold-storage.schema.js";
 
 /** Reusable error response schema for OpenAPI */
@@ -55,6 +56,7 @@ export async function coldStorageRoutes(fastify: FastifyInstance) {
             capacity: { type: "number", exclusiveMinimum: 0 },
             imageUrl: { type: "string", format: "uri" },
             chambers: chambersJsonSchema,
+            storageLayout: storageLayoutJsonSchema,
             plan: { type: "string", enum: Object.values(Plan) },
           },
         },
@@ -116,7 +118,13 @@ export async function coldStorageRoutes(fastify: FastifyInstance) {
               success: { type: "boolean" },
               data: {
                 type: "array",
-                items: { type: "object" },
+                items: {
+                  type: "object",
+                  properties: {
+                    storageLayout: storageLayoutJsonSchema,
+                  },
+                  additionalProperties: true,
+                },
               },
               pagination: {
                 type: "object",
