@@ -49,19 +49,15 @@ const ChamberSchema = new Schema<ChamberObj>(
   { _id: false },
 );
 
-const StorageFloorSchema = new Schema<StorageFloorObj>(
-  {
-    name: { type: String, required: true, trim: true },
-    capacity: { type: Number, required: true, min: 0 },
-  },
-);
+const StorageFloorSchema = new Schema<StorageFloorObj>({
+  name: { type: String, required: true, trim: true },
+  capacity: { type: Number, required: true, min: 0 },
+});
 
-const StorageChamberSchema = new Schema<StorageChamberObj>(
-  {
-    name: { type: String, required: true, trim: true },
-    floors: { type: [StorageFloorSchema], default: [] },
-  },
-);
+const StorageChamberSchema = new Schema<StorageChamberObj>({
+  name: { type: String, required: true, trim: true },
+  floors: { type: [StorageFloorSchema], default: [] },
+});
 
 // Mongoose schema
 const ColdStorageSchema = new Schema<IColdStorage>(
