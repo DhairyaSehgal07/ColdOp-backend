@@ -58,13 +58,33 @@ export const createTransferStockSchema = z.object({
         .number()
         .positive("Amount must be greater than 0")
         .optional(),
+      narration: z.string().trim().optional(),
       isBuyPotato: z.boolean().optional().default(false),
       isSellPotato: z.boolean().optional().default(false),
     })
     .refine((data) => !(data.isBuyPotato && data.isSellPotato), {
       message: "isBuyPotato and isSellPotato cannot both be true",
       path: ["isBuyPotato"],
-    }),
+    })
+    .refine(
+      (data) =>
+        !(data.isBuyPotato || data.isSellPotato) ||
+        (data.amount != null && data.amount > 0),
+      {
+        message: "Amount is required when isBuyPotato or isSellPotato is true",
+        path: ["amount"],
+      },
+    )
+    .refine(
+      (data) =>
+        !(data.isBuyPotato || data.isSellPotato) ||
+        (data.narration != null && data.narration.length > 0),
+      {
+        message:
+          "Narration is required when isBuyPotato or isSellPotato is true",
+        path: ["narration"],
+      },
+    ),
 });
 
 export type CreateTransferStockInput = z.infer<

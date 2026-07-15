@@ -450,11 +450,6 @@ export async function createTransferStock(
         : null;
 
       if (preferences?.showFinances) {
-        const totalBags = payload.items.reduce(
-          (sum, item) => sum + item.quantity,
-          0,
-        );
-
         if (!createdById) {
           throw new ValidationError(
             "Created by (store admin) is required to create potato voucher",
@@ -462,18 +457,22 @@ export async function createTransferStock(
           );
         }
 
-        const costPerBag = isBuyPotato
-          ? (fromLink as { costPerBag?: number }).costPerBag
-          : (toLink as { costPerBag?: number }).costPerBag;
-
-        if (costPerBag == null || costPerBag <= 0) {
+        if (payload.amount == null || payload.amount <= 0) {
           throw new ValidationError(
-            "costPerBag must be set on the farmer storage link to create a potato voucher",
-            "COST_PER_BAG_REQUIRED",
+            "Amount is required to create a potato voucher",
+            "AMOUNT_REQUIRED",
           );
         }
 
-        potatoAmount = costPerBag * totalBags;
+        const voucherNarration = payload.narration?.trim();
+        if (!voucherNarration) {
+          throw new ValidationError(
+            "Narration is required to create a potato voucher",
+            "NARRATION_REQUIRED",
+          );
+        }
+
+        potatoAmount = payload.amount;
         const createdByObjId = new Types.ObjectId(createdById);
         const farmerLinkId = isBuyPotato ? fromLinkId : toLinkId;
 
@@ -515,10 +514,6 @@ export async function createTransferStock(
           );
         }
 
-        const narration = isBuyPotato
-          ? `Potato purchase for transfer gate pass no. ${transferGatePassNo}`
-          : `Potato sales for transfer gate pass no. ${transferGatePassNo}`;
-
         const voucher = await createVoucher({
           debitLedgerId: isBuyPotato
             ? new Types.ObjectId(systemLedger._id)
@@ -527,7 +522,7 @@ export async function createTransferStock(
             ? new Types.ObjectId(farmerLedger._id)
             : new Types.ObjectId(systemLedger._id),
           amount: potatoAmount,
-          narration,
+          narration: voucherNarration,
           coldStorageId: fromColdStorageId,
           farmerStorageLinkId: farmerLinkId,
           createdBy: createdByObjId,
