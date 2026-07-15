@@ -86,6 +86,47 @@ const topSizeSchema = {
   required: ["size", "currentQuantity"],
 };
 
+/** One stock-summary bucket (used for ungrouped summary and per stockFilter group) */
+const stockSummaryResultSchema = {
+  type: "object" as const,
+  properties: {
+    stockSummary: {
+      type: "array" as const,
+      items: varietyItemSchema,
+    },
+    chartData: {
+      type: "object" as const,
+      properties: {
+        flatSeries: {
+          type: "array" as const,
+          items: chartDataPointSchema,
+        },
+        varieties: {
+          type: "array" as const,
+          items: { type: "string" },
+        },
+        sizes: {
+          type: "array" as const,
+          items: { type: "string" },
+        },
+      },
+      required: ["flatSeries", "varieties", "sizes"],
+    },
+    totalInventory: totalInventorySchema,
+    topVariety: {
+      oneOf: [topVarietySchema, { type: "null" }],
+    },
+    topSize: { oneOf: [topSizeSchema, { type: "null" }] },
+  },
+  required: [
+    "stockSummary",
+    "chartData",
+    "totalInventory",
+    "topVariety",
+    "topSize",
+  ],
+};
+
 const topFarmerChartPointSchema = {
   type: "object" as const,
   properties: {
@@ -300,7 +341,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate pass snapshots are not used). Scoped to authenticated user's cold storage. If stockFilter=true, summary is grouped by stock filter: FARMER and OWNED.",
+          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate pass snapshots are not used). Scoped to authenticated user's cold storage. If stockFilter=true, summary is grouped by every distinct non-empty stockFilter value found in data. Returns 400 if no stock filter values exist.",
         tags: ["Analytics"],
         summary: "Get stock summary",
         querystring: {
@@ -309,7 +350,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
             stockFilter: {
               type: "string",
               description:
-                "If 'true', group summary by stock filter (FARMER and OWNED)",
+                "If 'true', group summary by all distinct stockFilter values in data",
               enum: ["true", "false"],
             },
           },
@@ -357,88 +398,8 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
                   stockSummaryByFilter: {
                     type: "object",
                     description:
-                      "Present when stockFilter=true: summary grouped by FARMER and OWNED",
-                    properties: {
-                      FARMER: {
-                        type: "object",
-                        properties: {
-                          stockSummary: {
-                            type: "array",
-                            items: varietyItemSchema,
-                          },
-                          chartData: {
-                            type: "object",
-                            properties: {
-                              flatSeries: {
-                                type: "array",
-                                items: chartDataPointSchema,
-                              },
-                              varieties: {
-                                type: "array",
-                                items: { type: "string" },
-                              },
-                              sizes: {
-                                type: "array",
-                                items: { type: "string" },
-                              },
-                            },
-                            required: ["flatSeries", "varieties", "sizes"],
-                          },
-                          totalInventory: totalInventorySchema,
-                          topVariety: {
-                            oneOf: [topVarietySchema, { type: "null" }],
-                          },
-                          topSize: { oneOf: [topSizeSchema, { type: "null" }] },
-                        },
-                        required: [
-                          "stockSummary",
-                          "chartData",
-                          "totalInventory",
-                          "topVariety",
-                          "topSize",
-                        ],
-                      },
-                      OWNED: {
-                        type: "object",
-                        properties: {
-                          stockSummary: {
-                            type: "array",
-                            items: varietyItemSchema,
-                          },
-                          chartData: {
-                            type: "object",
-                            properties: {
-                              flatSeries: {
-                                type: "array",
-                                items: chartDataPointSchema,
-                              },
-                              varieties: {
-                                type: "array",
-                                items: { type: "string" },
-                              },
-                              sizes: {
-                                type: "array",
-                                items: { type: "string" },
-                              },
-                            },
-                            required: ["flatSeries", "varieties", "sizes"],
-                          },
-                          totalInventory: totalInventorySchema,
-                          topVariety: {
-                            oneOf: [topVarietySchema, { type: "null" }],
-                          },
-                          topSize: { oneOf: [topSizeSchema, { type: "null" }] },
-                        },
-                        required: [
-                          "stockSummary",
-                          "chartData",
-                          "totalInventory",
-                          "topVariety",
-                          "topSize",
-                        ],
-                      },
-                    },
-                    required: ["FARMER", "OWNED"],
+                      "Present when stockFilter=true: summary keyed by each distinct stockFilter string",
+                    additionalProperties: stockSummaryResultSchema,
                   },
                 },
                 required: [],
@@ -446,6 +407,11 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
               message: { type: "string" },
             },
             required: ["success", "data", "message"],
+          },
+          400: {
+            description:
+              "No stock filter values found (disable stock filter from preferences)",
+            ...errorResponse,
           },
           401: {
             description: "Unauthorized or missing cold storage in token",

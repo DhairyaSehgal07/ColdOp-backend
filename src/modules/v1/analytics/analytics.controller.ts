@@ -37,7 +37,8 @@ function sendErrorReply(
  * GET /summary – stock summary by variety and size (initial, current, removed)
  * with chart-ready data for Recharts. Requires authentication.
  * Uses only the current logged-in store admin's cold storage (from JWT).
- * Query param stockFilter=true: group summary by stock filter (FARMER and OWNED).
+ * Query param stockFilter=true: group summary by every distinct non-empty
+ * stockFilter value in data (returns NO_STOCK_FILTER if none exist).
  */
 export async function getSummaryHandler(
   request: FastifyRequest,
