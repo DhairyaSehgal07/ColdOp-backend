@@ -1,20 +1,31 @@
 # Dependencies
 node_modules/
+.pnpm-store/
 .pnp
 .pnp.js
+
+# Build outputs
+dist/
+build/
+
+# Cache
+.vite/
+.tanstack/
+.cache/
+.temp/
+tmp/
 
 # Testing
 coverage/
 *.lcov
 .nyc_output
 
-# Production
-dist/
-build/
+# Logs
 *.log
-
-# Prisma
-generated/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Environment variables
 .env
@@ -23,8 +34,13 @@ generated/
 .env.test.local
 .env.production.local
 
+# Generated
+generated/
+
+# TypeScript
+*.tsbuildinfo
+
 # IDE
-# Note: .vscode/settings.json is committed for team consistency
 .vscode/*
 !.vscode/settings.json
 .idea/
@@ -33,15 +49,11 @@ generated/
 *~
 .DS_Store
 
-# TypeScript
-*.tsbuildinfo
-
 # Husky
 .husky/_
 
-# .Md
+# Local documentation
 CONTEXT.md
 API_CURL_COMMANDS.md
 voucher_testing.md
 accounting.md
-.pnpm-store
