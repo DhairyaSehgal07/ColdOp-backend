@@ -866,13 +866,20 @@ export async function updateIncomingGatePass(
     }
 
     const bagSizesChanged = payload.bagSizes !== undefined;
+    const farmerChanged = payload.farmerStorageLinkId !== undefined;
+    const dateChanged = payload.date !== undefined;
     const explicitAmountUpdate =
       payload.amount !== undefined && payload.amount > 0;
+    const rentFinanceFieldsChanged =
+      bagSizesChanged ||
+      farmerChanged ||
+      explicitAmountUpdate ||
+      dateChanged;
 
     const shouldUpdateRentVoucher =
       preferences?.showFinances === true &&
       rentEntryVoucherId != null &&
-      (bagSizesChanged || explicitAmountUpdate);
+      rentFinanceFieldsChanged;
 
     // Only validate or update amount/voucher when cold storage has showFinances enabled
     if (preferences?.showFinances === true) {
@@ -882,9 +889,9 @@ export async function updateIncomingGatePass(
           "INVALID_AMOUNT",
         );
       }
-      if (payload.amount !== undefined && rentEntryVoucherId == null) {
+      if (rentFinanceFieldsChanged && rentEntryVoucherId == null) {
         throw new ValidationError(
-          "This gate pass has no rent entry voucher; amount cannot be updated",
+          "This gate pass has no rent entry voucher; rent-related fields cannot be updated",
           "NO_RENT_ENTRY_VOUCHER",
         );
       }
@@ -892,36 +899,12 @@ export async function updateIncomingGatePass(
 
     let rentAmountBefore: number | undefined;
     let rentAmountAfter: number | undefined;
-    let newRentAmount: number | undefined;
+    let rentVoucherSynced = false;
 
     if (shouldUpdateRentVoucher) {
-      if (bagSizesChanged) {
-        const costPerBag = (rentCostLink as { costPerBag?: number }).costPerBag;
-        if (costPerBag == null || costPerBag <= 0) {
-          throw new ValidationError(
-            "costPerBag must be set on the farmer storage link to recalculate rent voucher amount",
-            "COST_PER_BAG_REQUIRED",
-          );
-        }
-        const totalBags = payload.bagSizes!.reduce(
-          (sum, b) => sum + (b.initialQuantity ?? 0),
-          0,
-        );
-        newRentAmount = costPerBag * totalBags;
-      } else if (explicitAmountUpdate) {
-        newRentAmount = payload.amount as number;
-      }
-    }
-
-    const hasRentAmountUpdate =
-      shouldUpdateRentVoucher &&
-      newRentAmount != null &&
-      newRentAmount > 0;
-
-    if (hasRentAmountUpdate) {
       const rentVoucher = await Voucher.findById(rentEntryVoucherId)
         .session(session)
-        .select("debitLedger creditLedger amount")
+        .select("debitLedger creditLedger amount date farmerStorageLinkId")
         .lean();
       if (!rentVoucher) {
         throw new NotFoundError(
@@ -929,48 +912,151 @@ export async function updateIncomingGatePass(
           "RENT_VOUCHER_NOT_FOUND",
         );
       }
-      const debitLedgerId =
+
+      const oldDebitLedgerId =
         typeof rentVoucher.debitLedger === "object" &&
         rentVoucher.debitLedger != null
           ? (rentVoucher.debitLedger as mongoose.Types.ObjectId)
           : new mongoose.Types.ObjectId(rentVoucher.debitLedger);
-      const creditLedgerId =
+      const oldCreditLedgerId =
         typeof rentVoucher.creditLedger === "object" &&
         rentVoucher.creditLedger != null
           ? (rentVoucher.creditLedger as mongoose.Types.ObjectId)
           : new mongoose.Types.ObjectId(rentVoucher.creditLedger);
       const oldAmount = Number(rentVoucher.amount);
-      const newAmount = newRentAmount as number;
-      rentAmountBefore = oldAmount;
-      rentAmountAfter = newAmount;
 
-      await reverseVoucherBalances(
-        debitLedgerId,
-        creditLedgerId,
-        oldAmount,
-        session,
-      );
-      await applyVoucherBalances(
-        debitLedgerId,
-        creditLedgerId,
-        newAmount,
-        session,
-      );
+      let newRentAmount: number;
+      if (bagSizesChanged || farmerChanged) {
+        const costPerBag = (rentCostLink as { costPerBag?: number }).costPerBag;
+        if (costPerBag == null || costPerBag <= 0) {
+          throw new ValidationError(
+            "costPerBag must be set on the farmer storage link to recalculate rent voucher amount",
+            "COST_PER_BAG_REQUIRED",
+          );
+        }
+        const bagsForRent = bagSizesChanged
+          ? payload.bagSizes!
+          : ((existing as { bagSizes?: Array<{ initialQuantity?: number }> })
+              .bagSizes ?? []);
+        const totalBags = bagsForRent.reduce(
+          (sum, b) => sum + (b.initialQuantity ?? 0),
+          0,
+        );
+        newRentAmount = costPerBag * totalBags;
+      } else if (explicitAmountUpdate) {
+        newRentAmount = payload.amount as number;
+      } else {
+        // Date-only: keep existing voucher amount
+        newRentAmount = oldAmount;
+      }
 
-      const voucherUpdate: Record<string, unknown> = {
-        amount: newAmount,
-      };
+      if (newRentAmount <= 0) {
+        throw new ValidationError(
+          "Rent entry amount must be greater than 0",
+          "INVALID_AMOUNT",
+        );
+      }
+
+      let newDebitLedgerId = oldDebitLedgerId;
+      let newCreditLedgerId = oldCreditLedgerId;
+      let newFarmerStorageLinkId: mongoose.Types.ObjectId | undefined;
+
+      if (farmerChanged) {
+        const newLinkIdObj = new mongoose.Types.ObjectId(
+          payload.farmerStorageLinkId,
+        );
+        newFarmerStorageLinkId = newLinkIdObj;
+        const coldIdObj = new mongoose.Types.ObjectId(linkColdStorageId);
+
+        const farmerLedger = await Ledger.findOne({
+          coldStorageId: coldIdObj,
+          farmerStorageLinkId: newLinkIdObj,
+          category: "Debtors",
+        })
+          .session(session)
+          .select("_id")
+          .lean();
+
+        if (!farmerLedger) {
+          throw new NotFoundError(
+            "Farmer ledger not found for this farmer storage link",
+            "FARMER_LEDGER_NOT_FOUND",
+          );
+        }
+
+        const storeRentLedger = await Ledger.findOne({
+          coldStorageId: coldIdObj,
+          name: "Store Rent",
+          farmerStorageLinkId: null,
+        })
+          .session(session)
+          .select("_id")
+          .lean();
+
+        if (!storeRentLedger) {
+          throw new NotFoundError(
+            "Store Rent ledger not found for the current store",
+            "STORE_RENT_LEDGER_NOT_FOUND",
+          );
+        }
+
+        newDebitLedgerId = new mongoose.Types.ObjectId(farmerLedger._id);
+        newCreditLedgerId = new mongoose.Types.ObjectId(storeRentLedger._id);
+      }
+
+      const amountChanged = newRentAmount !== oldAmount;
+      const debitLedgerChanged = !newDebitLedgerId.equals(oldDebitLedgerId);
+      const creditLedgerChanged = !newCreditLedgerId.equals(oldCreditLedgerId);
+      const needsBalanceUpdate =
+        amountChanged || debitLedgerChanged || creditLedgerChanged;
+
+      if (needsBalanceUpdate) {
+        await reverseVoucherBalances(
+          oldDebitLedgerId,
+          oldCreditLedgerId,
+          oldAmount,
+          session,
+        );
+        await applyVoucherBalances(
+          newDebitLedgerId,
+          newCreditLedgerId,
+          newRentAmount,
+          session,
+        );
+      }
+
+      const voucherUpdate: Record<string, unknown> = {};
+      if (amountChanged || needsBalanceUpdate) {
+        voucherUpdate.amount = newRentAmount;
+      }
+      if (farmerChanged) {
+        voucherUpdate.debitLedger = newDebitLedgerId;
+        voucherUpdate.creditLedger = newCreditLedgerId;
+        voucherUpdate.farmerStorageLinkId = newFarmerStorageLinkId;
+      }
+      if (dateChanged) {
+        voucherUpdate.date = payload.date;
+      }
       if (editedById) {
         voucherUpdate.updatedBy = new mongoose.Types.ObjectId(editedById);
       }
-      await Voucher.findByIdAndUpdate(
-        rentEntryVoucherId,
-        { $set: voucherUpdate },
-        { session },
-      );
+
+      if (Object.keys(voucherUpdate).length > 0) {
+        await Voucher.findByIdAndUpdate(
+          rentEntryVoucherId,
+          { $set: voucherUpdate },
+          { session },
+        );
+        rentVoucherSynced = true;
+      }
+
+      if (amountChanged) {
+        rentAmountBefore = oldAmount;
+        rentAmountAfter = newRentAmount;
+      }
     }
 
-    if (Object.keys(updateFields).length === 0 && !hasRentAmountUpdate) {
+    if (Object.keys(updateFields).length === 0 && !rentVoucherSynced) {
       throw new ValidationError(
         "No valid fields to update",
         "NO_UPDATE_FIELDS",

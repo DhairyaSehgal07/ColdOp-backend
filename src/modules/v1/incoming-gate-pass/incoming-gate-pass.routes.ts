@@ -397,7 +397,7 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Update an existing incoming gate pass by ID. When updating bagSizes, both initial and current quantities are updated. An audit entry is created.",
+          "Update an existing incoming gate pass by ID. When updating bagSizes, both initial and current quantities are updated. When showFinances is enabled and a rent entry voucher exists, rent is synced: bagSizes and/or farmerStorageLinkId recalculate amount as costPerBag × Σ initialQuantity (net bags) and repoint the debit ledger to the farmer's Debtors ledger (credit remains Store Rent); date updates the voucher date; explicit amount alone updates voucher amount. An audit entry is created.",
         tags: ["Incoming Gate Pass"],
         summary: "Edit incoming gate pass",
         params: {
@@ -414,9 +414,14 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
             farmerStorageLinkId: {
               type: "string",
               description:
-                "Farmer-storage-link ID to associate the gate pass with (must belong to same cold storage)",
+                "Farmer-storage-link ID to associate the gate pass with (must belong to same cold storage). When showFinances is on, also moves the rent voucher debit ledger to this farmer's Debtors ledger and recalculates amount from that link's costPerBag × net bags.",
             },
-            date: { type: "string", format: "date-time" },
+            date: {
+              type: "string",
+              format: "date-time",
+              description:
+                "Gate pass date. When showFinances is on, also updates the associated rent voucher date.",
+            },
             variety: { type: "string" },
             truckNumber: { type: "string" },
             remarks: { type: "string" },
@@ -427,7 +432,7 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
               type: "number",
               minimum: 0.01,
               description:
-                "Rent entry voucher amount (only when gate pass has an associated rent voucher). When bagSizes is also sent, amount is auto-derived from costPerBag × total bags.",
+                "Rent entry voucher amount (only when gate pass has an associated rent voucher). Ignored when bagSizes and/or farmerStorageLinkId is sent — amount is then auto-derived as costPerBag × Σ initialQuantity.",
             },
             bagSizes: {
               type: "array",
