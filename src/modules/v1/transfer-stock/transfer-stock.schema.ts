@@ -54,6 +54,7 @@ export const createTransferStockSchema = z.object({
         .min(1, "At least one item is required"),
       remarks: z.string().trim().optional(),
       customMarka: z.string().trim().optional(),
+      stockFilter: z.string().trim().optional(),
       amount: z.coerce
         .number()
         .positive("Amount must be greater than 0")

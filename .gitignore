@@ -57,3 +57,6 @@ CONTEXT.md
 API_CURL_COMMANDS.md
 voucher_testing.md
 accounting.md
+
+# Local one-off scripts
+scripts/backfill-incoming-gate-pass-status.ts

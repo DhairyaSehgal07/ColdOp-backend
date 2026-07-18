@@ -155,7 +155,7 @@ async function populateTransferStockGatePass(
     .populate({ path: "createdBy", select: "name" })
     .populate({
       path: "createdIncomingGatePassId",
-      select: "gatePassNo date type variety bagSizes customMarka",
+      select: "gatePassNo date type variety bagSizes customMarka stockFilter",
     })
     .populate({
       path: "createdOutgoingGatePassId",
@@ -572,6 +572,9 @@ export async function createTransferStock(
           ...(payload.customMarka !== undefined && {
             customMarka: payload.customMarka,
           }),
+          ...(payload.stockFilter !== undefined && {
+            stockFilter: payload.stockFilter,
+          }),
         },
       ],
       { session },
@@ -731,7 +734,7 @@ export async function getTransferStockGatePassesForColdStorage(
     .populate({ path: "createdBy", select: "name" })
     .populate({
       path: "createdIncomingGatePassId",
-      select: "gatePassNo date type variety bagSizes customMarka",
+      select: "gatePassNo date type variety bagSizes customMarka stockFilter",
     })
     .populate({
       path: "createdOutgoingGatePassId",

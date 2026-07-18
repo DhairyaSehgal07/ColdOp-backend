@@ -8,7 +8,13 @@ import {
   IOutgoingGatePass,
   IOutgoingOrderDetail,
 } from "./outgoing-gate-pass.model.js";
-import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
+import {
+  IncomingGatePass,
+  GatePassStatus,
+  type IIncomingGatePass,
+  type IBagSize,
+  type ILocation,
+} from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import type {
   CreateOutgoingGatePassInput,
   NullOutgoingGatePassBody,
@@ -27,11 +33,6 @@ import {
   formatPopulatedFarmerStorageLinkDisplay,
   type PopulatedFarmerStorageLink,
 } from "../farmer-storage-link/farmer-storage-link.utils.js";
-import type {
-  IIncomingGatePass,
-  IBagSize,
-  ILocation,
-} from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import {
   recordEditHistory,
   recordEditHistoryBulk,
@@ -590,6 +591,41 @@ function prepareNetDeltaBulkOperationsForUpdate(
   return bulkOps;
 }
 
+/**
+ * Sets each affected incoming gate pass to CLOSED when all bag sizes are
+ * depleted (sum of currentQuantity === 0), otherwise OPEN.
+ */
+async function syncIncomingGatePassStatusFromQuantities(
+  incomingGatePassIds: Array<string | Types.ObjectId>,
+  session: ClientSession,
+): Promise<void> {
+  const uniqueIds = [
+    ...new Set(incomingGatePassIds.map((id) => id.toString())),
+  ].map((id) => new Types.ObjectId(id));
+
+  if (uniqueIds.length === 0) return;
+
+  await IncomingGatePass.updateMany(
+    { _id: { $in: uniqueIds } },
+    [
+      {
+        $set: {
+          status: {
+            $cond: {
+              if: {
+                $eq: [{ $sum: "$bagSizes.currentQuantity" }, 0],
+              },
+              then: GatePassStatus.CLOSED,
+              else: GatePassStatus.OPEN,
+            },
+          },
+        },
+      },
+    ],
+    { session, updatePipeline: true },
+  );
+}
+
 /* =======================
    BUILD SNAPSHOTS (remaining qty at creation time)
 ======================= */
@@ -1055,6 +1091,7 @@ export async function createOutgoingGatePass(
     const uniqueIncomingIds = [
       ...new Set(validated.map((v) => v.incomingGatePassId)),
     ];
+    await syncIncomingGatePassStatusFromQuantities(uniqueIncomingIds, session);
     await recordEditHistoryBulk(
       uniqueIncomingIds.map((id) => ({
         entityType: EditHistoryEntityType.INCOMING_GATE_PASS,
@@ -1414,6 +1451,11 @@ export async function updateOutgoingGatePass(
           }),
         ),
       ];
+
+      await syncIncomingGatePassStatusFromQuantities(
+        affectedIncomingIds,
+        session,
+      );
 
       await recordEditHistoryBulk(
         affectedIncomingIds.map((incomingId) => ({
@@ -2066,6 +2108,11 @@ export async function nullOutgoingGatePass(
           "CONCURRENT_MODIFICATION",
         );
       }
+
+      await syncIncomingGatePassStatusFromQuantities(
+        incomingGatePassIds,
+        session,
+      );
 
       await recordEditHistoryBulk(
         incomingGatePassIds.map((incomingId) => ({

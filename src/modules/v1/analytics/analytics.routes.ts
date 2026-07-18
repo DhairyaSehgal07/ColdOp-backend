@@ -581,7 +581,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get breakdown for a variety: all sizes with initial/current/quantityRemoved and per-farmer contribution per size. Scoped to authenticated store. Optional stockFilter narrows results to FARMER or OWNED.",
+          "Get breakdown for a variety: all sizes with initial/current/quantityRemoved and per-farmer contribution per size. Scoped to authenticated store. If stockFilter=true, breakdown is grouped by every distinct stockFilter value found in data. Returns 400 if no stock filter values exist.",
         tags: ["Analytics"],
         summary: "Get variety breakdown by size and farmer",
         querystring: {
@@ -595,8 +595,8 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
             stockFilter: {
               type: "string",
               description:
-                "Optional stock filter. Use FARMER or OWNED to filter breakdown data.",
-              enum: ["FARMER", "OWNED"],
+                "If 'true', group breakdown by all distinct stockFilter values in data",
+              enum: ["true", "false"],
             },
           },
         },
@@ -607,7 +607,25 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
             type: "object",
             properties: {
               success: { type: "boolean" },
-              data: varietyBreakdownResultSchema,
+              data: {
+                type: "object",
+                properties: {
+                  variety: { type: "string" },
+                  sizes: {
+                    type: "array",
+                    items: varietyBreakdownSizeSchema,
+                    description:
+                      "Present when stockFilter is not true (default)",
+                  },
+                  varietyBreakdownByFilter: {
+                    type: "object",
+                    description:
+                      "Present when stockFilter=true: breakdown keyed by each distinct stockFilter string",
+                    additionalProperties: varietyBreakdownResultSchema,
+                  },
+                },
+                required: [],
+              },
               message: { type: "string" },
             },
             required: ["success", "data", "message"],
@@ -617,7 +635,8 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
             ...errorResponse,
           },
           400: {
-            description: "Variety name missing or invalid",
+            description:
+              "Variety name missing/invalid, or no stock filter values found (disable stock filter from preferences)",
             ...errorResponse,
           },
           500: {

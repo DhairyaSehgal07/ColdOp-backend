@@ -913,16 +913,16 @@ export async function updateIncomingGatePass(
         );
       }
 
-      const oldDebitLedgerId =
-        typeof rentVoucher.debitLedger === "object" &&
-        rentVoucher.debitLedger != null
-          ? (rentVoucher.debitLedger as mongoose.Types.ObjectId)
-          : new mongoose.Types.ObjectId(rentVoucher.debitLedger);
-      const oldCreditLedgerId =
-        typeof rentVoucher.creditLedger === "object" &&
-        rentVoucher.creditLedger != null
-          ? (rentVoucher.creditLedger as mongoose.Types.ObjectId)
-          : new mongoose.Types.ObjectId(rentVoucher.creditLedger);
+      const oldDebitLedgerId = new mongoose.Types.ObjectId(
+        (
+          rentVoucher.debitLedger as mongoose.Types.ObjectId | string
+        ).toString(),
+      );
+      const oldCreditLedgerId = new mongoose.Types.ObjectId(
+        (
+          rentVoucher.creditLedger as mongoose.Types.ObjectId | string
+        ).toString(),
+      );
       const oldAmount = Number(rentVoucher.amount);
 
       let newRentAmount: number;
@@ -1004,11 +1004,22 @@ export async function updateIncomingGatePass(
         newCreditLedgerId = new mongoose.Types.ObjectId(storeRentLedger._id);
       }
 
-      const amountChanged = newRentAmount !== oldAmount;
-      const debitLedgerChanged = !newDebitLedgerId.equals(oldDebitLedgerId);
-      const creditLedgerChanged = !newCreditLedgerId.equals(oldCreditLedgerId);
+      const oldDebitStr = oldDebitLedgerId.toString();
+      const oldCreditStr = oldCreditLedgerId.toString();
+      const newDebitStr = newDebitLedgerId.toString();
+      const newCreditStr = newCreditLedgerId.toString();
+      const amountChanged = Number(newRentAmount) !== Number(oldAmount);
+      const debitLedgerChanged = newDebitStr !== oldDebitStr;
+      const creditLedgerChanged = newCreditStr !== oldCreditStr;
+      // Bags / farmer / explicit amount always reverse+reapply so Store Rent + debtor
+      // balances stay in sync even when the numeric amount is unchanged.
       const needsBalanceUpdate =
-        amountChanged || debitLedgerChanged || creditLedgerChanged;
+        bagSizesChanged ||
+        farmerChanged ||
+        explicitAmountUpdate ||
+        amountChanged ||
+        debitLedgerChanged ||
+        creditLedgerChanged;
 
       if (needsBalanceUpdate) {
         await reverseVoucherBalances(
@@ -1026,7 +1037,7 @@ export async function updateIncomingGatePass(
       }
 
       const voucherUpdate: Record<string, unknown> = {};
-      if (amountChanged || needsBalanceUpdate) {
+      if (needsBalanceUpdate || amountChanged) {
         voucherUpdate.amount = newRentAmount;
       }
       if (farmerChanged) {
@@ -1045,14 +1056,113 @@ export async function updateIncomingGatePass(
         await Voucher.findByIdAndUpdate(
           rentEntryVoucherId,
           { $set: voucherUpdate },
-          { session },
+          { session, runValidators: true },
         );
         rentVoucherSynced = true;
+        logger?.info(
+          {
+            rentEntryVoucherId: rentEntryVoucherId.toString(),
+            oldAmount,
+            newRentAmount,
+            amountChanged,
+            farmerChanged,
+            bagSizesChanged,
+            dateChanged,
+            debitLedgerChanged,
+            creditLedgerChanged,
+          },
+          "Rent entry voucher synced on incoming gate pass edit",
+        );
       }
 
-      if (amountChanged) {
+      if (amountChanged || needsBalanceUpdate) {
         rentAmountBefore = oldAmount;
         rentAmountAfter = newRentAmount;
+      }
+    }
+
+    // Keep labour cost voucher in sync when bag sizes change (labourCost × net bags).
+    if (
+      preferences?.showFinances === true &&
+      bagSizesChanged &&
+      preferences.labourCost != null &&
+      Number(preferences.labourCost) > 0
+    ) {
+      const labourCost = Number(preferences.labourCost);
+      const bagsForLabour = payload.bagSizes!;
+      const totalBags = bagsForLabour.reduce(
+        (sum, b) => sum + (b.initialQuantity ?? 0),
+        0,
+      );
+      if (totalBags > 0) {
+        const gatePassNo = (existing as { gatePassNo?: number }).gatePassNo;
+        const coldIdObj = new mongoose.Types.ObjectId(linkColdStorageId);
+        if (gatePassNo != null) {
+          const labourVoucher = await Voucher.findOne({
+            coldStorageId: coldIdObj,
+            narration: {
+              $regex: `^Labour cost for gate pass no\\. ${gatePassNo}\\b`,
+            },
+          })
+            .session(session)
+            .select("debitLedger creditLedger amount")
+            .lean();
+
+          if (labourVoucher) {
+            const newLabourAmount = labourCost * totalBags;
+            const oldLabourAmount = Number(labourVoucher.amount);
+            if (newLabourAmount > 0 && newLabourAmount !== oldLabourAmount) {
+              const labourDebitId =
+                typeof labourVoucher.debitLedger === "object" &&
+                labourVoucher.debitLedger != null
+                  ? (labourVoucher.debitLedger as mongoose.Types.ObjectId)
+                  : new mongoose.Types.ObjectId(labourVoucher.debitLedger);
+              const labourCreditId =
+                typeof labourVoucher.creditLedger === "object" &&
+                labourVoucher.creditLedger != null
+                  ? (labourVoucher.creditLedger as mongoose.Types.ObjectId)
+                  : new mongoose.Types.ObjectId(labourVoucher.creditLedger);
+
+              await reverseVoucherBalances(
+                labourDebitId,
+                labourCreditId,
+                oldLabourAmount,
+                session,
+              );
+              await applyVoucherBalances(
+                labourDebitId,
+                labourCreditId,
+                newLabourAmount,
+                session,
+              );
+
+              const labourNarration = `Labour cost for gate pass no. ${gatePassNo} (${totalBags} bags @ ${labourCost})`;
+              const labourUpdate: Record<string, unknown> = {
+                amount: newLabourAmount,
+                narration: labourNarration,
+              };
+              if (editedById) {
+                labourUpdate.updatedBy = new mongoose.Types.ObjectId(
+                  editedById,
+                );
+              }
+              await Voucher.findByIdAndUpdate(
+                labourVoucher._id,
+                { $set: labourUpdate },
+                { session, runValidators: true },
+              );
+              logger?.info(
+                {
+                  labourVoucherId: labourVoucher._id.toString(),
+                  oldLabourAmount,
+                  newLabourAmount,
+                  totalBags,
+                },
+                "Labour cost voucher synced on incoming gate pass edit",
+              );
+            }
+          }
+        }
       }
     }
 
@@ -1098,7 +1208,13 @@ export async function updateIncomingGatePass(
     await session.commitTransaction();
 
     logger?.info(
-      { incomingGatePassId: id, updatedFields: Object.keys(updateFields) },
+      {
+        incomingGatePassId: id,
+        updatedFields: Object.keys(updateFields),
+        rentVoucherSynced,
+        rentAmountBefore,
+        rentAmountAfter,
+      },
       "Incoming gate pass updated successfully",
     );
 
@@ -1112,6 +1228,15 @@ export async function updateIncomingGatePass(
         },
       })
       .populate({ path: "createdBy", select: "name" })
+      .populate({
+        path: "rentEntryVoucherId",
+        select:
+          "voucherNumber date amount debitLedger creditLedger farmerStorageLinkId narration updatedAt",
+        populate: [
+          { path: "debitLedger", select: "name category" },
+          { path: "creditLedger", select: "name category" },
+        ],
+      })
       .lean();
 
     if (!populated) {

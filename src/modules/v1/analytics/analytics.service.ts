@@ -97,6 +97,11 @@ export interface VarietyBreakdownResult {
   sizes: VarietyBreakdownSize[];
 }
 
+/** Result when groupByStockFilter is true: breakdown keyed by distinct stockFilter values */
+export interface VarietyBreakdownByFilterResult {
+  varietyBreakdownByFilter: Record<string, VarietyBreakdownResult>;
+}
+
 export interface StockSummaryResult {
   stockSummary: StockSummaryVariety[];
   chartData: StockSummaryChartData;
@@ -109,9 +114,6 @@ export interface StockSummaryResult {
 export interface StockSummaryByFilterResult {
   stockSummaryByFilter: Record<string, StockSummaryResult>;
 }
-
-const STOCK_FILTER_FARMER = "FARMER";
-const STOCK_FILTER_OWNED = "OWNED";
 
 /**
  * Distinct non-empty stockFilter values on IncomingGatePasses for a cold storage.
@@ -562,13 +564,17 @@ export async function getTopFarmersForStore(
  * Get breakdown for a single variety: all sizes with their quantities (initial,
  * current, quantityRemoved) and per-farmer contribution for each size.
  * Scoped to the given cold storage.
+ *
+ * When options.groupByStockFilter is true, returns breakdown grouped by every
+ * distinct non-empty stockFilter value found in data. If none exist, throws
+ * ValidationError (NO_STOCK_FILTER).
  */
 export async function getVarietyBreakdown(
   coldStorageId: string,
   varietyName: string,
-  stockFilter?: string,
   _logger?: FastifyBaseLogger,
-): Promise<VarietyBreakdownResult> {
+  options?: { groupByStockFilter?: boolean },
+): Promise<VarietyBreakdownResult | VarietyBreakdownByFilterResult> {
   if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
     throw new ValidationError(
       "Invalid cold storage ID format",
@@ -583,35 +589,56 @@ export async function getVarietyBreakdown(
       "VARIETY_NAME_REQUIRED",
     );
   }
-  const trimmedStockFilter = stockFilter?.trim();
-  if (
-    trimmedStockFilter &&
-    trimmedStockFilter !== STOCK_FILTER_FARMER &&
-    trimmedStockFilter !== STOCK_FILTER_OWNED
-  ) {
-    throw new ValidationError(
-      "stockFilter must be either FARMER or OWNED",
-      "INVALID_STOCK_FILTER",
+
+  if (options?.groupByStockFilter) {
+    const distinctFilters = await getDistinctStockFilters(coldStorageId);
+    if (distinctFilters.length === 0) {
+      throw new ValidationError(
+        "No stock filter found. Please disable it from preferences.",
+        "NO_STOCK_FILTER",
+      );
+    }
+
+    const results = await Promise.all(
+      distinctFilters.map((filterValue) =>
+        getVarietyBreakdownForFilter(
+          coldStorageId,
+          trimmedVariety,
+          filterValue,
+        ),
+      ),
     );
+
+    const varietyBreakdownByFilter: Record<string, VarietyBreakdownResult> =
+      {};
+    for (let i = 0; i < distinctFilters.length; i++) {
+      varietyBreakdownByFilter[distinctFilters[i]] = results[i];
+    }
+    return { varietyBreakdownByFilter };
   }
 
+  return getVarietyBreakdownForFilter(
+    coldStorageId,
+    trimmedVariety,
+    undefined,
+  );
+}
+
+/**
+ * Internal: get variety breakdown optionally filtered by stockFilter value.
+ * When filterValue is set, only documents with that exact stockFilter are included.
+ * When filterValue is undefined, no stockFilter filter is applied (all documents).
+ */
+async function getVarietyBreakdownForFilter(
+  coldStorageId: string,
+  trimmedVariety: string,
+  filterValue: string | undefined,
+): Promise<VarietyBreakdownResult> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
-  const stockFilterMatch: mongoose.PipelineStage[] =
-    trimmedStockFilter === STOCK_FILTER_FARMER
-      ? [{ $match: { stockFilter: STOCK_FILTER_FARMER } }]
-      : trimmedStockFilter === STOCK_FILTER_OWNED
-        ? [
-            {
-              $match: {
-                $or: [
-                  { stockFilter: STOCK_FILTER_OWNED },
-                  { stockFilter: { $in: [null, ""] } },
-                  { stockFilter: { $exists: false } },
-                ],
-              },
-            },
-          ]
-        : [];
+
+  const stockFilterMatch: mongoose.PipelineStage[] = filterValue
+    ? [{ $match: { stockFilter: filterValue } }]
+    : [];
 
   const pipeline: mongoose.PipelineStage[] = [
     {

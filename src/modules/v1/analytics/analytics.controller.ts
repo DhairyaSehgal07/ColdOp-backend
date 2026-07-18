@@ -156,6 +156,8 @@ export async function getTopFarmersHandler(
  * GET /variety-breakdown – for a given variety (query param), returns all sizes
  * with their quantities (initial, current, quantityRemoved) and per-farmer
  * contribution for each size. Scoped to authenticated user's cold storage.
+ * Query param stockFilter=true: group breakdown by every distinct non-empty
+ * stockFilter value in data (returns NO_STOCK_FILTER if none exist).
  */
 export async function getVarietyBreakdownHandler(
   request: FastifyRequest,
@@ -185,16 +187,25 @@ export async function getVarietyBreakdownHandler(
         ? (request.query as { variety: string }).variety
         : "";
     const stockFilter =
-      typeof (request.query as { stockFilter?: string }).stockFilter === "string"
-        ? (request.query as { stockFilter: string }).stockFilter
-        : undefined;
+      (request.query as { stockFilter?: string }).stockFilter === "true";
 
     const result = await getVarietyBreakdown(
       coldStorageId,
       variety,
-      stockFilter,
       request.log,
+      { groupByStockFilter: stockFilter },
     );
+
+    if ("varietyBreakdownByFilter" in result) {
+      return reply.code(200).send({
+        success: true,
+        data: {
+          varietyBreakdownByFilter: result.varietyBreakdownByFilter,
+        },
+        message:
+          "Variety breakdown retrieved successfully (grouped by stock filter)",
+      });
+    }
 
     return reply.code(200).send({
       success: true,
