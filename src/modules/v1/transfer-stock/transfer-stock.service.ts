@@ -4,6 +4,9 @@ import {
   IncomingGatePass,
   GatePassType,
   GatePassStatus,
+  getEffectiveLocation,
+  bagHasLocation,
+  buildBagLocationArrayFilter,
 } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import type {
   IBagSize,
@@ -44,23 +47,6 @@ function normalizeSize(s: string): string {
     .replace(/\s+/g, " ");
 }
 
-function getEffectiveLocation(bag: IBagSize): ILocation {
-  const p = bag.paltaiLocation;
-  if (p?.chamber && p?.floor && p?.row) return p;
-  return bag.location;
-}
-
-function locationMatches(
-  a: { chamber: string; floor: string; row: string },
-  b: { chamber: string; floor: string; row: string },
-): boolean {
-  return (
-    (a.chamber ?? "").trim() === (b.chamber ?? "").trim() &&
-    (a.floor ?? "").trim() === (b.floor ?? "").trim() &&
-    (a.row ?? "").trim() === (b.row ?? "").trim()
-  );
-}
-
 function getBagForTransferItem(
   bagSizes: IBagSize[],
   item: { bagSize: string; location: ILocation },
@@ -68,8 +54,7 @@ function getBagForTransferItem(
   const normSize = normalizeSize(item.bagSize);
   for (const b of bagSizes) {
     if (normalizeSize(b.name) !== normSize) continue;
-    const effective = getEffectiveLocation(b);
-    if (locationMatches(effective, item.location)) return b;
+    if (bagHasLocation(b, item.location)) return b;
   }
   return undefined;
 }
@@ -358,20 +343,7 @@ export async function createTransferStock(
         "elem.name": bag.name,
         "elem.currentQuantity": { $gte: item.quantity },
       };
-      const locationFilter = {
-        $or: [
-          {
-            "elem.location.chamber": location.chamber,
-            "elem.location.floor": location.floor,
-            "elem.location.row": location.row,
-          },
-          {
-            "elem.paltaiLocation.chamber": location.chamber,
-            "elem.paltaiLocation.floor": location.floor,
-            "elem.paltaiLocation.row": location.row,
-          },
-        ],
-      };
+      const locationFilter = buildBagLocationArrayFilter(location);
       bulkOps.push({
         updateOne: {
           filter: { _id: new Types.ObjectId(item.incomingGatePassId) },

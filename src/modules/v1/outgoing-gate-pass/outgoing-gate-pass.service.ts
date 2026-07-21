@@ -13,7 +13,10 @@ import {
   GatePassStatus,
   type IIncomingGatePass,
   type IBagSize,
-  type ILocation,
+  locationMatches,
+  getEffectiveLocation,
+  bagHasLocation,
+  buildBagLocationArrayFilter,
 } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import type {
   CreateOutgoingGatePassInput,
@@ -80,26 +83,6 @@ function normalizeSize(s: string): string {
 }
 
 /**
- * Effective location for a bag (paltai if set, else original location).
- */
-function getEffectiveLocation(bag: IBagSize): ILocation {
-  const p = bag.paltaiLocation;
-  if (p?.chamber && p?.floor && p?.row) return p;
-  return bag.location;
-}
-
-function locationMatches(
-  a: { chamber: string; floor: string; row: string },
-  b: { chamber: string; floor: string; row: string },
-): boolean {
-  return (
-    (a.chamber ?? "").trim() === (b.chamber ?? "").trim() &&
-    (a.floor ?? "").trim() === (b.floor ?? "").trim() &&
-    (a.row ?? "").trim() === (b.row ?? "").trim()
-  );
-}
-
-/**
  * Finds the bag in bagSizes for the given allocation. When location is provided,
  * matches by size and location (same bag size can exist at multiple locations).
  */
@@ -111,8 +94,7 @@ function getBagForAllocation(
   for (const b of bagSizes) {
     if (normalizeSize(b.name) !== normSize) continue;
     if (!alloc.location) return b;
-    const effective = getEffectiveLocation(b);
-    if (locationMatches(effective, alloc.location)) return b;
+    if (bagHasLocation(b, alloc.location)) return b;
   }
   return undefined;
 }
@@ -197,27 +179,6 @@ function parseAllocationMapKey(key: string): {
     };
   }
   return { incomingGatePassId, size: rest };
-}
-
-function buildLocationArrayFilter(location: {
-  chamber: string;
-  floor: string;
-  row: string;
-}): Record<string, unknown> {
-  return {
-    $or: [
-      {
-        "elem.location.chamber": location.chamber,
-        "elem.location.floor": location.floor,
-        "elem.location.row": location.row,
-      },
-      {
-        "elem.paltaiLocation.chamber": location.chamber,
-        "elem.paltaiLocation.floor": location.floor,
-        "elem.paltaiLocation.row": location.row,
-      },
-    ],
-  };
 }
 
 /* =======================
@@ -339,24 +300,7 @@ function prepareBulkOperationsForOutgoing(
         "elem.currentQuantity": { $gte: alloc.quantityToAllocate },
       };
       const locationFilter =
-        alloc.location &&
-        (() => {
-          const loc = alloc.location;
-          return {
-            $or: [
-              {
-                "elem.location.chamber": loc.chamber,
-                "elem.location.floor": loc.floor,
-                "elem.location.row": loc.row,
-              },
-              {
-                "elem.paltaiLocation.chamber": loc.chamber,
-                "elem.paltaiLocation.floor": loc.floor,
-                "elem.paltaiLocation.row": loc.row,
-              },
-            ],
-          };
-        })();
+        alloc.location && buildBagLocationArrayFilter(alloc.location);
       bulkOps.push({
         updateOne: {
           filter: { _id: new Types.ObjectId(item.incomingGatePassId) },
@@ -572,7 +516,7 @@ function prepareNetDeltaBulkOperationsForUpdate(
     }
 
     const locationFilter = location
-      ? buildLocationArrayFilter(location)
+      ? buildBagLocationArrayFilter(location)
       : undefined;
 
     bulkOps.push({
@@ -705,14 +649,8 @@ function buildIncomingGatePassSnapshots(
       const remaining = options?.stockAlreadyAdjusted
         ? Math.max(0, bag.currentQuantity)
         : Math.max(0, bag.currentQuantity - allocated);
-      // Use paltai location as latest location when present (bags moved in cold storage)
-      const effectiveLocation =
-        bag.paltaiLocation &&
-        bag.paltaiLocation.chamber &&
-        bag.paltaiLocation.floor &&
-        bag.paltaiLocation.row
-          ? bag.paltaiLocation
-          : bag.location;
+      // Use latest paltai location when present (bags moved in cold storage)
+      const effectiveLocation = getEffectiveLocation(bag);
 
       bagSizes.push({
         name: bag.name,

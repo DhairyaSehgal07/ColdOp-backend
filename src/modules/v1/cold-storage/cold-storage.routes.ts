@@ -261,4 +261,18 @@ export async function coldStorageRoutes(fastify: FastifyInstance) {
     },
     updatePreferencesHandler,
   );
+
+  // Optional local-only reset route (file is gitignored; may be absent)
+  try {
+    const resetRouteSpec = "./cold-storage-reset.routes.js";
+    const resetRouteModule = (await import(resetRouteSpec)) as {
+      registerColdStorageResetRoute: (instance: FastifyInstance) => Promise<void>;
+    };
+    await resetRouteModule.registerColdStorageResetRoute(fastify);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code !== "ERR_MODULE_NOT_FOUND") {
+      throw err;
+    }
+  }
 }

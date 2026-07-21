@@ -334,7 +334,7 @@ describe("outgoing gate pass stock edit helpers", () => {
           initialQuantity: 300,
           currentQuantity: 200,
           location: { chamber: "A", floor: "1", row: "1" },
-          paltaiLocation: paltai,
+          paltaiLocation: [paltai],
         },
       ]);
       const incomingPassMap = new Map([[incomingId, pass]]);
@@ -356,7 +356,13 @@ describe("outgoing gate pass stock edit helpers", () => {
       expect(filter.$or).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            "elem.paltaiLocation.chamber": "B",
+            "elem.paltaiLocation": {
+              $elemMatch: {
+                chamber: "B",
+                floor: "2",
+                row: "4",
+              },
+            },
           }),
         ]),
       );

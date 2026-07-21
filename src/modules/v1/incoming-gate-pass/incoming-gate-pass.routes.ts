@@ -459,11 +459,15 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
                     },
                   },
                   paltaiLocation: {
-                    type: "object",
-                    properties: {
-                      chamber: { type: "string" },
-                      floor: { type: "string" },
-                      row: { type: "string" },
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["chamber", "floor", "row"],
+                      properties: {
+                        chamber: { type: "string" },
+                        floor: { type: "string" },
+                        row: { type: "string" },
+                      },
                     },
                   },
                 },

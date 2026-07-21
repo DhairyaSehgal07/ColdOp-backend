@@ -12,7 +12,7 @@ const bagSizeSchema = z.object({
   initialQuantity: z.coerce.number().min(0, "Initial quantity must be >= 0"),
   currentQuantity: z.coerce.number().min(0, "Current quantity must be >= 0"),
   location: locationSchema,
-  paltaiLocation: locationSchema.optional(),
+  paltaiLocation: z.array(locationSchema).optional(),
 });
 
 /** Create payload: type is set server-side (RECEIPT for regular incoming; transfer stock uses Incoming-transfer on the generated receipt) and must not be sent. */

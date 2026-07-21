@@ -63,10 +63,10 @@ function serializeAuditField(key: string, value: unknown): unknown {
       if (item.location && typeof item.location === "object") {
         item.location = { ...(item.location as Record<string, unknown>) };
       }
-      if (item.paltaiLocation && typeof item.paltaiLocation === "object") {
-        item.paltaiLocation = {
-          ...(item.paltaiLocation as Record<string, unknown>),
-        };
+      if (Array.isArray(item.paltaiLocation)) {
+        item.paltaiLocation = item.paltaiLocation.map((loc) => ({
+          ...(loc as Record<string, unknown>),
+        }));
       }
       return item;
     });

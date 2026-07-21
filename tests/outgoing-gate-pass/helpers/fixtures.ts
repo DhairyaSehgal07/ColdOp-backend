@@ -92,7 +92,7 @@ export interface TestBagConfig {
   initialQuantity: number;
   currentQuantity?: number;
   location: { chamber: string; floor: string; row: string };
-  paltaiLocation?: { chamber: string; floor: string; row: string };
+  paltaiLocation?: { chamber: string; floor: string; row: string }[];
 }
 
 export async function createTestIncomingGatePass(params: {
@@ -115,7 +115,8 @@ export async function createTestIncomingGatePass(params: {
       initialQuantity: bag.initialQuantity,
       currentQuantity: bag.currentQuantity ?? bag.initialQuantity,
       location: bag.location,
-      ...(bag.paltaiLocation && { paltaiLocation: bag.paltaiLocation }),
+      ...(bag.paltaiLocation &&
+        bag.paltaiLocation.length > 0 && { paltaiLocation: bag.paltaiLocation }),
     })),
   });
 }

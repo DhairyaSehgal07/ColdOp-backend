@@ -33,7 +33,7 @@ export interface IBagSize {
   initialQuantity: number;
   currentQuantity: number;
   location: ILocation;
-  paltaiLocation?: ILocation;
+  paltaiLocation?: ILocation[];
 }
 
 export interface IIncomingGatePass {
@@ -108,8 +108,9 @@ const BagSizeSchema = new Schema<IBagSize>(
     },
 
     paltaiLocation: {
-      type: LocationSchema,
+      type: [LocationSchema],
       required: false,
+      default: undefined,
     },
   },
   { _id: false },
@@ -225,6 +226,59 @@ IncomingGatePassSchema.index(
   { farmerStorageLinkId: 1, gatePassNo: 1 },
   { unique: true },
 );
+
+/* =======================
+   LOCATION HELPERS
+======================= */
+
+export function locationMatches(a: ILocation, b: ILocation): boolean {
+  return (
+    (a.chamber ?? "").trim() === (b.chamber ?? "").trim() &&
+    (a.floor ?? "").trim() === (b.floor ?? "").trim() &&
+    (a.row ?? "").trim() === (b.row ?? "").trim()
+  );
+}
+
+/** Latest storage location: last paltai entry if any, else original location. */
+export function getEffectiveLocation(bag: IBagSize): ILocation {
+  const paltai = bag.paltaiLocation;
+  if (Array.isArray(paltai) && paltai.length > 0) {
+    const last = paltai[paltai.length - 1];
+    if (last?.chamber && last?.floor && last?.row) return last;
+  }
+  return bag.location;
+}
+
+/** Whether a bag is stored at the given location (original or any paltai). */
+export function bagHasLocation(bag: IBagSize, location: ILocation): boolean {
+  if (locationMatches(bag.location, location)) return true;
+  const paltai = bag.paltaiLocation;
+  if (!Array.isArray(paltai)) return false;
+  return paltai.some((p) => locationMatches(p, location));
+}
+
+export function buildBagLocationArrayFilter(
+  location: ILocation,
+): Record<string, unknown> {
+  return {
+    $or: [
+      {
+        "elem.location.chamber": location.chamber,
+        "elem.location.floor": location.floor,
+        "elem.location.row": location.row,
+      },
+      {
+        "elem.paltaiLocation": {
+          $elemMatch: {
+            chamber: location.chamber,
+            floor: location.floor,
+            row: location.row,
+          },
+        },
+      },
+    ],
+  };
+}
 
 /* =======================
    MODEL EXPORT
