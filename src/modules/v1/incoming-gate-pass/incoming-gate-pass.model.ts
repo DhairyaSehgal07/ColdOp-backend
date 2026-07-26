@@ -33,7 +33,7 @@ export interface IBagSize {
   initialQuantity: number;
   currentQuantity: number;
   location: ILocation;
-  paltaiLocation?: ILocation;
+  previousLocation?: ILocation[];
 }
 
 export interface IIncomingGatePass {
@@ -107,9 +107,10 @@ const BagSizeSchema = new Schema<IBagSize>(
       required: true,
     },
 
-    paltaiLocation: {
-      type: LocationSchema,
+    previousLocation: {
+      type: [LocationSchema],
       required: false,
+      default: undefined,
     },
   },
   { _id: false },

@@ -458,12 +458,18 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
                       row: { type: "string" },
                     },
                   },
-                  paltaiLocation: {
-                    type: "object",
-                    properties: {
-                      chamber: { type: "string" },
-                      floor: { type: "string" },
-                      row: { type: "string" },
+                  previousLocation: {
+                    type: "array",
+                    description:
+                      "Prior locations for this bag (history of moves). Each entry is chamber/floor/row.",
+                    items: {
+                      type: "object",
+                      required: ["chamber", "floor", "row"],
+                      properties: {
+                        chamber: { type: "string" },
+                        floor: { type: "string" },
+                        row: { type: "string" },
+                      },
                     },
                   },
                 },

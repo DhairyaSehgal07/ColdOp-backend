@@ -80,12 +80,21 @@ function normalizeSize(s: string): string {
 }
 
 /**
- * Effective location for a bag (paltai if set, else original location).
+ * Latest prior location from previousLocation history (last entry), if valid.
+ */
+function getLatestPreviousLocation(bag: IBagSize): ILocation | undefined {
+  const list = bag.previousLocation;
+  if (!Array.isArray(list) || list.length === 0) return undefined;
+  const p = list[list.length - 1];
+  if (p?.chamber && p?.floor && p?.row) return p;
+  return undefined;
+}
+
+/**
+ * Effective location for a bag (latest previous if set, else original location).
  */
 function getEffectiveLocation(bag: IBagSize): ILocation {
-  const p = bag.paltaiLocation;
-  if (p?.chamber && p?.floor && p?.row) return p;
-  return bag.location;
+  return getLatestPreviousLocation(bag) ?? bag.location;
 }
 
 function locationMatches(
@@ -212,9 +221,13 @@ function buildLocationArrayFilter(location: {
         "elem.location.row": location.row,
       },
       {
-        "elem.paltaiLocation.chamber": location.chamber,
-        "elem.paltaiLocation.floor": location.floor,
-        "elem.paltaiLocation.row": location.row,
+        "elem.previousLocation": {
+          $elemMatch: {
+            chamber: location.chamber,
+            floor: location.floor,
+            row: location.row,
+          },
+        },
       },
     ],
   };
@@ -350,9 +363,13 @@ function prepareBulkOperationsForOutgoing(
                 "elem.location.row": loc.row,
               },
               {
-                "elem.paltaiLocation.chamber": loc.chamber,
-                "elem.paltaiLocation.floor": loc.floor,
-                "elem.paltaiLocation.row": loc.row,
+                "elem.previousLocation": {
+                  $elemMatch: {
+                    chamber: loc.chamber,
+                    floor: loc.floor,
+                    row: loc.row,
+                  },
+                },
               },
             ],
           };
@@ -705,14 +722,8 @@ function buildIncomingGatePassSnapshots(
       const remaining = options?.stockAlreadyAdjusted
         ? Math.max(0, bag.currentQuantity)
         : Math.max(0, bag.currentQuantity - allocated);
-      // Use paltai location as latest location when present (bags moved in cold storage)
-      const effectiveLocation =
-        bag.paltaiLocation &&
-        bag.paltaiLocation.chamber &&
-        bag.paltaiLocation.floor &&
-        bag.paltaiLocation.row
-          ? bag.paltaiLocation
-          : bag.location;
+      // Use latest previous location as current when present (bags moved in cold storage)
+      const effectiveLocation = getEffectiveLocation(bag);
 
       bagSizes.push({
         name: bag.name,

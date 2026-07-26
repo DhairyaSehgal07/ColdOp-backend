@@ -861,7 +861,9 @@ export async function updateIncomingGatePass(
         initialQuantity: b.initialQuantity,
         currentQuantity: b.currentQuantity,
         location: b.location,
-        ...(b.paltaiLocation && { paltaiLocation: b.paltaiLocation }),
+        ...(b.previousLocation?.length && {
+          previousLocation: b.previousLocation,
+        }),
       }));
     }
 

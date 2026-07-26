@@ -45,8 +45,11 @@ function normalizeSize(s: string): string {
 }
 
 function getEffectiveLocation(bag: IBagSize): ILocation {
-  const p = bag.paltaiLocation;
-  if (p?.chamber && p?.floor && p?.row) return p;
+  const list = bag.previousLocation;
+  if (Array.isArray(list) && list.length > 0) {
+    const p = list[list.length - 1];
+    if (p?.chamber && p?.floor && p?.row) return p;
+  }
   return bag.location;
 }
 
@@ -366,9 +369,13 @@ export async function createTransferStock(
             "elem.location.row": location.row,
           },
           {
-            "elem.paltaiLocation.chamber": location.chamber,
-            "elem.paltaiLocation.floor": location.floor,
-            "elem.paltaiLocation.row": location.row,
+            "elem.previousLocation": {
+              $elemMatch: {
+                chamber: location.chamber,
+                floor: location.floor,
+                row: location.row,
+              },
+            },
           },
         ],
       };

@@ -326,19 +326,19 @@ describe("outgoing gate pass stock edit helpers", () => {
       }
     });
 
-    it("targets bag by paltai location when set", () => {
-      const paltai = { chamber: "B", floor: "2", row: "4" };
+    it("targets bag by previous location when set", () => {
+      const previous = { chamber: "B", floor: "2", row: "4" };
       const pass = makeIncomingPass(incomingId, "Potato", [
         {
           name: "50kg",
           initialQuantity: 300,
           currentQuantity: 200,
           location: { chamber: "A", floor: "1", row: "1" },
-          paltaiLocation: paltai,
+          previousLocation: [previous],
         },
       ]);
       const incomingPassMap = new Map([[incomingId, pass]]);
-      const key = allocationMapKey(incomingId, "50kg", paltai);
+      const key = allocationMapKey(incomingId, "50kg", previous);
       const previouslyIssued = new Map([[key, 20]]);
       const requested = new Map([[key, 50]]);
       const ops = prepareNetDeltaBulkOperationsForUpdate(
@@ -356,7 +356,13 @@ describe("outgoing gate pass stock edit helpers", () => {
       expect(filter.$or).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            "elem.paltaiLocation.chamber": "B",
+            "elem.previousLocation": {
+              $elemMatch: {
+                chamber: "B",
+                floor: "2",
+                row: "4",
+              },
+            },
           }),
         ]),
       );
