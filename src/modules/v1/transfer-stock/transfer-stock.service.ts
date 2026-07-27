@@ -45,11 +45,6 @@ function normalizeSize(s: string): string {
 }
 
 function getEffectiveLocation(bag: IBagSize): ILocation {
-  const list = bag.previousLocation;
-  if (Array.isArray(list) && list.length > 0) {
-    const p = list[list.length - 1];
-    if (p?.chamber && p?.floor && p?.row) return p;
-  }
   return bag.location;
 }
 
@@ -71,8 +66,7 @@ function getBagForTransferItem(
   const normSize = normalizeSize(item.bagSize);
   for (const b of bagSizes) {
     if (normalizeSize(b.name) !== normSize) continue;
-    const effective = getEffectiveLocation(b);
-    if (locationMatches(effective, item.location)) return b;
+    if (locationMatches(getEffectiveLocation(b), item.location)) return b;
   }
   return undefined;
 }
@@ -362,22 +356,9 @@ export async function createTransferStock(
         "elem.currentQuantity": { $gte: item.quantity },
       };
       const locationFilter = {
-        $or: [
-          {
-            "elem.location.chamber": location.chamber,
-            "elem.location.floor": location.floor,
-            "elem.location.row": location.row,
-          },
-          {
-            "elem.previousLocation": {
-              $elemMatch: {
-                chamber: location.chamber,
-                floor: location.floor,
-                row: location.row,
-              },
-            },
-          },
-        ],
+        "elem.location.chamber": location.chamber,
+        "elem.location.floor": location.floor,
+        "elem.location.row": location.row,
       };
       bulkOps.push({
         updateOne: {

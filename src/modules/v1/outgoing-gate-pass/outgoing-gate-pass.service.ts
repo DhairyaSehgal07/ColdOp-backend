@@ -80,21 +80,10 @@ function normalizeSize(s: string): string {
 }
 
 /**
- * Latest prior location from previousLocation history (last entry), if valid.
- */
-function getLatestPreviousLocation(bag: IBagSize): ILocation | undefined {
-  const list = bag.previousLocation;
-  if (!Array.isArray(list) || list.length === 0) return undefined;
-  const p = list[list.length - 1];
-  if (p?.chamber && p?.floor && p?.row) return p;
-  return undefined;
-}
-
-/**
- * Effective location for a bag (latest previous if set, else original location).
+ * Current placement for a bag. `location` is current; `previousLocation` is move history only.
  */
 function getEffectiveLocation(bag: IBagSize): ILocation {
-  return getLatestPreviousLocation(bag) ?? bag.location;
+  return bag.location;
 }
 
 function locationMatches(
@@ -109,8 +98,18 @@ function locationMatches(
 }
 
 /**
+ * True when allocLocation matches the bag's current location.
+ */
+function bagMatchesLocation(
+  bag: IBagSize,
+  allocLocation: { chamber: string; floor: string; row: string },
+): boolean {
+  return locationMatches(getEffectiveLocation(bag), allocLocation);
+}
+
+/**
  * Finds the bag in bagSizes for the given allocation. When location is provided,
- * matches by size and location (same bag size can exist at multiple locations).
+ * matches by size and current location (same bag size can exist at multiple locations).
  */
 function getBagForAllocation(
   bagSizes: IBagSize[],
@@ -120,8 +119,7 @@ function getBagForAllocation(
   for (const b of bagSizes) {
     if (normalizeSize(b.name) !== normSize) continue;
     if (!alloc.location) return b;
-    const effective = getEffectiveLocation(b);
-    if (locationMatches(effective, alloc.location)) return b;
+    if (bagMatchesLocation(b, alloc.location)) return b;
   }
   return undefined;
 }
@@ -214,22 +212,9 @@ function buildLocationArrayFilter(location: {
   row: string;
 }): Record<string, unknown> {
   return {
-    $or: [
-      {
-        "elem.location.chamber": location.chamber,
-        "elem.location.floor": location.floor,
-        "elem.location.row": location.row,
-      },
-      {
-        "elem.previousLocation": {
-          $elemMatch: {
-            chamber: location.chamber,
-            floor: location.floor,
-            row: location.row,
-          },
-        },
-      },
-    ],
+    "elem.location.chamber": location.chamber,
+    "elem.location.floor": location.floor,
+    "elem.location.row": location.row,
   };
 }
 
@@ -356,22 +341,9 @@ function prepareBulkOperationsForOutgoing(
         (() => {
           const loc = alloc.location;
           return {
-            $or: [
-              {
-                "elem.location.chamber": loc.chamber,
-                "elem.location.floor": loc.floor,
-                "elem.location.row": loc.row,
-              },
-              {
-                "elem.previousLocation": {
-                  $elemMatch: {
-                    chamber: loc.chamber,
-                    floor: loc.floor,
-                    row: loc.row,
-                  },
-                },
-              },
-            ],
+            "elem.location.chamber": loc.chamber,
+            "elem.location.floor": loc.floor,
+            "elem.location.row": loc.row,
           };
         })();
       bulkOps.push({
@@ -722,7 +694,7 @@ function buildIncomingGatePassSnapshots(
       const remaining = options?.stockAlreadyAdjusted
         ? Math.max(0, bag.currentQuantity)
         : Math.max(0, bag.currentQuantity - allocated);
-      // Use latest previous location as current when present (bags moved in cold storage)
+      // Current placement is bag.location; previousLocation is move history only
       const effectiveLocation = getEffectiveLocation(bag);
 
       bagSizes.push({
