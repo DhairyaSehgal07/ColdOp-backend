@@ -92,7 +92,7 @@ export interface TestBagConfig {
   initialQuantity: number;
   currentQuantity?: number;
   location: { chamber: string; floor: string; row: string };
-  paltaiLocation?: { chamber: string; floor: string; row: string }[];
+  previousLocation?: { chamber: string; floor: string; row: string }[];
 }
 
 export async function createTestIncomingGatePass(params: {
@@ -101,6 +101,8 @@ export async function createTestIncomingGatePass(params: {
   variety?: string;
   bagSizes: TestBagConfig[];
   createdById?: Types.ObjectId;
+  stockFilter?: string;
+  generation?: string;
 }) {
   return IncomingGatePass.create({
     farmerStorageLinkId: params.farmerStorageLinkId,
@@ -110,13 +112,16 @@ export async function createTestIncomingGatePass(params: {
     type: IncomingGatePassType.RECEIPT,
     variety: params.variety ?? "Potato",
     status: GatePassStatus.OPEN,
+    ...(params.stockFilter !== undefined && { stockFilter: params.stockFilter }),
+    ...(params.generation !== undefined && { generation: params.generation }),
     bagSizes: params.bagSizes.map((bag) => ({
       name: bag.name,
       initialQuantity: bag.initialQuantity,
       currentQuantity: bag.currentQuantity ?? bag.initialQuantity,
       location: bag.location,
-      ...(bag.paltaiLocation &&
-        bag.paltaiLocation.length > 0 && { paltaiLocation: bag.paltaiLocation }),
+      ...(bag.previousLocation?.length && {
+        previousLocation: bag.previousLocation,
+      }),
     })),
   });
 }
@@ -130,11 +135,15 @@ export async function createTestOutgoingGatePass(params: {
   quantity: number;
   location?: { chamber: string; floor: string; row: string };
   createdById?: string;
+  stockFilter?: string;
+  generation?: string;
 }) {
   const payload: CreateOutgoingGatePassInput = {
     farmerStorageLinkId: params.farmerStorageLinkId.toString(),
     gatePassNo: params.gatePassNo,
     date: new Date(),
+    ...(params.stockFilter !== undefined && { stockFilter: params.stockFilter }),
+    ...(params.generation !== undefined && { generation: params.generation }),
     incomingGatePasses: [
       {
         incomingGatePassId: params.incomingGatePassId.toString(),

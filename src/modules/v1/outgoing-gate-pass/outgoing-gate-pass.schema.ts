@@ -102,6 +102,8 @@ export const createOutgoingGatePassSchema = z.object({
 
     stockFilter: z.string().trim().optional(),
 
+    generation: z.string().trim().optional(),
+
     idempotencyKey: z
       .string()
       .trim()
@@ -175,6 +177,7 @@ export const updateOutgoingGatePassSchema = z.object({
         .positive("Manual parchi number must be a positive number")
         .optional(),
       stockFilter: z.string().trim().optional(),
+      generation: z.string().trim().optional(),
       incomingGatePasses: z
         .array(outgoingIncomingGatePassAllocationSchema)
         .min(1, "At least one incoming gate pass with allocations is required")
@@ -190,6 +193,7 @@ export const updateOutgoingGatePassSchema = z.object({
         data.remarks !== undefined ||
         data.manualParchiNumber !== undefined ||
         data.stockFilter !== undefined ||
+        data.generation !== undefined ||
         data.incomingGatePasses !== undefined,
       "At least one field must be provided for update",
     ),

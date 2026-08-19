@@ -102,6 +102,29 @@ export interface VarietyBreakdownByFilterResult {
   varietyBreakdownByFilter: Record<string, VarietyBreakdownResult>;
 }
 
+/** Result when groupByGeneration is true: breakdown keyed by distinct generation values */
+export interface VarietyBreakdownByGenerationResult {
+  varietyBreakdownByGeneration: Record<string, VarietyBreakdownResult>;
+}
+
+/** Result when both grouping flags are true: nested filter → generation buckets */
+export interface VarietyBreakdownByFilterAndGenerationResult {
+  varietyBreakdownByFilterAndGeneration: Record<
+    string,
+    Record<string, VarietyBreakdownResult>
+  >;
+}
+
+export type AnalyticsGroupingOptions = {
+  groupByStockFilter?: boolean;
+  groupByGeneration?: boolean;
+};
+
+type DimensionFilters = {
+  stockFilter?: string;
+  generation?: string;
+};
+
 export interface StockSummaryResult {
   stockSummary: StockSummaryVariety[];
   chartData: StockSummaryChartData;
@@ -115,11 +138,25 @@ export interface StockSummaryByFilterResult {
   stockSummaryByFilter: Record<string, StockSummaryResult>;
 }
 
+/** Result when groupByGeneration is true: summary keyed by distinct generation values */
+export interface StockSummaryByGenerationResult {
+  stockSummaryByGeneration: Record<string, StockSummaryResult>;
+}
+
+/** Result when both grouping flags are true: nested filter → generation buckets */
+export interface StockSummaryByFilterAndGenerationResult {
+  stockSummaryByFilterAndGeneration: Record<
+    string,
+    Record<string, StockSummaryResult>
+  >;
+}
+
 /**
- * Distinct non-empty stockFilter values on IncomingGatePasses for a cold storage.
+ * Distinct non-empty values for a string field on IncomingGatePasses for a cold storage.
  */
-async function getDistinctStockFilters(
+async function getDistinctFieldValues(
   coldStorageId: string,
+  field: "stockFilter" | "generation",
 ): Promise<string[]> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
 
@@ -136,19 +173,107 @@ async function getDistinctStockFilters(
     {
       $match: {
         "_link.coldStorageId": coldStorageObjectId,
-        stockFilter: { $exists: true, $nin: [null, ""] },
+        [field]: { $exists: true, $nin: [null, ""] },
       },
     },
     {
       $group: {
         _id: null,
-        values: { $addToSet: "$stockFilter" },
+        values: { $addToSet: `$${field}` },
       },
     },
   ]);
 
   const values = result[0]?.values ?? [];
-  return values.filter((v): v is string => typeof v === "string" && v.trim() !== "").sort();
+  return values
+    .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+    .sort();
+}
+
+async function requireDistinctFieldValues(
+  coldStorageId: string,
+  field: "stockFilter" | "generation",
+): Promise<string[]> {
+  const values = await getDistinctFieldValues(coldStorageId, field);
+  if (values.length > 0) return values;
+
+  if (field === "stockFilter") {
+    throw new ValidationError(
+      "No stock filter found. Please disable it from preferences.",
+      "NO_STOCK_FILTER",
+    );
+  }
+
+  throw new ValidationError(
+    "No generation found. Please disable it from preferences.",
+    "NO_GENERATION",
+  );
+}
+
+async function getDistinctFilterGenerationPairs(
+  coldStorageId: string,
+): Promise<Array<{ stockFilter: string; generation: string }>> {
+  const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+
+  const result = await IncomingGatePass.aggregate<{
+    _id: { stockFilter: string; generation: string };
+  }>([
+    {
+      $lookup: {
+        from: col.farmerStorageLinks,
+        localField: "farmerStorageLinkId",
+        foreignField: "_id",
+        as: "_link",
+      },
+    },
+    { $unwind: "$_link" },
+    {
+      $match: {
+        "_link.coldStorageId": coldStorageObjectId,
+        stockFilter: { $exists: true, $nin: [null, ""] },
+        generation: { $exists: true, $nin: [null, ""] },
+      },
+    },
+    {
+      $group: {
+        _id: {
+          stockFilter: "$stockFilter",
+          generation: "$generation",
+        },
+      },
+    },
+  ]);
+
+  return result
+    .map((row) => ({
+      stockFilter: row._id.stockFilter,
+      generation: row._id.generation,
+    }))
+    .filter(
+      (pair) =>
+        typeof pair.stockFilter === "string" &&
+        pair.stockFilter.trim() !== "" &&
+        typeof pair.generation === "string" &&
+        pair.generation.trim() !== "",
+    )
+    .sort(
+      (a, b) =>
+        a.stockFilter.localeCompare(b.stockFilter) ||
+        a.generation.localeCompare(b.generation),
+    );
+}
+
+function dimensionMatchStages(
+  filters: DimensionFilters,
+): mongoose.PipelineStage[] {
+  const stages: mongoose.PipelineStage[] = [];
+  if (filters.stockFilter) {
+    stages.push({ $match: { stockFilter: filters.stockFilter } });
+  }
+  if (filters.generation) {
+    stages.push({ $match: { generation: filters.generation } });
+  }
+  return stages;
 }
 
 /**
@@ -166,13 +291,20 @@ async function getDistinctStockFilters(
  *
  * When options.groupByStockFilter is true, returns summary grouped by every
  * distinct non-empty stockFilter value found in data. If none exist, throws
- * ValidationError (NO_STOCK_FILTER).
+ * ValidationError (NO_STOCK_FILTER). When groupByGeneration is true, groups by
+ * generation (NO_GENERATION if none). When both are true, returns nested
+ * filter → generation buckets from distinct pairs in data.
  */
 export async function getStockSummary(
   coldStorageId: string,
   logger?: FastifyBaseLogger,
-  options?: { groupByStockFilter?: boolean },
-): Promise<StockSummaryResult | StockSummaryByFilterResult> {
+  options?: AnalyticsGroupingOptions,
+): Promise<
+  | StockSummaryResult
+  | StockSummaryByFilterResult
+  | StockSummaryByGenerationResult
+  | StockSummaryByFilterAndGenerationResult
+> {
   if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
     throw new ValidationError(
       "Invalid cold storage ID format",
@@ -180,18 +312,45 @@ export async function getStockSummary(
     );
   }
 
-  if (options?.groupByStockFilter) {
-    const distinctFilters = await getDistinctStockFilters(coldStorageId);
-    if (distinctFilters.length === 0) {
-      throw new ValidationError(
-        "No stock filter found. Please disable it from preferences.",
-        "NO_STOCK_FILTER",
-      );
-    }
+  const groupByStockFilter = options?.groupByStockFilter === true;
+  const groupByGeneration = options?.groupByGeneration === true;
 
+  if (groupByStockFilter && groupByGeneration) {
+    await requireDistinctFieldValues(coldStorageId, "stockFilter");
+    await requireDistinctFieldValues(coldStorageId, "generation");
+    const pairs = await getDistinctFilterGenerationPairs(coldStorageId);
+    const results = await Promise.all(
+      pairs.map((pair) =>
+        getStockSummaryForFilter(coldStorageId, pair, logger),
+      ),
+    );
+
+    const stockSummaryByFilterAndGeneration: Record<
+      string,
+      Record<string, StockSummaryResult>
+    > = {};
+    for (let i = 0; i < pairs.length; i++) {
+      const { stockFilter, generation } = pairs[i];
+      if (!stockSummaryByFilterAndGeneration[stockFilter]) {
+        stockSummaryByFilterAndGeneration[stockFilter] = {};
+      }
+      stockSummaryByFilterAndGeneration[stockFilter][generation] = results[i];
+    }
+    return { stockSummaryByFilterAndGeneration };
+  }
+
+  if (groupByStockFilter) {
+    const distinctFilters = await requireDistinctFieldValues(
+      coldStorageId,
+      "stockFilter",
+    );
     const results = await Promise.all(
       distinctFilters.map((filterValue) =>
-        getStockSummaryForFilter(coldStorageId, filterValue, logger),
+        getStockSummaryForFilter(
+          coldStorageId,
+          { stockFilter: filterValue },
+          logger,
+        ),
       ),
     );
 
@@ -202,24 +361,42 @@ export async function getStockSummary(
     return { stockSummaryByFilter };
   }
 
-  return getStockSummaryForFilter(coldStorageId, undefined, logger);
+  if (groupByGeneration) {
+    const distinctGenerations = await requireDistinctFieldValues(
+      coldStorageId,
+      "generation",
+    );
+    const results = await Promise.all(
+      distinctGenerations.map((generationValue) =>
+        getStockSummaryForFilter(
+          coldStorageId,
+          { generation: generationValue },
+          logger,
+        ),
+      ),
+    );
+
+    const stockSummaryByGeneration: Record<string, StockSummaryResult> = {};
+    for (let i = 0; i < distinctGenerations.length; i++) {
+      stockSummaryByGeneration[distinctGenerations[i]] = results[i];
+    }
+    return { stockSummaryByGeneration };
+  }
+
+  return getStockSummaryForFilter(coldStorageId, {}, logger);
 }
 
 /**
- * Internal: get stock summary optionally filtered by stockFilter value.
- * When filterValue is set, only documents with that exact stockFilter are included.
- * When filterValue is undefined, no stockFilter filter is applied (all documents).
+ * Internal: get stock summary optionally filtered by stockFilter and/or generation.
  */
 async function getStockSummaryForFilter(
   coldStorageId: string,
-  filterValue: string | undefined,
+  filters: DimensionFilters,
   logger?: FastifyBaseLogger,
 ): Promise<StockSummaryResult> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
 
-  const stockFilterMatch: mongoose.PipelineStage[] = filterValue
-    ? [{ $match: { stockFilter: filterValue } }]
-    : [];
+  const stockFilterMatch = dimensionMatchStages(filters);
 
   const pipeline: mongoose.PipelineStage[] = [
     {
@@ -567,14 +744,21 @@ export async function getTopFarmersForStore(
  *
  * When options.groupByStockFilter is true, returns breakdown grouped by every
  * distinct non-empty stockFilter value found in data. If none exist, throws
- * ValidationError (NO_STOCK_FILTER).
+ * ValidationError (NO_STOCK_FILTER). When groupByGeneration is true, groups by
+ * generation (NO_GENERATION if none). When both are true, returns nested
+ * filter → generation buckets from distinct pairs in data.
  */
 export async function getVarietyBreakdown(
   coldStorageId: string,
   varietyName: string,
   _logger?: FastifyBaseLogger,
-  options?: { groupByStockFilter?: boolean },
-): Promise<VarietyBreakdownResult | VarietyBreakdownByFilterResult> {
+  options?: AnalyticsGroupingOptions,
+): Promise<
+  | VarietyBreakdownResult
+  | VarietyBreakdownByFilterResult
+  | VarietyBreakdownByGenerationResult
+  | VarietyBreakdownByFilterAndGenerationResult
+> {
   if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
     throw new ValidationError(
       "Invalid cold storage ID format",
@@ -590,22 +774,44 @@ export async function getVarietyBreakdown(
     );
   }
 
-  if (options?.groupByStockFilter) {
-    const distinctFilters = await getDistinctStockFilters(coldStorageId);
-    if (distinctFilters.length === 0) {
-      throw new ValidationError(
-        "No stock filter found. Please disable it from preferences.",
-        "NO_STOCK_FILTER",
-      );
-    }
+  const groupByStockFilter = options?.groupByStockFilter === true;
+  const groupByGeneration = options?.groupByGeneration === true;
 
+  if (groupByStockFilter && groupByGeneration) {
+    await requireDistinctFieldValues(coldStorageId, "stockFilter");
+    await requireDistinctFieldValues(coldStorageId, "generation");
+    const pairs = await getDistinctFilterGenerationPairs(coldStorageId);
+    const results = await Promise.all(
+      pairs.map((pair) =>
+        getVarietyBreakdownForFilter(coldStorageId, trimmedVariety, pair),
+      ),
+    );
+
+    const varietyBreakdownByFilterAndGeneration: Record<
+      string,
+      Record<string, VarietyBreakdownResult>
+    > = {};
+    for (let i = 0; i < pairs.length; i++) {
+      const { stockFilter, generation } = pairs[i];
+      if (!varietyBreakdownByFilterAndGeneration[stockFilter]) {
+        varietyBreakdownByFilterAndGeneration[stockFilter] = {};
+      }
+      varietyBreakdownByFilterAndGeneration[stockFilter][generation] =
+        results[i];
+    }
+    return { varietyBreakdownByFilterAndGeneration };
+  }
+
+  if (groupByStockFilter) {
+    const distinctFilters = await requireDistinctFieldValues(
+      coldStorageId,
+      "stockFilter",
+    );
     const results = await Promise.all(
       distinctFilters.map((filterValue) =>
-        getVarietyBreakdownForFilter(
-          coldStorageId,
-          trimmedVariety,
-          filterValue,
-        ),
+        getVarietyBreakdownForFilter(coldStorageId, trimmedVariety, {
+          stockFilter: filterValue,
+        }),
       ),
     );
 
@@ -617,28 +823,41 @@ export async function getVarietyBreakdown(
     return { varietyBreakdownByFilter };
   }
 
-  return getVarietyBreakdownForFilter(
-    coldStorageId,
-    trimmedVariety,
-    undefined,
-  );
+  if (groupByGeneration) {
+    const distinctGenerations = await requireDistinctFieldValues(
+      coldStorageId,
+      "generation",
+    );
+    const results = await Promise.all(
+      distinctGenerations.map((generationValue) =>
+        getVarietyBreakdownForFilter(coldStorageId, trimmedVariety, {
+          generation: generationValue,
+        }),
+      ),
+    );
+
+    const varietyBreakdownByGeneration: Record<string, VarietyBreakdownResult> =
+      {};
+    for (let i = 0; i < distinctGenerations.length; i++) {
+      varietyBreakdownByGeneration[distinctGenerations[i]] = results[i];
+    }
+    return { varietyBreakdownByGeneration };
+  }
+
+  return getVarietyBreakdownForFilter(coldStorageId, trimmedVariety, {});
 }
 
 /**
- * Internal: get variety breakdown optionally filtered by stockFilter value.
- * When filterValue is set, only documents with that exact stockFilter are included.
- * When filterValue is undefined, no stockFilter filter is applied (all documents).
+ * Internal: get variety breakdown optionally filtered by stockFilter and/or generation.
  */
 async function getVarietyBreakdownForFilter(
   coldStorageId: string,
   trimmedVariety: string,
-  filterValue: string | undefined,
+  filters: DimensionFilters,
 ): Promise<VarietyBreakdownResult> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
 
-  const stockFilterMatch: mongoose.PipelineStage[] = filterValue
-    ? [{ $match: { stockFilter: filterValue } }]
-    : [];
+  const stockFilterMatch = dimensionMatchStages(filters);
 
   const pipeline: mongoose.PipelineStage[] = [
     {

@@ -202,6 +202,9 @@ function mapIncomingGatePassToReport(
   if (raw.customMarka != null && raw.customMarka !== "") {
     report.customMarka = raw.customMarka;
   }
+  if (raw.generation != null && raw.generation !== "") {
+    report.generation = raw.generation;
+  }
   if (populatedAdmin) {
     report.createdBy = {
       _id: populatedAdmin._id,
@@ -612,6 +615,9 @@ export async function createIncomingGatePass(
       ...(payload.customMarka !== undefined && {
         customMarka: payload.customMarka,
       }),
+      ...(payload.generation !== undefined && {
+        generation: payload.generation,
+      }),
       ...(rentEntryVoucherId ? { rentEntryVoucherId } : {}),
     });
 
@@ -855,14 +861,16 @@ export async function updateIncomingGatePass(
       updateFields.stockFilter = payload.stockFilter;
     if (payload.customMarka !== undefined)
       updateFields.customMarka = payload.customMarka;
+    if (payload.generation !== undefined)
+      updateFields.generation = payload.generation;
     if (payload.bagSizes !== undefined) {
       updateFields.bagSizes = payload.bagSizes.map((b) => ({
         name: b.name,
         initialQuantity: b.initialQuantity,
         currentQuantity: b.currentQuantity,
         location: b.location,
-        ...(b.paltaiLocation !== undefined && {
-          paltaiLocation: b.paltaiLocation,
+        ...(b.previousLocation?.length && {
+          previousLocation: b.previousLocation,
         }),
       }));
     }

@@ -326,19 +326,20 @@ describe("outgoing gate pass stock edit helpers", () => {
       }
     });
 
-    it("targets bag by paltai location when set", () => {
-      const paltai = { chamber: "B", floor: "2", row: "4" };
+    it("targets bag by current location when previousLocation history is set", () => {
+      const current = { chamber: "A", floor: "1", row: "1" };
+      const previous = { chamber: "B", floor: "2", row: "4" };
       const pass = makeIncomingPass(incomingId, "Potato", [
         {
           name: "50kg",
           initialQuantity: 300,
           currentQuantity: 200,
-          location: { chamber: "A", floor: "1", row: "1" },
-          paltaiLocation: [paltai],
+          location: current,
+          previousLocation: [previous],
         },
       ]);
       const incomingPassMap = new Map([[incomingId, pass]]);
-      const key = allocationMapKey(incomingId, "50kg", paltai);
+      const key = allocationMapKey(incomingId, "50kg", current);
       const previouslyIssued = new Map([[key, 20]]);
       const requested = new Map([[key, 50]]);
       const ops = prepareNetDeltaBulkOperationsForUpdate(
@@ -353,19 +354,14 @@ describe("outgoing gate pass stock edit helpers", () => {
         };
       };
       const filter = op.updateOne.arrayFilters[0];
-      expect(filter.$or).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            "elem.paltaiLocation": {
-              $elemMatch: {
-                chamber: "B",
-                floor: "2",
-                row: "4",
-              },
-            },
-          }),
-        ]),
+      expect(filter).toEqual(
+        expect.objectContaining({
+          "elem.location.chamber": "A",
+          "elem.location.floor": "1",
+          "elem.location.row": "1",
+        }),
       );
+      expect(filter.$or).toBeUndefined();
     });
   });
 });

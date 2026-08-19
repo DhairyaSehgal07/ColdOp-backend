@@ -45,6 +45,7 @@ const outgoingGatePassDataSchema = {
     incomingGatePassSnapshots: { type: "array", items: { type: "object" } },
     remarks: { type: "string" },
     stockFilter: { type: "string" },
+    generation: { type: "string" },
     manualParchiNumber: { type: "number" },
     isNull: { type: "boolean" },
     createdAt: { type: "string" },
@@ -537,6 +538,7 @@ export async function outgoingGatePassRoutes(fastify: FastifyInstance) {
             truckNumber: { type: "string" },
             remarks: { type: "string" },
             stockFilter: { type: "string" },
+            generation: { type: "string" },
             manualParchiNumber: { type: "number" },
             incomingGatePasses: {
               type: "array",

@@ -1,7 +1,12 @@
 import mongoose from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
 import { ColdStorage } from "../cold-storage/cold-storage.model.js";
-import { CommodityObj, Preferences, StockFilterObj } from "./preferences.model.js";
+import {
+  CommodityObj,
+  Preferences,
+  GenerationObj,
+  StockFilterObj,
+} from "./preferences.model.js";
 import {
   NotFoundError,
   ValidationError,
@@ -13,6 +18,7 @@ export interface UpdatePreferencesInput {
   reportFormat?: string;
   showFinances?: boolean;
   showViewFilters?: boolean;
+  generation?: GenerationObj;
   labourCost?: number;
   stockFilter?: StockFilterObj;
   customMarka?: boolean;
@@ -133,6 +139,7 @@ export async function updatePreferencesByColdStorageId(
       "reportFormat",
       "showFinances",
       "showViewFilters",
+      "generation",
       "labourCost",
       "stockFilter",
       "customMarka",

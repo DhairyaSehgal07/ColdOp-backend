@@ -61,5 +61,5 @@ accounting.md
 # Local one-off scripts
 scripts/backfill-incoming-gate-pass-status.ts
 
-# Local-only cold storage reset route (do not commit)
+# Local-only cold storage reset routes (dev)
 src/modules/v1/cold-storage/cold-storage-reset.routes.ts

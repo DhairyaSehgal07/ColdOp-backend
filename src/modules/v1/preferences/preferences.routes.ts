@@ -34,7 +34,7 @@ export async function preferencesRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get preferences for the authenticated store admin's cold storage (includes markaType, showViewFilters, default GatePass for markaType)",
+          "Get preferences for the authenticated store admin's cold storage (includes markaType, showViewFilters, generation { enabled, options }, default GatePass for markaType)",
         tags: ["Preferences"],
         summary: "Get my cold storage preferences",
         response: {
@@ -76,7 +76,7 @@ export async function preferencesRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Update preferences for the authenticated store admin's cold storage. Updatable fields include markaType (string, default GatePass) and showViewFilters (boolean, optional).",
+          "Update preferences for the authenticated store admin's cold storage. Updatable fields include markaType (string, default GatePass), showViewFilters (boolean, optional), and generation ({ enabled, options }, default enabled false).",
         tags: ["Preferences"],
         summary: "Update my cold storage preferences",
         body: {

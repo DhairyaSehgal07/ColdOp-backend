@@ -428,6 +428,7 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
             manualParchiNumber: { type: "string" },
             stockFilter: { type: "string" },
             customMarka: { type: "string" },
+            generation: { type: "string" },
             amount: {
               type: "number",
               minimum: 0.01,
@@ -458,8 +459,10 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
                       row: { type: "string" },
                     },
                   },
-                  paltaiLocation: {
+                  previousLocation: {
                     type: "array",
+                    description:
+                      "Prior locations for this bag (history of moves). Each entry is chamber/floor/row.",
                     items: {
                       type: "object",
                       required: ["chamber", "floor", "row"],

@@ -39,6 +39,8 @@ function sendErrorReply(
  * Uses only the current logged-in store admin's cold storage (from JWT).
  * Query param stockFilter=true: group summary by every distinct non-empty
  * stockFilter value in data (returns NO_STOCK_FILTER if none exist).
+ * Query param generation=true: group by generation (NO_GENERATION if none).
+ * Both true: nested grouping by distinct stockFilter + generation pairs.
  */
 export async function getSummaryHandler(
   request: FastifyRequest,
@@ -64,12 +66,40 @@ export async function getSummaryHandler(
       });
     }
 
-    const stockFilter =
-      (request.query as { stockFilter?: string }).stockFilter === "true";
+    const query = request.query as {
+      stockFilter?: string;
+      generation?: string;
+    };
+    const stockFilter = query.stockFilter === "true";
+    const generation = query.generation === "true";
 
     const result = await getStockSummary(coldStorageId, request.log, {
       groupByStockFilter: stockFilter,
+      groupByGeneration: generation,
     });
+
+    if ("stockSummaryByFilterAndGeneration" in result) {
+      return reply.code(200).send({
+        success: true,
+        data: {
+          stockSummaryByFilterAndGeneration:
+            result.stockSummaryByFilterAndGeneration,
+        },
+        message:
+          "Stock summary retrieved successfully (grouped by stock filter and generation)",
+      });
+    }
+
+    if ("stockSummaryByGeneration" in result) {
+      return reply.code(200).send({
+        success: true,
+        data: {
+          stockSummaryByGeneration: result.stockSummaryByGeneration,
+        },
+        message:
+          "Stock summary retrieved successfully (grouped by generation)",
+      });
+    }
 
     if ("stockSummaryByFilter" in result) {
       return reply.code(200).send({
@@ -182,19 +212,44 @@ export async function getVarietyBreakdownHandler(
       });
     }
 
-    const variety =
-      typeof (request.query as { variety?: string }).variety === "string"
-        ? (request.query as { variety: string }).variety
-        : "";
-    const stockFilter =
-      (request.query as { stockFilter?: string }).stockFilter === "true";
+    const query = request.query as {
+      variety?: string;
+      stockFilter?: string;
+      generation?: string;
+    };
+    const variety = typeof query.variety === "string" ? query.variety : "";
+    const stockFilter = query.stockFilter === "true";
+    const generation = query.generation === "true";
 
     const result = await getVarietyBreakdown(
       coldStorageId,
       variety,
       request.log,
-      { groupByStockFilter: stockFilter },
+      { groupByStockFilter: stockFilter, groupByGeneration: generation },
     );
+
+    if ("varietyBreakdownByFilterAndGeneration" in result) {
+      return reply.code(200).send({
+        success: true,
+        data: {
+          varietyBreakdownByFilterAndGeneration:
+            result.varietyBreakdownByFilterAndGeneration,
+        },
+        message:
+          "Variety breakdown retrieved successfully (grouped by stock filter and generation)",
+      });
+    }
+
+    if ("varietyBreakdownByGeneration" in result) {
+      return reply.code(200).send({
+        success: true,
+        data: {
+          varietyBreakdownByGeneration: result.varietyBreakdownByGeneration,
+        },
+        message:
+          "Variety breakdown retrieved successfully (grouped by generation)",
+      });
+    }
 
     if ("varietyBreakdownByFilter" in result) {
       return reply.code(200).send({

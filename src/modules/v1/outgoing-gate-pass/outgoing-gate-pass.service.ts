@@ -13,10 +13,7 @@ import {
   GatePassStatus,
   type IIncomingGatePass,
   type IBagSize,
-  locationMatches,
-  getEffectiveLocation,
-  bagHasLocation,
-  buildBagLocationArrayFilter,
+  type ILocation,
 } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import type {
   CreateOutgoingGatePassInput,
@@ -83,8 +80,36 @@ function normalizeSize(s: string): string {
 }
 
 /**
+ * Current placement for a bag. `location` is current; `previousLocation` is move history only.
+ */
+function getEffectiveLocation(bag: IBagSize): ILocation {
+  return bag.location;
+}
+
+function locationMatches(
+  a: { chamber: string; floor: string; row: string },
+  b: { chamber: string; floor: string; row: string },
+): boolean {
+  return (
+    (a.chamber ?? "").trim() === (b.chamber ?? "").trim() &&
+    (a.floor ?? "").trim() === (b.floor ?? "").trim() &&
+    (a.row ?? "").trim() === (b.row ?? "").trim()
+  );
+}
+
+/**
+ * True when allocLocation matches the bag's current location.
+ */
+function bagMatchesLocation(
+  bag: IBagSize,
+  allocLocation: { chamber: string; floor: string; row: string },
+): boolean {
+  return locationMatches(getEffectiveLocation(bag), allocLocation);
+}
+
+/**
  * Finds the bag in bagSizes for the given allocation. When location is provided,
- * matches by size and location (same bag size can exist at multiple locations).
+ * matches by size and current location (same bag size can exist at multiple locations).
  */
 function getBagForAllocation(
   bagSizes: IBagSize[],
@@ -94,7 +119,7 @@ function getBagForAllocation(
   for (const b of bagSizes) {
     if (normalizeSize(b.name) !== normSize) continue;
     if (!alloc.location) return b;
-    if (bagHasLocation(b, alloc.location)) return b;
+    if (bagMatchesLocation(b, alloc.location)) return b;
   }
   return undefined;
 }
@@ -179,6 +204,18 @@ function parseAllocationMapKey(key: string): {
     };
   }
   return { incomingGatePassId, size: rest };
+}
+
+function buildLocationArrayFilter(location: {
+  chamber: string;
+  floor: string;
+  row: string;
+}): Record<string, unknown> {
+  return {
+    "elem.location.chamber": location.chamber,
+    "elem.location.floor": location.floor,
+    "elem.location.row": location.row,
+  };
 }
 
 /* =======================
@@ -300,7 +337,15 @@ function prepareBulkOperationsForOutgoing(
         "elem.currentQuantity": { $gte: alloc.quantityToAllocate },
       };
       const locationFilter =
-        alloc.location && buildBagLocationArrayFilter(alloc.location);
+        alloc.location &&
+        (() => {
+          const loc = alloc.location;
+          return {
+            "elem.location.chamber": loc.chamber,
+            "elem.location.floor": loc.floor,
+            "elem.location.row": loc.row,
+          };
+        })();
       bulkOps.push({
         updateOne: {
           filter: { _id: new Types.ObjectId(item.incomingGatePassId) },
@@ -516,7 +561,7 @@ function prepareNetDeltaBulkOperationsForUpdate(
     }
 
     const locationFilter = location
-      ? buildBagLocationArrayFilter(location)
+      ? buildLocationArrayFilter(location)
       : undefined;
 
     bulkOps.push({
@@ -649,7 +694,7 @@ function buildIncomingGatePassSnapshots(
       const remaining = options?.stockAlreadyAdjusted
         ? Math.max(0, bag.currentQuantity)
         : Math.max(0, bag.currentQuantity - allocated);
-      // Use latest paltai location when present (bags moved in cold storage)
+      // Current placement is bag.location; previousLocation is move history only
       const effectiveLocation = getEffectiveLocation(bag);
 
       bagSizes.push({
@@ -1068,6 +1113,9 @@ export async function createOutgoingGatePass(
           ...(payload.stockFilter !== undefined && {
             stockFilter: payload.stockFilter,
           }),
+          ...(payload.generation !== undefined && {
+            generation: payload.generation,
+          }),
           remarks: payload.remarks,
           idempotencyKey: payload.idempotencyKey,
         },
@@ -1253,6 +1301,8 @@ export async function updateOutgoingGatePass(
       updateFields.manualParchiNumber = payload.manualParchiNumber;
     if (payload.stockFilter !== undefined)
       updateFields.stockFilter = payload.stockFilter;
+    if (payload.generation !== undefined)
+      updateFields.generation = payload.generation;
 
     if (payload.farmerStorageLinkId !== undefined) {
       if (!mongoose.Types.ObjectId.isValid(payload.farmerStorageLinkId)) {
@@ -1751,6 +1801,9 @@ function mapOutgoingGatePassToReport(
   }
   if (raw.stockFilter != null && raw.stockFilter !== "") {
     report.stockFilter = raw.stockFilter;
+  }
+  if (raw.generation != null && raw.generation !== "") {
+    report.generation = raw.generation;
   }
   if (raw.incomingGatePassSnapshots != null) {
     report.incomingGatePassSnapshots = raw.incomingGatePassSnapshots;

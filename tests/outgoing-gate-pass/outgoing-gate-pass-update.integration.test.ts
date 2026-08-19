@@ -22,7 +22,7 @@ import {
   updateOutgoingGatePass,
   nullOutgoingGatePass,
 } from "../../src/modules/v1/outgoing-gate-pass/outgoing-gate-pass.service.js";
-import { updateOutgoingGatePassSchema } from "../../src/modules/v1/outgoing-gate-pass/outgoing-gate-pass.schema.js";
+import { updateOutgoingGatePassSchema, createOutgoingGatePassSchema } from "../../src/modules/v1/outgoing-gate-pass/outgoing-gate-pass.schema.js";
 import {
   OutgoingGatePass,
 } from "../../src/modules/v1/outgoing-gate-pass/outgoing-gate-pass.model.js";
@@ -121,6 +121,25 @@ describe("updateOutgoingGatePass integration", () => {
       refreshedOutgoing?.incomingGatePassSnapshots?.[0].bagSizes[0]
         .quantityIssued,
     ).toBe(80);
+  });
+
+  it("persists generation on create", async () => {
+    const { link, incoming, admin, outgoing } = await seedBaseline();
+
+    const created = await createTestOutgoingGatePass({
+      farmerStorageLinkId: link._id,
+      gatePassNo: 502,
+      incomingGatePassId: incoming._id,
+      quantity: 10,
+      size: "50kg",
+      location: locationA,
+      createdById: admin._id.toString(),
+      generation: "G1",
+    });
+
+    const stored = await OutgoingGatePass.findById(created.outgoing._id).lean();
+    expect(stored?.generation).toBe("G1");
+    expect(outgoing.gatePassNo).toBe(501);
   });
 
   it("decreases issued quantity and restores stock", async () => {
@@ -615,5 +634,37 @@ describe("updateOutgoingGatePassSchema", () => {
       },
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it("accepts generation on update", () => {
+    const parsed = updateOutgoingGatePassSchema.safeParse({
+      params: { id: new Types.ObjectId().toString() },
+      body: { generation: "G1" },
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
+
+describe("createOutgoingGatePassSchema", () => {
+  it("accepts generation on create", () => {
+    const parsed = createOutgoingGatePassSchema.safeParse({
+      body: {
+        farmerStorageLinkId: new Types.ObjectId().toString(),
+        gatePassNo: 1,
+        date: new Date().toISOString(),
+        generation: "G1",
+        incomingGatePasses: [
+          {
+            incomingGatePassId: new Types.ObjectId().toString(),
+            variety: "Potato",
+            allocations: [{ size: "50kg", quantityToAllocate: 10 }],
+          },
+        ],
+      },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.body.generation).toBe("G1");
+    }
   });
 });

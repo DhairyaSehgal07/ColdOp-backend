@@ -55,6 +55,7 @@ export const createTransferStockSchema = z.object({
       remarks: z.string().trim().optional(),
       customMarka: z.string().trim().optional(),
       stockFilter: z.string().trim().optional(),
+      generation: z.string().trim().optional(),
       amount: z.coerce
         .number()
         .positive("Amount must be greater than 0")

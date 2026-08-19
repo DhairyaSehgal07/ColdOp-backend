@@ -184,6 +184,10 @@ export async function storeAdminRoutes(fastify: FastifyInstance) {
                       type: "string",
                       description: "Custom marka (incoming orders only)",
                     },
+                    generation: {
+                      type: "string",
+                      description: "Generation (incoming orders only)",
+                    },
                   },
                 },
               },

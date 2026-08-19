@@ -17,6 +17,11 @@ export interface StockFilterObj {
   options: string[];
 }
 
+export interface GenerationObj {
+  enabled: boolean;
+  options: string[];
+}
+
 export interface IPreferences extends Document {
   commodities: CommodityObj[];
 
@@ -28,6 +33,9 @@ export interface IPreferences extends Document {
 
   /** Whether view filters should be shown in the UI */
   showViewFilters?: boolean;
+
+  /** Generation visibility and selectable options */
+  generation: GenerationObj;
 
   /** Labour cost (default 0) */
   labourCost: number;
@@ -81,6 +89,20 @@ const StockFilterSchema = new Schema<StockFilterObj>(
   { _id: false },
 );
 
+const GenerationSchema = new Schema<GenerationObj>(
+  {
+    enabled: {
+      type: Boolean,
+      default: false,
+    },
+    options: {
+      type: [String],
+      default: [],
+    },
+  },
+  { _id: false },
+);
+
 const PreferencesSchema = new Schema<IPreferences>(
   {
     commodities: {
@@ -101,6 +123,11 @@ const PreferencesSchema = new Schema<IPreferences>(
 
     showViewFilters: {
       type: Boolean,
+    },
+
+    generation: {
+      type: GenerationSchema,
+      default: () => ({ enabled: false, options: [] }),
     },
 
     labourCost: {

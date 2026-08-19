@@ -4,9 +4,6 @@ import {
   IncomingGatePass,
   GatePassType,
   GatePassStatus,
-  getEffectiveLocation,
-  bagHasLocation,
-  buildBagLocationArrayFilter,
 } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import type {
   IBagSize,
@@ -47,6 +44,21 @@ function normalizeSize(s: string): string {
     .replace(/\s+/g, " ");
 }
 
+function getEffectiveLocation(bag: IBagSize): ILocation {
+  return bag.location;
+}
+
+function locationMatches(
+  a: { chamber: string; floor: string; row: string },
+  b: { chamber: string; floor: string; row: string },
+): boolean {
+  return (
+    (a.chamber ?? "").trim() === (b.chamber ?? "").trim() &&
+    (a.floor ?? "").trim() === (b.floor ?? "").trim() &&
+    (a.row ?? "").trim() === (b.row ?? "").trim()
+  );
+}
+
 function getBagForTransferItem(
   bagSizes: IBagSize[],
   item: { bagSize: string; location: ILocation },
@@ -54,7 +66,7 @@ function getBagForTransferItem(
   const normSize = normalizeSize(item.bagSize);
   for (const b of bagSizes) {
     if (normalizeSize(b.name) !== normSize) continue;
-    if (bagHasLocation(b, item.location)) return b;
+    if (locationMatches(getEffectiveLocation(b), item.location)) return b;
   }
   return undefined;
 }
@@ -140,7 +152,8 @@ async function populateTransferStockGatePass(
     .populate({ path: "createdBy", select: "name" })
     .populate({
       path: "createdIncomingGatePassId",
-      select: "gatePassNo date type variety bagSizes customMarka stockFilter",
+      select:
+        "gatePassNo date type variety bagSizes customMarka stockFilter generation",
     })
     .populate({
       path: "createdOutgoingGatePassId",
@@ -343,7 +356,11 @@ export async function createTransferStock(
         "elem.name": bag.name,
         "elem.currentQuantity": { $gte: item.quantity },
       };
-      const locationFilter = buildBagLocationArrayFilter(location);
+      const locationFilter = {
+        "elem.location.chamber": location.chamber,
+        "elem.location.floor": location.floor,
+        "elem.location.row": location.row,
+      };
       bulkOps.push({
         updateOne: {
           filter: { _id: new Types.ObjectId(item.incomingGatePassId) },
@@ -547,6 +564,9 @@ export async function createTransferStock(
           ...(payload.stockFilter !== undefined && {
             stockFilter: payload.stockFilter,
           }),
+          ...(payload.generation !== undefined && {
+            generation: payload.generation,
+          }),
         },
       ],
       { session },
@@ -706,7 +726,8 @@ export async function getTransferStockGatePassesForColdStorage(
     .populate({ path: "createdBy", select: "name" })
     .populate({
       path: "createdIncomingGatePassId",
-      select: "gatePassNo date type variety bagSizes customMarka stockFilter",
+      select:
+        "gatePassNo date type variety bagSizes customMarka stockFilter generation",
     })
     .populate({
       path: "createdOutgoingGatePassId",

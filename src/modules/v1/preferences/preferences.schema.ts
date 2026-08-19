@@ -26,6 +26,16 @@ export const preferencesDataProperties = {
   reportFormat: { type: "string" },
   showFinances: { type: "boolean" },
   showViewFilters: { type: "boolean" },
+  generation: {
+    type: "object",
+    properties: {
+      enabled: { type: "boolean" },
+      options: {
+        type: "array",
+        items: { type: "string" },
+      },
+    },
+  },
   labourCost: { type: "number" },
   stockFilter: {
     type: "object",
@@ -69,6 +79,17 @@ export const updatePreferencesBodyProperties = {
   reportFormat: { type: "string" },
   showFinances: { type: "boolean" },
   showViewFilters: { type: "boolean" },
+  generation: {
+    type: "object",
+    required: ["enabled"],
+    properties: {
+      enabled: { type: "boolean" },
+      options: {
+        type: "array",
+        items: { type: "string" },
+      },
+    },
+  },
   labourCost: { type: "number", minimum: 0 },
   stockFilter: {
     type: "object",

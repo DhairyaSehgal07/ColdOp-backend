@@ -353,6 +353,12 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
                 "If 'true', group summary by all distinct stockFilter values in data",
               enum: ["true", "false"],
             },
+            generation: {
+              type: "string",
+              description:
+                "If 'true', group summary by all distinct generation values in data. Combined with stockFilter=true, returns nested filter → generation buckets.",
+              enum: ["true", "false"],
+            },
           },
         },
         response: {
@@ -400,6 +406,21 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
                     description:
                       "Present when stockFilter=true: summary keyed by each distinct stockFilter string",
                     additionalProperties: stockSummaryResultSchema,
+                  },
+                  stockSummaryByGeneration: {
+                    type: "object",
+                    description:
+                      "Present when generation=true: summary keyed by each distinct generation string",
+                    additionalProperties: stockSummaryResultSchema,
+                  },
+                  stockSummaryByFilterAndGeneration: {
+                    type: "object",
+                    description:
+                      "Present when stockFilter=true and generation=true: nested summary keyed by stockFilter then generation",
+                    additionalProperties: {
+                      type: "object",
+                      additionalProperties: stockSummaryResultSchema,
+                    },
                   },
                 },
                 required: [],
@@ -598,6 +619,12 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
                 "If 'true', group breakdown by all distinct stockFilter values in data",
               enum: ["true", "false"],
             },
+            generation: {
+              type: "string",
+              description:
+                "If 'true', group breakdown by all distinct generation values in data. Combined with stockFilter=true, returns nested filter → generation buckets.",
+              enum: ["true", "false"],
+            },
           },
         },
         response: {
@@ -622,6 +649,21 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
                     description:
                       "Present when stockFilter=true: breakdown keyed by each distinct stockFilter string",
                     additionalProperties: varietyBreakdownResultSchema,
+                  },
+                  varietyBreakdownByGeneration: {
+                    type: "object",
+                    description:
+                      "Present when generation=true: breakdown keyed by each distinct generation string",
+                    additionalProperties: varietyBreakdownResultSchema,
+                  },
+                  varietyBreakdownByFilterAndGeneration: {
+                    type: "object",
+                    description:
+                      "Present when stockFilter=true and generation=true: nested breakdown keyed by stockFilter then generation",
+                    additionalProperties: {
+                      type: "object",
+                      additionalProperties: varietyBreakdownResultSchema,
+                    },
                   },
                 },
                 required: [],

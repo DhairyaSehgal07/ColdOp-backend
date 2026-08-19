@@ -12,7 +12,7 @@ const bagSizeSchema = z.object({
   initialQuantity: z.coerce.number().min(0, "Initial quantity must be >= 0"),
   currentQuantity: z.coerce.number().min(0, "Current quantity must be >= 0"),
   location: locationSchema,
-  paltaiLocation: z.array(locationSchema).optional(),
+  previousLocation: z.array(locationSchema).optional(),
 });
 
 /** Create payload: type is set server-side (RECEIPT for regular incoming; transfer stock uses Incoming-transfer on the generated receipt) and must not be sent. */
@@ -44,6 +44,8 @@ export const createIncomingGatePassSchema = z.object({
     stockFilter: z.string().trim().optional(),
 
     customMarka: z.string().trim().optional(),
+
+    generation: z.string().trim().optional(),
 
     // Voucher amount when cold storage showFinances is true (ledgers resolved on backend)
     amount: z.coerce
@@ -114,6 +116,7 @@ export const updateIncomingGatePassSchema = z.object({
         .optional(),
       stockFilter: z.string().trim().optional(),
       customMarka: z.string().trim().optional(),
+      generation: z.string().trim().optional(),
     })
     .refine(
       (data) =>
@@ -126,7 +129,8 @@ export const updateIncomingGatePassSchema = z.object({
         data.bagSizes !== undefined ||
         data.amount !== undefined ||
         data.stockFilter !== undefined ||
-        data.customMarka !== undefined,
+        data.customMarka !== undefined ||
+        data.generation !== undefined,
       "At least one field must be provided for update",
     ),
 });

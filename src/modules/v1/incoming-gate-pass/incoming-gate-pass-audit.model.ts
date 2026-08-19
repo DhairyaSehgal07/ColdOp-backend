@@ -21,6 +21,7 @@ export type IncomingGatePassAuditState = Partial<
     | "rentEntryVoucherId"
     | "stockFilter"
     | "customMarka"
+    | "generation"
   >
 > &
   Record<string, unknown>;
