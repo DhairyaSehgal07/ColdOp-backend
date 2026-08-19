@@ -1729,6 +1729,50 @@ type OutgoingReportPopulatedLinkWithId = PopulatedFarmerStorageLink & {
   _id?: unknown;
 };
 
+type OutgoingReportPopulatedIncomingRef = {
+  _id: unknown;
+  customMarka?: string;
+};
+
+function stringifyReportId(value: unknown): unknown {
+  if (typeof value === "object" && value !== null && "toString" in value) {
+    return (value as { toString: () => string }).toString();
+  }
+  return value;
+}
+
+function isPopulatedIncomingRef(
+  value: unknown,
+): value is OutgoingReportPopulatedIncomingRef {
+  if (value == null || typeof value !== "object") return false;
+  if (value instanceof Types.ObjectId) return false;
+  return "_id" in value;
+}
+
+function mapIncomingGatePassSnapshotsForReport(snapshots: unknown): unknown {
+  if (!Array.isArray(snapshots)) return snapshots;
+
+  return snapshots.map((snap) => {
+    if (snap == null || typeof snap !== "object") return snap;
+
+    const snapshot = snap as Record<string, unknown>;
+    const rawId = snapshot._id;
+    const populatedIncoming = isPopulatedIncomingRef(rawId) ? rawId : null;
+
+    const mapped: Record<string, unknown> = {
+      ...snapshot,
+      _id: stringifyReportId(populatedIncoming?._id ?? rawId),
+    };
+
+    const customMarka = populatedIncoming?.customMarka;
+    if (customMarka != null && customMarka !== "") {
+      mapped.customMarka = customMarka;
+    }
+
+    return mapped;
+  });
+}
+
 function mapOutgoingGatePassToReport(
   raw: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -1798,7 +1842,9 @@ function mapOutgoingGatePassToReport(
     report.stockFilter = raw.stockFilter;
   }
   if (raw.incomingGatePassSnapshots != null) {
-    report.incomingGatePassSnapshots = raw.incomingGatePassSnapshots;
+    report.incomingGatePassSnapshots = mapIncomingGatePassSnapshotsForReport(
+      raw.incomingGatePassSnapshots,
+    );
   }
   if (raw.isNull === true) {
     report.isNull = true;
@@ -1900,6 +1946,10 @@ export async function getOutgoingGatePassReport(
         },
       })
       .populate({ path: "createdBy", select: "name" })
+      .populate({
+        path: "incomingGatePassSnapshots._id",
+        select: "customMarka",
+      })
       .lean();
 
     const report = list.map((raw) =>
