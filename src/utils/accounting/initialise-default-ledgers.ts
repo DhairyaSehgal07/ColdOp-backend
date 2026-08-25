@@ -222,10 +222,14 @@ export async function initializeDefaultLedgers(
     await Ledger.insertMany(ledgersToCreate, {
       ordered: false,
     });
-  } catch (error: any) {
+  } catch (error) {
     // Ignore duplicate key errors
-    if (error?.code !== 11000) {
-      throw new Error(`Failed to initialize default ledgers: ${error.message}`);
+    const mongoError = error as { code?: number; message?: string };
+    if (mongoError?.code !== 11000) {
+      throw new Error(
+        `Failed to initialize default ledgers: ${mongoError.message ?? String(error)}`,
+        { cause: error },
+      );
     }
   }
 }
@@ -420,10 +424,12 @@ export async function initializeDefaultLedgersForColdStorage(
     await Ledger.insertMany(ledgersToCreate, {
       ordered: false,
     });
-  } catch (error: any) {
-    if (error?.code !== 11000) {
+  } catch (error) {
+    const mongoError = error as { code?: number; message?: string };
+    if (mongoError?.code !== 11000) {
       throw new Error(
-        `Failed to initialize default ledgers for cold storage: ${error.message}`,
+        `Failed to initialize default ledgers for cold storage: ${mongoError.message ?? String(error)}`,
+        { cause: error },
       );
     }
   }

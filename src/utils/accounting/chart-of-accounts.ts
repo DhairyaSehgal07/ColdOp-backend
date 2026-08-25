@@ -18,13 +18,19 @@ export type ChartOfAccounts = {
 
 export const chartOfAccounts: ChartOfAccounts = {
   [LedgerType.Asset]: {
-    "Fixed Assets": ["Property", "Plant", "Equipment", "Furniture", "Vehicles"],
+    "Fixed Assets": [
+      "Land",
+      "Building",
+      "Machinery",
+      "Vehicle",
+      "Furniture",
+      "Computer",
+    ],
     "Current Assets": [
       "Cash",
       "Bank Accounts",
-      "Cash Equivalents",
-      "Stock in Hand",
       "Debtors",
+      "Stock in Hand",
       "Prepaid Expenses",
       "Other Current Assets",
     ],
@@ -33,39 +39,31 @@ export const chartOfAccounts: ChartOfAccounts = {
   [LedgerType.Liability]: {
     "Current Liabilities": [
       "Creditors",
-      "Short-term Loans",
+      "Short-term Loan",
       "Outstanding Expenses",
+      "Other Current Liabilities",
     ],
-    "Long-term Liabilities": ["Long-term Loans", "Deferred Revenue"],
+    "Non Current Liabilities": ["Bank Loan", "Other Non Current Liabilities"],
   },
 
   [LedgerType.Income]: {
-    "Operating Income": ["Sales", "Service Revenue", "Rental Income"],
-    "Non-Operating Income": ["Interest Received", "Dividends", "Other Income"],
+    "Operating Income": ["Sales"],
+    "Non-Operating Income": [
+      "Interest Income",
+      "Rental Income",
+      "Other Income",
+    ],
   },
 
   [LedgerType.Expense]: {
-    "Direct Expenses": ["Purchases"],
-    "Operating Expenses": [
-      "Rent",
-      "Salaries",
-      "Utilities",
-      "Supplies",
-      "Depreciation",
-    ],
-    "Non-Operating Expenses": [
-      "Interest Expense",
-      "Loss on Sale",
-      "Miscellaneous",
-    ],
-    "Other Expense": ["Discount"],
+    "Direct Expenses": ["Purchases", "Freight", "Packaging"],
+    "Indirect Expenses": ["Utilities", "Salary", "Supplies", "Other Indirect"],
+    "Financial Expenses": ["Bank Charges", "Loan Interest"],
   },
 
   [LedgerType.Equity]: {
-    "Capital & Reserves": [
-      "Capital",
-      "Reserves & Surplus",
-      "Retained Earnings",
-    ],
+    Capital: ["Owner Capital", "Partner Capital"],
+    Reserves: ["Retained Earnings"],
+    Drawings: ["Owner Drawings"],
   },
 } as const;
