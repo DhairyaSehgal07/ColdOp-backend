@@ -83,7 +83,7 @@ export async function initializeDefaultLedgers(
         isSystemLedger: true,
       },
       {
-        name: "Labour Contractor",
+        name: "Labour Thekedar",
         type: LedgerType.Liability,
         subType: "Current Liabilities",
         category: "Creditor",
@@ -209,6 +209,15 @@ export async function initializeDefaultLedgers(
         ? new Types.ObjectId(storeAdminId)
         : storeAdminId;
 
+    await Ledger.updateMany(
+      {
+        coldStorageId: coldStorageObjectId,
+        name: "Labour Contractor",
+        isSystemLedger: true,
+      },
+      { $set: { name: "Labour Thekedar" } },
+    );
+
     const ledgersToCreate: DefaultLedgerInput[] = defaultLedgers.map(
       (ledger) => ({
         ...ledger,
@@ -291,7 +300,7 @@ export async function initializeDefaultLedgersForColdStorage(
         isSystemLedger: true,
       },
       {
-        name: "Labour Contractor",
+        name: "Labour Thekedar",
         type: LedgerType.Liability,
         subType: "Current Liabilities",
         category: "Creditor",
@@ -420,6 +429,15 @@ export async function initializeDefaultLedgersForColdStorage(
       farmerStorageLinkId: null,
       createdBy: adminObjectId,
     }));
+
+    await Ledger.updateMany(
+      {
+        coldStorageId: coldStorageObjectId,
+        name: "Labour Contractor",
+        isSystemLedger: true,
+      },
+      { $set: { name: "Labour Thekedar" } },
+    );
 
     await Ledger.insertMany(ledgersToCreate, {
       ordered: false,

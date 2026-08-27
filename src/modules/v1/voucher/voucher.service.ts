@@ -6,14 +6,129 @@ import {
   applyVoucherBalances,
   reverseVoucherBalances,
 } from "../../../utils/accounting/update-balances.js";
-import { getNextGeneralVoucherNumber } from "../../../utils/accounting/helper-fns.js";
+import {
+  getNextGeneralVoucherNumber,
+  createVoucher as createJournalVoucher,
+  findLabourThekedarLedger,
+  LABOUR_THEKEDAR_LEDGER_NAME,
+} from "../../../utils/accounting/helper-fns.js";
 import type {
   CreateVoucherInput,
+  CreateLabourExpenseInput,
   UpdateVoucherInput,
   ListVouchersQuery,
 } from "./voucher.schema.js";
 import { NotFoundError, BadRequestError } from "../../../utils/errors.js";
 import { VoucherType } from "./voucher.model.js";
+
+function labourExpenseNarration(ledgerName: string, amount: number): string {
+  return `Labour expense: ${ledgerName} — ${amount}`;
+}
+
+/**
+ * Create one journal voucher per debit row, all crediting Labour Thekedar.
+ * Runs in a single transaction so a failure rolls back every voucher.
+ */
+export async function createLabourExpenseVouchers(
+  payload: CreateLabourExpenseInput,
+  coldStorageId: string,
+  createdById: string,
+  logger?: FastifyBaseLogger,
+): Promise<Record<string, unknown>> {
+  const coldId = toObjectId(coldStorageId);
+  const createdByObjId = toObjectId(createdById);
+  const creditLedger = await findLabourThekedarLedger(coldId);
+  if (!creditLedger) {
+    throw new NotFoundError(
+      "Labour Thekedar ledger not found for the current store",
+      "LABOUR_THEKEDAR_LEDGER_NOT_FOUND",
+    );
+  }
+  const creditLedgerId = creditLedger._id;
+
+  const debitIds = payload.debits.map((d) => toObjectId(d.debitLedgerId));
+  const uniqueDebitIds = [...new Map(debitIds.map((id) => [id.toString(), id])).values()];
+
+  const debitLedgers = await Ledger.find({
+    _id: { $in: uniqueDebitIds },
+    coldStorageId: coldId,
+  })
+    .select("_id name farmerStorageLinkId")
+    .lean();
+
+  const debitById = new Map(
+    debitLedgers.map((ledger) => [ledger._id.toString(), ledger]),
+  );
+
+  for (const entry of payload.debits) {
+    if (entry.debitLedgerId === creditLedgerId.toString()) {
+      throw new BadRequestError("Debit and credit ledgers must be different");
+    }
+    if (!debitById.has(entry.debitLedgerId)) {
+      throw new NotFoundError("One or more debit ledgers not found");
+    }
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  const createdIds: Types.ObjectId[] = [];
+  try {
+    for (const entry of payload.debits) {
+      const debitLedger = debitById.get(entry.debitLedgerId)!;
+      const debitLedgerId = toObjectId(entry.debitLedgerId);
+      const name =
+        typeof debitLedger.name === "string" && debitLedger.name.trim()
+          ? debitLedger.name.trim()
+          : "Labour";
+      const farmerStorageLinkId =
+        debitLedger.farmerStorageLinkId != null
+          ? debitLedger.farmerStorageLinkId
+          : null;
+
+      const voucher = await createJournalVoucher({
+        creditLedgerId,
+        debitLedgerId,
+        amount: entry.amount,
+        narration: labourExpenseNarration(name, entry.amount),
+        coldStorageId: coldId,
+        farmerStorageLinkId,
+        createdBy: createdByObjId,
+        date: payload.date,
+        session,
+      });
+      createdIds.push(voucher._id as Types.ObjectId);
+    }
+
+    await session.commitTransaction();
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    await session.endSession();
+  }
+
+  const created = await Voucher.find({ _id: { $in: createdIds } })
+    .populate("debitLedger", "name")
+    .populate("creditLedger", "name")
+    .lean();
+  const createdByIdMap = new Map(
+    created.map((voucher) => [voucher._id.toString(), voucher]),
+  );
+  const vouchers = createdIds
+    .map((id) => createdByIdMap.get(id.toString()))
+    .filter(Boolean);
+
+  logger?.info(
+    { count: vouchers.length, coldStorageId },
+    "Labour expense vouchers created",
+  );
+
+  return {
+    creditLedgerId: creditLedgerId.toString(),
+    creditLedgerName: LABOUR_THEKEDAR_LEDGER_NAME,
+    vouchers,
+  };
+}
 
 type QueryFilter = Record<string, unknown>;
 

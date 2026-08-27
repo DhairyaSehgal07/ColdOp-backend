@@ -342,6 +342,7 @@ import { Preferences } from "../preferences/preferences.model.js";
 import { getNextVoucherNumber } from "../store-admin/store-admin.service.js";
 import {
   createVoucher,
+  findLabourThekedarLedger,
   type CreateVoucherParams,
 } from "../../../utils/accounting/helper-fns.js";
 import {
@@ -509,7 +510,7 @@ export async function createIncomingGatePass(
         );
       }
 
-      // Labour cost voucher: debit Labour, credit Labour Contractor when preferences.labourCost > 0
+      // Labour cost voucher: debit Labour, credit Labour Thekedar when preferences.labourCost > 0
       const labourCost =
         preferences?.labourCost != null ? Number(preferences.labourCost) : 0;
       if (labourCost > 0 && Array.isArray(payload.bagSizes)) {
@@ -541,23 +542,18 @@ export async function createIncomingGatePass(
           })
             .select("_id")
             .lean();
-          const labourContractorLedger = await Ledger.findOne({
-            coldStorageId: loggedInColdStorageObj,
-            name: "Labour Contractor",
-            farmerStorageLinkId: null,
-            isSystemLedger: true,
-          })
-            .select("_id")
-            .lean();
+          const labourThekedarLedger = await findLabourThekedarLedger(
+            loggedInColdStorageObj,
+          );
           if (!labourLedger) {
             throw new NotFoundError(
               "Labour ledger not found for the current store",
               "LABOUR_LEDGER_NOT_FOUND",
             );
           }
-          if (!labourContractorLedger) {
+          if (!labourThekedarLedger) {
             throw new NotFoundError(
-              "Labour Contractor ledger not found for the current store",
+              "Labour Thekedar ledger not found for the current store",
               "LABOUR_CONTRACTOR_LEDGER_NOT_FOUND",
             );
           }
@@ -566,7 +562,7 @@ export async function createIncomingGatePass(
           const labourVoucherParams: CreateVoucherParams = {
             debitLedgerId: new mongoose.Types.ObjectId(labourLedger._id),
             creditLedgerId: new mongoose.Types.ObjectId(
-              labourContractorLedger._id,
+              labourThekedarLedger._id,
             ),
             amount: labourAmount,
             narration: labourNarration,

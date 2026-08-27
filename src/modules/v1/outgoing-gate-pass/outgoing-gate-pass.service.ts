@@ -44,6 +44,7 @@ import { Preferences } from "../preferences/preferences.model.js";
 import Ledger from "../ledger/ledger.model.js";
 import {
   createVoucher,
+  findLabourThekedarLedger,
   type CreateVoucherParams,
 } from "../../../utils/accounting/helper-fns.js";
 import {
@@ -975,7 +976,7 @@ export async function createOutgoingGatePass(
       logger,
     );
 
-    // Labour cost voucher: debit Labour, credit Labour Contractor when preferences.labourCost > 0
+    // Labour cost voucher: debit Labour, credit Labour Thekedar when preferences.labourCost > 0
     let labourVoucherParams: CreateVoucherParams | null = null;
     const totalBags = validated.reduce(
       (sum, item) =>
@@ -1012,24 +1013,19 @@ export async function createOutgoingGatePass(
         .select("_id")
         .session(session)
         .lean();
-      const labourContractorLedger = await Ledger.findOne({
+      const labourThekedarLedger = await findLabourThekedarLedger(
         coldStorageId,
-        name: "Labour Contractor",
-        farmerStorageLinkId: null,
-        isSystemLedger: true,
-      })
-        .select("_id")
-        .session(session)
-        .lean();
+        session,
+      );
       if (!labourLedger) {
         throw new NotFoundError(
           "Labour ledger not found for the current store",
           "LABOUR_LEDGER_NOT_FOUND",
         );
       }
-      if (!labourContractorLedger) {
+      if (!labourThekedarLedger) {
         throw new NotFoundError(
-          "Labour Contractor ledger not found for the current store",
+          "Labour Thekedar ledger not found for the current store",
           "LABOUR_CONTRACTOR_LEDGER_NOT_FOUND",
         );
       }
@@ -1037,7 +1033,7 @@ export async function createOutgoingGatePass(
       const labourNarration = `Labour cost for gate pass no. ${payload.gatePassNo} (${totalBags} bags @ ${labourCost})`;
       labourVoucherParams = {
         debitLedgerId: new Types.ObjectId(labourLedger._id),
-        creditLedgerId: new Types.ObjectId(labourContractorLedger._id),
+        creditLedgerId: new Types.ObjectId(labourThekedarLedger._id),
         amount: labourAmount,
         narration: labourNarration,
         coldStorageId,

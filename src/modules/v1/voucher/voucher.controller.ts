@@ -7,14 +7,17 @@ import {
   getVoucherById,
   updateVoucher,
   deleteVoucher,
+  createLabourExpenseVouchers,
 } from "./voucher.service.js";
 import {
   createVoucherSchema,
+  createLabourExpenseSchema,
   updateVoucherSchema,
   listVouchersQuerySchema,
   voucherIdParamsSchema,
   objectIdString,
   type CreateVoucherInput,
+  type CreateLabourExpenseInput,
   type UpdateVoucherInput,
   type ListVouchersQuery,
   type VoucherIdParams,
@@ -113,6 +116,44 @@ export async function createVoucherHandler(
     request.log.error(
       { error, body: request.body },
       "Error in createVoucherHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}
+
+export async function createLabourExpenseHandler(
+  request: FastifyRequest<{ Body: CreateLabourExpenseInput }>,
+  reply: FastifyReply,
+) {
+  try {
+    const parsed = createLabourExpenseSchema.parse({ body: request.body });
+    const coldStorageId = getColdStorageId(request);
+    const createdById = getCreatedById(request);
+    const data = await createLabourExpenseVouchers(
+      parsed.body,
+      coldStorageId,
+      createdById,
+      request.log,
+    );
+    return reply.code(201).send({
+      success: true,
+      data,
+      message: "Labour expense vouchers created successfully",
+    });
+  } catch (error) {
+    if (error instanceof ZodError) {
+      return reply.code(400).send({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Validation failed",
+          details: error.flatten(),
+        },
+      });
+    }
+    request.log.error(
+      { error, body: request.body },
+      "Error in createLabourExpenseHandler",
     );
     return sendErrorReply(reply, error);
   }

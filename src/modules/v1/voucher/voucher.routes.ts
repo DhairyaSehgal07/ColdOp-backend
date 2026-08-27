@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import {
   createVoucherHandler,
+  createLabourExpenseHandler,
   getAllVouchersHandler,
   getVoucherByIdHandler,
   updateVoucherHandler,
@@ -68,6 +69,47 @@ export async function voucherRoutes(fastify: FastifyInstance) {
       },
     },
     createVoucherHandler as never,
+  );
+
+  fastify.post(
+    "/labour-expense",
+    {
+      schema: {
+        description:
+          "Create one journal voucher per labour-expense debit row. Credit ledger is resolved as Labour Thekedar.",
+        tags: ["Accounting - Vouchers"],
+        summary: "Create labour expense vouchers",
+        body: {
+          type: "object",
+          required: ["date", "debits"],
+          properties: {
+            date: { type: "string", format: "date-time" },
+            debits: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                required: ["debitLedgerId", "amount"],
+                properties: {
+                  debitLedgerId: { type: "string" },
+                  amount: { type: "number" },
+                },
+              },
+            },
+          },
+        },
+        response: {
+          201: successDataResponse("Labour expense vouchers created successfully"),
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: { max: 60, timeWindow: "1 minute" },
+      },
+    },
+    createLabourExpenseHandler as never,
   );
 
   fastify.get(

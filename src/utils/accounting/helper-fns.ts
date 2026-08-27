@@ -6,6 +6,9 @@ import Voucher, {
 } from "../../modules/v1/voucher/voucher.model.js";
 import { applyVoucherBalances } from "./update-balances.js";
 
+export const LABOUR_THEKEDAR_LEDGER_NAME = "Labour Thekedar";
+const LEGACY_LABOUR_CONTRACTOR_LEDGER_NAME = "Labour Contractor";
+
 interface CreateDebtorLedgerParams {
   farmerStorageLinkId: Types.ObjectId;
   coldStorageId: Types.ObjectId;
@@ -51,6 +54,50 @@ export async function createDebtorLedger({
   });
 
   return ledger;
+}
+
+/**
+ * Store-level Labour Thekedar system ledger (credit side for labour cost).
+ * Renames a leftover "Labour Contractor" ledger if that is all that exists.
+ */
+export async function findLabourThekedarLedger(
+  coldStorageId: Types.ObjectId,
+  session?: ClientSession,
+): Promise<{ _id: Types.ObjectId } | null> {
+  const baseFilter = {
+    coldStorageId,
+    farmerStorageLinkId: null,
+    isSystemLedger: true,
+  };
+  const findOpts = session ? { session } : {};
+
+  let ledger = await Ledger.findOne({
+    ...baseFilter,
+    name: LABOUR_THEKEDAR_LEDGER_NAME,
+  })
+    .select("_id")
+    .setOptions(findOpts)
+    .lean();
+
+  if (!ledger) {
+    ledger = await Ledger.findOne({
+      ...baseFilter,
+      name: LEGACY_LABOUR_CONTRACTOR_LEDGER_NAME,
+    })
+      .select("_id")
+      .setOptions(findOpts)
+      .lean();
+
+    if (ledger) {
+      await Ledger.updateOne(
+        { _id: ledger._id },
+        { $set: { name: LABOUR_THEKEDAR_LEDGER_NAME } },
+        findOpts,
+      );
+    }
+  }
+
+  return ledger ? { _id: ledger._id as Types.ObjectId } : null;
 }
 
 export interface CreateVoucherParams {

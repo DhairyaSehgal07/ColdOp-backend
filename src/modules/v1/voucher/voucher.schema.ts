@@ -39,3 +39,24 @@ export const voucherIdParamsSchema = z.object({
   id: objectIdString,
 });
 export type VoucherIdParams = z.infer<typeof voucherIdParamsSchema>;
+
+export const createLabourExpenseSchema = z.object({
+  body: z.object({
+    date: z
+      .string()
+      .datetime()
+      .or(z.date())
+      .transform((val) => (typeof val === "string" ? new Date(val) : val)),
+    debits: z
+      .array(
+        z.object({
+          debitLedgerId: objectIdString,
+          amount: z.number().min(0.01, "Amount must be at least 0.01"),
+        }),
+      )
+      .min(1, "At least one debit entry is required"),
+  }),
+});
+export type CreateLabourExpenseInput = z.infer<
+  typeof createLabourExpenseSchema
+>["body"];
