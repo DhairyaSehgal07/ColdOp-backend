@@ -21,8 +21,23 @@ import type {
 import { NotFoundError, BadRequestError } from "../../../utils/errors.js";
 import { VoucherType } from "./voucher.model.js";
 
+const OTHER_LABOUR_EXPENSES_LEDGER_NAME = "Other Labour Expenses";
+
 function labourExpenseNarration(ledgerName: string, amount: number): string {
   return `Labour expense: ${ledgerName} — ${amount}`;
+}
+
+function resolveLabourExpenseNarration(
+  ledgerName: string,
+  amount: number,
+  customNarration?: string,
+): string {
+  const isOtherLabourExpenses =
+    ledgerName.toLowerCase() === OTHER_LABOUR_EXPENSES_LEDGER_NAME.toLowerCase();
+  if (isOtherLabourExpenses && customNarration) {
+    return customNarration;
+  }
+  return labourExpenseNarration(ledgerName, amount);
 }
 
 /**
@@ -89,7 +104,11 @@ export async function createLabourExpenseVouchers(
         creditLedgerId,
         debitLedgerId,
         amount: entry.amount,
-        narration: labourExpenseNarration(name, entry.amount),
+        narration: resolveLabourExpenseNarration(
+          name,
+          entry.amount,
+          entry.narration,
+        ),
         coldStorageId: coldId,
         farmerStorageLinkId,
         createdBy: createdByObjId,

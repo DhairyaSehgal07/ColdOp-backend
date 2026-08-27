@@ -93,6 +93,7 @@ export async function voucherRoutes(fastify: FastifyInstance) {
                 properties: {
                   debitLedgerId: { type: "string" },
                   amount: { type: "number" },
+                  narration: { type: "string" },
                 },
               },
             },

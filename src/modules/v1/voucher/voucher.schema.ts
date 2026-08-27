@@ -52,6 +52,11 @@ export const createLabourExpenseSchema = z.object({
         z.object({
           debitLedgerId: objectIdString,
           amount: z.number().min(0.01, "Amount must be at least 0.01"),
+          narration: z
+            .string()
+            .max(500, "Narration too long")
+            .trim()
+            .optional(),
         }),
       )
       .min(1, "At least one debit entry is required"),
