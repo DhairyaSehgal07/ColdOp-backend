@@ -57,7 +57,13 @@ export const chartOfAccounts: ChartOfAccounts = {
 
   [LedgerType.Expense]: {
     "Direct Expenses": ["Purchases", "Freight", "Packaging"],
-    "Indirect Expenses": ["Utilities", "Salary", "Supplies", "Other Indirect"],
+    "Indirect Expenses": [
+      "Utilities",
+      "Salary",
+      "Supplies",
+      "Labour expense",
+      "Other Indirect",
+    ],
     "Financial Expenses": ["Bank Charges", "Loan Interest"],
   },
 
