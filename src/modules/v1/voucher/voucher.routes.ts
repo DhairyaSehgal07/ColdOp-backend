@@ -89,10 +89,21 @@ export async function voucherRoutes(fastify: FastifyInstance) {
               minItems: 1,
               items: {
                 type: "object",
-                required: ["debitLedgerId", "amount"],
+                required: [
+                  "debitLedgerId",
+                  "amount",
+                  "lenoBags",
+                  "juteBags",
+                  "lenoRate",
+                  "juteRate",
+                ],
                 properties: {
                   debitLedgerId: { type: "string" },
                   amount: { type: "number" },
+                  lenoBags: { type: "integer", minimum: 0 },
+                  juteBags: { type: "integer", minimum: 0 },
+                  lenoRate: { type: "number", minimum: 0 },
+                  juteRate: { type: "number", minimum: 0 },
                   narration: { type: "string" },
                 },
               },
@@ -100,7 +111,9 @@ export async function voucherRoutes(fastify: FastifyInstance) {
           },
         },
         response: {
-          201: successDataResponse("Labour expense vouchers created successfully"),
+          201: successDataResponse(
+            "Labour expense vouchers created successfully",
+          ),
           400: errorResponseSchema,
           404: errorResponseSchema,
         },

@@ -23,21 +23,48 @@ import { VoucherType } from "./voucher.model.js";
 
 const OTHER_LABOUR_EXPENSES_LEDGER_NAME = "Other Labour Expenses";
 
-function labourExpenseNarration(ledgerName: string, amount: number): string {
-  return `Labour expense: ${ledgerName} — ${amount}`;
+type LabourExpenseBagRates = {
+  lenoBags: number;
+  juteBags: number;
+  lenoRate: number;
+  juteRate: number;
+};
+
+function labourExpenseBreakdown(entry: LabourExpenseBagRates): string {
+  const parts: string[] = [];
+  if (entry.lenoBags > 0) {
+    parts.push(`${entry.lenoBags} leno bags × ${entry.lenoRate}`);
+  }
+  if (entry.juteBags > 0) {
+    parts.push(`${entry.juteBags} jute bags × ${entry.juteRate}`);
+  }
+  return parts.join(" + ");
+}
+
+function labourExpenseNarration(
+  ledgerName: string,
+  amount: number,
+  entry: LabourExpenseBagRates,
+): string {
+  const breakdown = labourExpenseBreakdown(entry);
+  const suffix = breakdown ? ` (${breakdown})` : "";
+  return `Labour expense: ${ledgerName} — ${amount}${suffix}`;
 }
 
 function resolveLabourExpenseNarration(
   ledgerName: string,
   amount: number,
+  entry: LabourExpenseBagRates,
   customNarration?: string,
 ): string {
   const isOtherLabourExpenses =
     ledgerName.toLowerCase() === OTHER_LABOUR_EXPENSES_LEDGER_NAME.toLowerCase();
+  const breakdown = labourExpenseBreakdown(entry);
+  const suffix = breakdown ? ` (${breakdown})` : "";
   if (isOtherLabourExpenses && customNarration) {
-    return customNarration;
+    return `${customNarration}${suffix}`;
   }
-  return labourExpenseNarration(ledgerName, amount);
+  return labourExpenseNarration(ledgerName, amount, entry);
 }
 
 /**
@@ -107,6 +134,7 @@ export async function createLabourExpenseVouchers(
         narration: resolveLabourExpenseNarration(
           name,
           entry.amount,
+          entry,
           entry.narration,
         ),
         coldStorageId: coldId,

@@ -49,15 +49,33 @@ export const createLabourExpenseSchema = z.object({
       .transform((val) => (typeof val === "string" ? new Date(val) : val)),
     debits: z
       .array(
-        z.object({
-          debitLedgerId: objectIdString,
-          amount: z.number().min(0.01, "Amount must be at least 0.01"),
-          narration: z
-            .string()
-            .max(500, "Narration too long")
-            .trim()
-            .optional(),
-        }),
+        z
+          .object({
+            debitLedgerId: objectIdString,
+            amount: z.number().min(0.01, "Amount must be at least 0.01"),
+            lenoBags: z.number().int().min(0),
+            juteBags: z.number().int().min(0),
+            lenoRate: z.number().min(0),
+            juteRate: z.number().min(0),
+            narration: z
+              .string()
+              .max(500, "Narration too long")
+              .trim()
+              .optional(),
+          })
+          .refine(
+            (row) =>
+              Math.round(row.amount * 100) ===
+              Math.round(
+                (row.lenoBags * row.lenoRate + row.juteBags * row.juteRate) *
+                  100,
+              ),
+            {
+              message:
+                "Amount must equal (lenoBags × lenoRate) + (juteBags × juteRate)",
+              path: ["amount"],
+            },
+          ),
       )
       .min(1, "At least one debit entry is required"),
   }),
