@@ -2,7 +2,10 @@ import mongoose from "mongoose";
 import type { FastifyBaseLogger } from "fastify";
 import { Farmer } from "../farmer/farmer-model.js";
 import { FarmerStorageLink } from "../farmer-storage-link/farmer-storage-link-model.js";
-import { IncomingGatePass } from "../incoming-gate-pass/incoming-gate-pass.model.js";
+import {
+  GatePassType,
+  IncomingGatePass,
+} from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import { StoreAdmin } from "../store-admin/store-admin.model.js";
 import { ValidationError } from "../../../utils/errors.js";
 
@@ -117,11 +120,17 @@ export interface StockSummaryByFilterResult {
 
 /**
  * Distinct non-empty stockFilter values on IncomingGatePasses for a cold storage.
+ * When includeTransferStock is false, Incoming-transfer gate passes are excluded.
  */
 async function getDistinctStockFilters(
   coldStorageId: string,
+  includeTransferStock = false,
 ): Promise<string[]> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
+
+  const transferStockMatch: mongoose.PipelineStage[] = includeTransferStock
+    ? []
+    : [{ $match: { type: { $ne: GatePassType.INCOMING_TRANSFER } } }];
 
   const result = await IncomingGatePass.aggregate<{ values: string[] }>([
     {
@@ -139,6 +148,7 @@ async function getDistinctStockFilters(
         stockFilter: { $exists: true, $nin: [null, ""] },
       },
     },
+    ...transferStockMatch,
     {
       $group: {
         _id: null,
@@ -167,11 +177,14 @@ async function getDistinctStockFilters(
  * When options.groupByStockFilter is true, returns summary grouped by every
  * distinct non-empty stockFilter value found in data. If none exist, throws
  * ValidationError (NO_STOCK_FILTER).
+ *
+ * When options.includeTransferStock is false/undefined, Incoming-transfer
+ * gate passes are excluded from the aggregation.
  */
 export async function getStockSummary(
   coldStorageId: string,
   logger?: FastifyBaseLogger,
-  options?: { groupByStockFilter?: boolean },
+  options?: { groupByStockFilter?: boolean; includeTransferStock?: boolean },
 ): Promise<StockSummaryResult | StockSummaryByFilterResult> {
   if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
     throw new ValidationError(
@@ -180,8 +193,13 @@ export async function getStockSummary(
     );
   }
 
+  const includeTransferStock = options?.includeTransferStock === true;
+
   if (options?.groupByStockFilter) {
-    const distinctFilters = await getDistinctStockFilters(coldStorageId);
+    const distinctFilters = await getDistinctStockFilters(
+      coldStorageId,
+      includeTransferStock,
+    );
     if (distinctFilters.length === 0) {
       throw new ValidationError(
         "No stock filter found. Please disable it from preferences.",
@@ -191,7 +209,12 @@ export async function getStockSummary(
 
     const results = await Promise.all(
       distinctFilters.map((filterValue) =>
-        getStockSummaryForFilter(coldStorageId, filterValue, logger),
+        getStockSummaryForFilter(
+          coldStorageId,
+          filterValue,
+          logger,
+          includeTransferStock,
+        ),
       ),
     );
 
@@ -202,24 +225,35 @@ export async function getStockSummary(
     return { stockSummaryByFilter };
   }
 
-  return getStockSummaryForFilter(coldStorageId, undefined, logger);
+  return getStockSummaryForFilter(
+    coldStorageId,
+    undefined,
+    logger,
+    includeTransferStock,
+  );
 }
 
 /**
  * Internal: get stock summary optionally filtered by stockFilter value.
  * When filterValue is set, only documents with that exact stockFilter are included.
  * When filterValue is undefined, no stockFilter filter is applied (all documents).
+ * When includeTransferStock is false, Incoming-transfer gate passes are excluded.
  */
 async function getStockSummaryForFilter(
   coldStorageId: string,
   filterValue: string | undefined,
   logger?: FastifyBaseLogger,
+  includeTransferStock = false,
 ): Promise<StockSummaryResult> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
 
   const stockFilterMatch: mongoose.PipelineStage[] = filterValue
     ? [{ $match: { stockFilter: filterValue } }]
     : [];
+
+  const transferStockMatch: mongoose.PipelineStage[] = includeTransferStock
+    ? []
+    : [{ $match: { type: { $ne: GatePassType.INCOMING_TRANSFER } } }];
 
   const pipeline: mongoose.PipelineStage[] = [
     {
@@ -236,6 +270,7 @@ async function getStockSummaryForFilter(
         "_link.coldStorageId": coldStorageObjectId,
       },
     },
+    ...transferStockMatch,
     ...stockFilterMatch,
     { $unwind: "$bagSizes" },
     {

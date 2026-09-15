@@ -341,7 +341,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate pass snapshots are not used). Scoped to authenticated user's cold storage. If stockFilter=true, summary is grouped by every distinct non-empty stockFilter value found in data. Returns 400 if no stock filter values exist.",
+          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate pass snapshots are not used). Scoped to authenticated user's cold storage. If stockFilter=true, summary is grouped by every distinct non-empty stockFilter value found in data. Returns 400 if no stock filter values exist. By default Incoming-transfer gate passes are excluded; set transferStock=true to include them.",
         tags: ["Analytics"],
         summary: "Get stock summary",
         querystring: {
@@ -351,6 +351,12 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
               type: "string",
               description:
                 "If 'true', group summary by all distinct stockFilter values in data",
+              enum: ["true", "false"],
+            },
+            transferStock: {
+              type: "string",
+              description:
+                "If 'true', include Incoming-transfer gate passes in the summary. Default excludes them.",
               enum: ["true", "false"],
             },
           },

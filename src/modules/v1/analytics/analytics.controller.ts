@@ -39,6 +39,8 @@ function sendErrorReply(
  * Uses only the current logged-in store admin's cold storage (from JWT).
  * Query param stockFilter=true: group summary by every distinct non-empty
  * stockFilter value in data (returns NO_STOCK_FILTER if none exist).
+ * Query param transferStock=true: include Incoming-transfer gate passes;
+ * default excludes them.
  */
 export async function getSummaryHandler(
   request: FastifyRequest,
@@ -64,11 +66,16 @@ export async function getSummaryHandler(
       });
     }
 
-    const stockFilter =
-      (request.query as { stockFilter?: string }).stockFilter === "true";
+    const query = request.query as {
+      stockFilter?: string;
+      transferStock?: string;
+    };
+    const stockFilter = query.stockFilter === "true";
+    const transferStock = query.transferStock === "true";
 
     const result = await getStockSummary(coldStorageId, request.log, {
       groupByStockFilter: stockFilter,
+      includeTransferStock: transferStock,
     });
 
     if ("stockSummaryByFilter" in result) {
