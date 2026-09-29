@@ -1,6 +1,7 @@
 import { FastifyReply, FastifyRequest } from "fastify";
 import {
   createIncomingGatePass,
+  getIncomingGatePassById,
   getIncomingGatePassesByFarmerStorageLinkId,
   getIncomingGatePassReport,
   updateIncomingGatePass,
@@ -10,6 +11,7 @@ import {
   CreateIncomingGatePassInput,
   UpdateIncomingGatePassBody,
   updateIncomingGatePassSchema,
+  getIncomingGatePassByIdSchema,
   getIncomingGatePassEditHistoryQuerySchema,
   getIncomingGatePassReportQuerySchema,
 } from "./incoming-gate-pass.schema.js";
@@ -114,6 +116,50 @@ export async function getIncomingGatePassesByFarmerStorageLinkIdHandler(
     request.log.error(
       { error, farmerStorageLinkId: request.params?.farmerStorageLinkId },
       "Error in getIncomingGatePassesByFarmerStorageLinkIdHandler",
+    );
+    return sendErrorReply(reply, error);
+  }
+}
+
+/**
+ * Handler for fetching a single incoming gate pass by ID.
+ */
+export async function getIncomingGatePassByIdHandler(
+  request: FastifyRequest<{ Params: { id: string } }>,
+  reply: FastifyReply,
+) {
+  try {
+    const parsed = getIncomingGatePassByIdSchema.safeParse({
+      params: request.params,
+    });
+    if (!parsed.success) {
+      const message =
+        parsed.error.issues
+          ?.map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ") ?? parsed.error.message;
+      return reply.code(400).send({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message },
+      });
+    }
+
+    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
+
+    const incomingGatePass = await getIncomingGatePassById(
+      parsed.data.params.id,
+      loggedInUserColdStorageId,
+      request.log,
+    );
+
+    return reply.code(200).send({
+      success: true,
+      data: incomingGatePass,
+      message: "Incoming gate pass retrieved successfully",
+    });
+  } catch (error) {
+    request.log.error(
+      { error, params: request.params },
+      "Error in getIncomingGatePassByIdHandler",
     );
     return sendErrorReply(reply, error);
   }

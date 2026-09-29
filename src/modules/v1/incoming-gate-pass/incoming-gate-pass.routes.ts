@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import {
   createIncomingGatePassHandler,
+  getIncomingGatePassByIdHandler,
   getIncomingGatePassesByFarmerStorageLinkIdHandler,
   getIncomingGatePassReportHandler,
   updateIncomingGatePassHandler,
@@ -389,6 +390,87 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
       },
     },
     createIncomingGatePassHandler as never,
+  );
+
+  // Get a single incoming gate pass by ID
+  fastify.get(
+    "/:id",
+    {
+      schema: {
+        description:
+          "Get a single incoming gate pass by ID for the authenticated store admin's cold storage.",
+        tags: ["Incoming Gate Pass"],
+        summary: "Get incoming gate pass by ID",
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: {
+            id: { type: "string", description: "Incoming gate pass ID" },
+          },
+        },
+        response: {
+          200: {
+            description: "Incoming gate pass retrieved successfully",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              data: { type: "object", additionalProperties: true },
+              message: { type: "string" },
+            },
+          },
+          400: {
+            description: "Bad request - invalid ID format",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          404: {
+            description: "Incoming gate pass not found",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+          500: {
+            description: "Server error",
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              error: {
+                type: "object",
+                properties: {
+                  code: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    getIncomingGatePassByIdHandler as never,
   );
 
   // Update (edit) incoming gate pass by ID

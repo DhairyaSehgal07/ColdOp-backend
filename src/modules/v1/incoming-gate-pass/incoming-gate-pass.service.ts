@@ -115,6 +115,126 @@ export async function getIncomingGatePassesByFarmerStorageLinkId(
   });
 }
 
+/**
+ * Fetches a single incoming gate pass by ID, scoped to the logged-in user's cold storage.
+ *
+ * @param id - Incoming gate pass document _id
+ * @param loggedInUserColdStorageId - Cold storage ID of the logged-in user (for auth scope)
+ * @param logger - Optional logger instance
+ * @returns Incoming gate pass with populated farmerStorageLinkId, createdBy, and rentEntryVoucherId
+ * @throws ValidationError if id is invalid
+ * @throws NotFoundError if gate pass not found or not in user's cold storage
+ */
+export async function getIncomingGatePassById(
+  id: string,
+  loggedInUserColdStorageId: string | undefined,
+  logger?: FastifyBaseLogger,
+) {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ValidationError(
+      "Invalid incoming gate pass ID format",
+      "INVALID_INCOMING_GATE_PASS_ID",
+    );
+  }
+
+  const idObj = new mongoose.Types.ObjectId(id);
+  const existing = await IncomingGatePass.findById(idObj).lean();
+
+  if (!existing) {
+    logger?.warn({ id }, "Incoming gate pass not found");
+    throw new NotFoundError(
+      "Incoming gate pass not found",
+      "INCOMING_GATE_PASS_NOT_FOUND",
+    );
+  }
+
+  const linkId =
+    typeof existing.farmerStorageLinkId === "object" &&
+    existing.farmerStorageLinkId !== null &&
+    "_id" in existing.farmerStorageLinkId
+      ? (existing.farmerStorageLinkId as { _id: mongoose.Types.ObjectId })._id
+      : existing.farmerStorageLinkId;
+  const linkIdObj =
+    typeof linkId === "object" ? linkId : new mongoose.Types.ObjectId(linkId);
+  const storageLink = await FarmerStorageLink.findById(linkIdObj).lean();
+
+  if (!storageLink) {
+    throw new NotFoundError(
+      "Incoming gate pass not found",
+      "INCOMING_GATE_PASS_NOT_FOUND",
+    );
+  }
+
+  const linkColdStorageId =
+    typeof storageLink.coldStorageId === "object" &&
+    storageLink.coldStorageId !== null
+      ? (
+          storageLink.coldStorageId as { _id: mongoose.Types.ObjectId }
+        )._id.toString()
+      : (storageLink.coldStorageId as string);
+
+  if (
+    loggedInUserColdStorageId &&
+    linkColdStorageId !== loggedInUserColdStorageId
+  ) {
+    logger?.warn(
+      { id, linkColdStorageId, loggedInUserColdStorageId },
+      "Incoming gate pass does not belong to user's cold storage",
+    );
+    throw new NotFoundError(
+      "Incoming gate pass not found",
+      "INCOMING_GATE_PASS_NOT_FOUND",
+    );
+  }
+
+  const populated = await IncomingGatePass.findById(idObj)
+    .populate({
+      path: "farmerStorageLinkId",
+      select: FARMER_STORAGE_LINK_POPULATE_SELECT,
+      populate: {
+        path: "farmerId",
+        select: FARMER_STORAGE_LINK_FARMER_POPULATE_SELECT,
+      },
+    })
+    .populate({ path: "createdBy", select: "name" })
+    .populate({
+      path: "rentEntryVoucherId",
+      select:
+        "voucherNumber date amount debitLedger creditLedger farmerStorageLinkId narration updatedAt",
+      populate: [
+        { path: "debitLedger", select: "name category" },
+        { path: "creditLedger", select: "name category" },
+      ],
+    })
+    .lean();
+
+  if (!populated) {
+    throw new NotFoundError(
+      "Incoming gate pass not found",
+      "INCOMING_GATE_PASS_NOT_FOUND",
+    );
+  }
+
+  logger?.info({ incomingGatePassId: id }, "Retrieved incoming gate pass by ID");
+
+  const raw = populated as unknown as Record<string, unknown>;
+  type PopulatedAdmin = { _id: unknown; name: string };
+  const populatedLink = raw.farmerStorageLinkId as
+    | PopulatedFarmerStorageLink
+    | null
+    | undefined;
+  const populatedAdmin = raw.createdBy as PopulatedAdmin | null | undefined;
+  const linkDisplay = formatPopulatedFarmerStorageLinkDisplay(populatedLink);
+
+  return {
+    ...raw,
+    farmerStorageLinkId: linkDisplay ?? raw.farmerStorageLinkId,
+    createdBy: populatedAdmin
+      ? { _id: populatedAdmin._id, name: populatedAdmin.name }
+      : raw.createdBy,
+  };
+}
+
 export interface IncomingGatePassReportOptions {
   dateFrom?: string;
   dateTo?: string;

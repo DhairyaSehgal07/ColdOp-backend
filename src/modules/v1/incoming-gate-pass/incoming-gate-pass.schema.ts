@@ -138,6 +138,24 @@ export type UpdateIncomingGatePassBody = z.infer<
   typeof updateIncomingGatePassSchema
 >["body"];
 
+/** Params for GET /:id */
+export const getIncomingGatePassByIdSchema = z.object({
+  params: z.object({
+    id: z
+      .string()
+      .trim()
+      .min(1, "Incoming gate pass ID is required")
+      .refine(
+        (val) => mongoose.Types.ObjectId.isValid(val),
+        "Invalid incoming gate pass ID format",
+      ),
+  }),
+});
+
+export type GetIncomingGatePassByIdParams = z.infer<
+  typeof getIncomingGatePassByIdSchema
+>["params"];
+
 /** Query params for GET /edit-history */
 export const getIncomingGatePassEditHistoryQuerySchema = z.object({
   querystring: z.object({
