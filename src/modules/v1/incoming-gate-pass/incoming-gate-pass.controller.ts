@@ -143,11 +143,8 @@ export async function getIncomingGatePassByIdHandler(
       });
     }
 
-    const loggedInUserColdStorageId = getLoggedInUserColdStorageId(request);
-
     const incomingGatePass = await getIncomingGatePassById(
       parsed.data.params.id,
-      loggedInUserColdStorageId,
       request.log,
     );
 

@@ -116,18 +116,16 @@ export async function getIncomingGatePassesByFarmerStorageLinkId(
 }
 
 /**
- * Fetches a single incoming gate pass by ID, scoped to the logged-in user's cold storage.
+ * Fetches a single incoming gate pass by ID. Public; not scoped to a cold storage.
  *
  * @param id - Incoming gate pass document _id
- * @param loggedInUserColdStorageId - Cold storage ID of the logged-in user (for auth scope)
  * @param logger - Optional logger instance
  * @returns Incoming gate pass with populated farmerStorageLinkId, createdBy, and rentEntryVoucherId
  * @throws ValidationError if id is invalid
- * @throws NotFoundError if gate pass not found or not in user's cold storage
+ * @throws NotFoundError if gate pass not found
  */
 export async function getIncomingGatePassById(
   id: string,
-  loggedInUserColdStorageId: string | undefined,
   logger?: FastifyBaseLogger,
 ) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -138,55 +136,6 @@ export async function getIncomingGatePassById(
   }
 
   const idObj = new mongoose.Types.ObjectId(id);
-  const existing = await IncomingGatePass.findById(idObj).lean();
-
-  if (!existing) {
-    logger?.warn({ id }, "Incoming gate pass not found");
-    throw new NotFoundError(
-      "Incoming gate pass not found",
-      "INCOMING_GATE_PASS_NOT_FOUND",
-    );
-  }
-
-  const linkId =
-    typeof existing.farmerStorageLinkId === "object" &&
-    existing.farmerStorageLinkId !== null &&
-    "_id" in existing.farmerStorageLinkId
-      ? (existing.farmerStorageLinkId as { _id: mongoose.Types.ObjectId })._id
-      : existing.farmerStorageLinkId;
-  const linkIdObj =
-    typeof linkId === "object" ? linkId : new mongoose.Types.ObjectId(linkId);
-  const storageLink = await FarmerStorageLink.findById(linkIdObj).lean();
-
-  if (!storageLink) {
-    throw new NotFoundError(
-      "Incoming gate pass not found",
-      "INCOMING_GATE_PASS_NOT_FOUND",
-    );
-  }
-
-  const linkColdStorageId =
-    typeof storageLink.coldStorageId === "object" &&
-    storageLink.coldStorageId !== null
-      ? (
-          storageLink.coldStorageId as { _id: mongoose.Types.ObjectId }
-        )._id.toString()
-      : (storageLink.coldStorageId as string);
-
-  if (
-    loggedInUserColdStorageId &&
-    linkColdStorageId !== loggedInUserColdStorageId
-  ) {
-    logger?.warn(
-      { id, linkColdStorageId, loggedInUserColdStorageId },
-      "Incoming gate pass does not belong to user's cold storage",
-    );
-    throw new NotFoundError(
-      "Incoming gate pass not found",
-      "INCOMING_GATE_PASS_NOT_FOUND",
-    );
-  }
-
   const populated = await IncomingGatePass.findById(idObj)
     .populate({
       path: "farmerStorageLinkId",

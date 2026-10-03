@@ -398,7 +398,7 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get a single incoming gate pass by ID for the authenticated store admin's cold storage.",
+          "Get a single incoming gate pass by ID. Public; no authentication required.",
         tags: ["Incoming Gate Pass"],
         summary: "Get incoming gate pass by ID",
         params: {
@@ -462,7 +462,6 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
           },
         },
       },
-      preHandler: [authenticate],
       config: {
         rateLimit: {
           max: 60,
