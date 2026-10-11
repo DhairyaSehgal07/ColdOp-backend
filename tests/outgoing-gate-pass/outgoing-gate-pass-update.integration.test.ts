@@ -19,6 +19,7 @@ import {
   disconnectTestDatabase,
 } from "./helpers/fixtures.js";
 import {
+  createOutgoingGatePass,
   updateOutgoingGatePass,
   nullOutgoingGatePass,
 } from "../../src/modules/v1/outgoing-gate-pass/outgoing-gate-pass.service.js";
@@ -581,6 +582,85 @@ describe("updateOutgoingGatePass integration", () => {
     ).rejects.toMatchObject({
       code: "NO_FIELDS_TO_UPDATE",
     });
+  });
+
+  it("issues stock across duplicate bag rows at the same location", async () => {
+    const coldStorage = await createTestColdStorage();
+    const farmer = await createTestFarmer();
+    const link = await createTestFarmerStorageLink(
+      coldStorage._id,
+      farmer._id,
+      1003,
+    );
+    const admin = await createTestStoreAdmin(coldStorage._id);
+    const rack = { chamber: "3", floor: "1", row: "43" };
+    const incoming = await createTestIncomingGatePass({
+      farmerStorageLinkId: link._id,
+      gatePassNo: 336,
+      variety: "K. Pukhraj",
+      bagSizes: [
+        {
+          name: "Cut-tok",
+          initialQuantity: 74,
+          currentQuantity: 74,
+          location: rack,
+        },
+        {
+          name: "Cut-tok",
+          initialQuantity: 107,
+          currentQuantity: 107,
+          location: rack,
+        },
+        {
+          name: "Cut-tok",
+          initialQuantity: 84,
+          currentQuantity: 84,
+          location: rack,
+        },
+      ],
+    });
+
+    await createOutgoingGatePass(
+      {
+        farmerStorageLinkId: link._id.toString(),
+        gatePassNo: 708,
+        date: new Date(),
+        incomingGatePasses: [
+          {
+            incomingGatePassId: incoming._id.toString(),
+            variety: "K. Pukhraj",
+            allocations: [
+              { size: "Cut-tok", quantityToAllocate: 74, location: rack },
+              { size: "Cut-tok", quantityToAllocate: 107, location: rack },
+              { size: "Cut-tok", quantityToAllocate: 84, location: rack },
+            ],
+          },
+        ],
+      },
+      admin._id.toString(),
+    );
+
+    const refreshed = await IncomingGatePass.findById(incoming._id).lean();
+    expect(refreshed?.bagSizes.map((bag) => bag.currentQuantity)).toEqual([
+      0, 0, 0,
+    ]);
+    expect(refreshed?.status).toBe("CLOSED");
+
+    const outgoing = await OutgoingGatePass.findOne({ gatePassNo: 708 }).lean();
+    expect(outgoing?.orderDetails[0]).toEqual(
+      expect.objectContaining({
+        size: "Cut-tok",
+        quantityIssued: 265,
+        quantityAvailable: 0,
+      }),
+    );
+    expect(outgoing?.incomingGatePassSnapshots?.[0].bagSizes).toEqual([
+      expect.objectContaining({
+        name: "Cut-tok",
+        quantityIssued: 265,
+        currentQuantity: 0,
+      }),
+    ]);
   });
 });
 

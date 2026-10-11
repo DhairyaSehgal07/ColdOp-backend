@@ -16,6 +16,7 @@ import { ValidationError } from "../../src/utils/errors.js";
 
 const {
   allocationMapKey,
+  buildIncomingGatePassSnapshots,
   buildPreviouslyIssuedMap,
   buildRequestedAllocationMap,
   prepareNetDeltaBulkOperationsForUpdate,
@@ -235,13 +236,11 @@ describe("outgoing gate pass stock edit helpers", () => {
       const op = ops[0] as {
         updateOne: {
           update: { $inc: Record<string, number> };
-          arrayFilters: Array<Record<string, unknown>>;
+          filter: Record<string, unknown>;
         };
       };
-      expect(op.updateOne.update.$inc["bagSizes.$[elem].currentQuantity"]).toBe(
-        -30,
-      );
-      expect(op.updateOne.arrayFilters[0]["elem.currentQuantity"]).toEqual({
+      expect(op.updateOne.update.$inc["bagSizes.0.currentQuantity"]).toBe(-30);
+      expect(op.updateOne.filter["bagSizes.0.currentQuantity"]).toEqual({
         $gte: 30,
       });
     });
@@ -259,9 +258,7 @@ describe("outgoing gate pass stock edit helpers", () => {
       const op = ops[0] as {
         updateOne: { update: { $inc: Record<string, number> } };
       };
-      expect(op.updateOne.update.$inc["bagSizes.$[elem].currentQuantity"]).toBe(
-        50,
-      );
+      expect(op.updateOne.update.$inc["bagSizes.0.currentQuantity"]).toBe(50);
     });
 
     it("restores full stock when allocation is removed", () => {
@@ -277,9 +274,7 @@ describe("outgoing gate pass stock edit helpers", () => {
       const op = ops[0] as {
         updateOne: { update: { $inc: Record<string, number> } };
       };
-      expect(op.updateOne.update.$inc["bagSizes.$[elem].currentQuantity"]).toBe(
-        50,
-      );
+      expect(op.updateOne.update.$inc["bagSizes.0.currentQuantity"]).toBe(50);
     });
 
     it("throws INSUFFICIENT_STOCK when increase exceeds available + edit credit", () => {
@@ -350,18 +345,179 @@ describe("outgoing gate pass stock edit helpers", () => {
       expect(ops).toHaveLength(1);
       const op = ops[0] as {
         updateOne: {
-          arrayFilters: Array<Record<string, unknown>>;
+          filter: Record<string, unknown>;
         };
       };
-      const filter = op.updateOne.arrayFilters[0];
-      expect(filter).toEqual(
+      expect(op.updateOne.filter).toEqual(
         expect.objectContaining({
-          "elem.location.chamber": "A",
-          "elem.location.floor": "1",
-          "elem.location.row": "1",
+          "bagSizes.0.location.chamber": "A",
+          "bagSizes.0.location.floor": "1",
+          "bagSizes.0.location.row": "1",
         }),
       );
-      expect(filter.$or).toBeUndefined();
+    });
+
+    it("draws a request across duplicate rows at the same location", () => {
+      const rack = { chamber: "3", floor: "1", row: "43" };
+      const pass = makeIncomingPass(incomingId, "K. Pukhraj", [
+        {
+          name: "Cut-tok",
+          initialQuantity: 74,
+          currentQuantity: 74,
+          location: rack,
+        },
+        {
+          name: "Cut-tok",
+          initialQuantity: 107,
+          currentQuantity: 107,
+          location: rack,
+        },
+        {
+          name: "Cut-tok",
+          initialQuantity: 84,
+          currentQuantity: 84,
+          location: rack,
+        },
+      ]);
+      const key = allocationMapKey(incomingId, "Cut-tok", rack);
+      const ops = prepareNetDeltaBulkOperationsForUpdate(
+        new Map(),
+        new Map([[key, 265]]),
+        new Map([[incomingId, pass]]),
+      );
+
+      expect(ops).toHaveLength(1);
+      const op = ops[0] as {
+        updateOne: { update: { $inc: Record<string, number> } };
+      };
+      expect(op.updateOne.update.$inc).toEqual({
+        "bagSizes.0.currentQuantity": -74,
+        "bagSizes.1.currentQuantity": -107,
+        "bagSizes.2.currentQuantity": -84,
+      });
+    });
+
+    it("continues into the next row when the first row is smaller than the request", () => {
+      const rack = { chamber: "3", floor: "1", row: "43" };
+      const pass = makeIncomingPass(incomingId, "K. Pukhraj", [
+        {
+          name: "Cut-tok",
+          initialQuantity: 74,
+          currentQuantity: 74,
+          location: rack,
+        },
+        {
+          name: "Cut-tok",
+          initialQuantity: 107,
+          currentQuantity: 107,
+          location: rack,
+        },
+      ]);
+      const key = allocationMapKey(incomingId, "Cut-tok", rack);
+      const ops = prepareNetDeltaBulkOperationsForUpdate(
+        new Map(),
+        new Map([[key, 107]]),
+        new Map([[incomingId, pass]]),
+      );
+      const op = ops[0] as {
+        updateOne: { update: { $inc: Record<string, number> } };
+      };
+      expect(op.updateOne.update.$inc).toEqual({
+        "bagSizes.0.currentQuantity": -74,
+        "bagSizes.1.currentQuantity": -33,
+      });
+    });
+
+    it("rejects when the pooled rows are still short", () => {
+      const rack = { chamber: "3", floor: "1", row: "43" };
+      const pass = makeIncomingPass(incomingId, "K. Pukhraj", [
+        {
+          name: "Cut-tok",
+          initialQuantity: 74,
+          currentQuantity: 74,
+          location: rack,
+        },
+        {
+          name: "Cut-tok",
+          initialQuantity: 107,
+          currentQuantity: 107,
+          location: rack,
+        },
+      ]);
+      const key = allocationMapKey(incomingId, "Cut-tok", rack);
+      expect(() =>
+        prepareNetDeltaBulkOperationsForUpdate(
+          new Map(),
+          new Map([[key, 300]]),
+          new Map([[incomingId, pass]]),
+        ),
+      ).toThrow(ValidationError);
+    });
+  });
+
+  describe("buildIncomingGatePassSnapshots", () => {
+    it("records one pooled line when several rows share a size and location", () => {
+      const rack = { chamber: "3", floor: "1", row: "43" };
+      const pass = makeIncomingPass(incomingId, "K. Pukhraj", [
+        {
+          name: "Cut-tok",
+          initialQuantity: 74,
+          currentQuantity: 74,
+          location: rack,
+        },
+        {
+          name: "Cut-tok",
+          initialQuantity: 107,
+          currentQuantity: 107,
+          location: rack,
+        },
+        {
+          name: "Cut-tok",
+          initialQuantity: 84,
+          currentQuantity: 84,
+          location: rack,
+        },
+      ]);
+      const snapshots = buildIncomingGatePassSnapshots(
+        [
+          {
+            incomingGatePassId: incomingId,
+            variety: "K. Pukhraj",
+            allocations: [
+              {
+                incomingGatePassId: incomingId,
+                size: "Cut-tok",
+                quantityToAllocate: 74,
+                location: rack,
+              },
+              {
+                incomingGatePassId: incomingId,
+                size: "Cut-tok",
+                quantityToAllocate: 107,
+                location: rack,
+              },
+              {
+                incomingGatePassId: incomingId,
+                size: "Cut-tok",
+                quantityToAllocate: 84,
+                location: rack,
+              },
+            ],
+          },
+        ],
+        new Map([[incomingId, pass]]),
+      );
+
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].bagSizes).toEqual([
+        expect.objectContaining({
+          name: "Cut-tok",
+          quantityIssued: 265,
+          currentQuantity: 0,
+          initialQuantity: 265,
+          location: rack,
+        }),
+      ]);
     });
   });
 });
