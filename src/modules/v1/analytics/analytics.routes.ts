@@ -341,7 +341,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate pass snapshots are not used). Scoped to authenticated user's cold storage. If stockFilter=true, summary is grouped by every distinct non-empty stockFilter value found in data. Returns 400 if no stock filter values exist. By default Incoming-transfer gate passes are excluded; set transferStock=true to include them.",
+          "Get stock summary: all bag varieties and sizes with initial/current quantity and quantity removed (initial − current); total inventory (initial and current); top variety and top bag size by current quantity; chart-ready data for Recharts. Quantities are aggregated from IncomingGatePass only (outgoing gate passes are not summed). currentQuantity includes Incoming-transfer passes; initialQuantity does not, so an internal transfer does not change cold-storage totals. Scoped to authenticated user's cold storage. If stockFilter=true, summary is grouped by every distinct non-empty stockFilter value found in data. Returns 400 if no stock filter values exist. transferStock is accepted for older clients and does not change the totals.",
         tags: ["Analytics"],
         summary: "Get stock summary",
         querystring: {
@@ -356,7 +356,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
             transferStock: {
               type: "string",
               description:
-                "If 'true', include Incoming-transfer gate passes in the summary. Default excludes them.",
+                "Accepted for older clients. Does not change the totals. Incoming-transfer passes always count toward current quantity and never toward initial quantity.",
               enum: ["true", "false"],
             },
           },
@@ -587,7 +587,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get breakdown for a variety: all sizes with initial/current/quantityRemoved and per-farmer contribution per size. Scoped to authenticated store. If stockFilter=true, breakdown is grouped by every distinct stockFilter value found in data. Returns 400 if no stock filter values exist.",
+          "Get breakdown for a variety: all sizes with initial/current/quantityRemoved and per-farmer contribution per size. Scoped to authenticated store. currentQuantity includes Incoming-transfer passes; initialQuantity does not, including on farmer rows, so farmer rows still add up to the size totals. Outgoing gate passes are not summed. If stockFilter=true, breakdown is grouped by every distinct stockFilter value found in data. Returns 400 if no stock filter values exist.",
         tags: ["Analytics"],
         summary: "Get variety breakdown by size and farmer",
         querystring: {

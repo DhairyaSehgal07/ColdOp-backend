@@ -119,18 +119,30 @@ export interface StockSummaryByFilterResult {
 }
 
 /**
+ * initialQuantity on Incoming-transfer passes repeats bags already counted on
+ * the source receipt. Sum only non-transfer initial quantities.
+ */
+function sumInitialQuantityExcludingTransfers() {
+  return {
+    $sum: {
+      $cond: [
+        { $eq: ["$type", GatePassType.INCOMING_TRANSFER] },
+        0,
+        "$bagSizes.initialQuantity",
+      ],
+    },
+  };
+}
+
+/**
  * Distinct non-empty stockFilter values on IncomingGatePasses for a cold storage.
- * When includeTransferStock is false, Incoming-transfer gate passes are excluded.
+ * Includes filters that exist only on Incoming-transfer passes so transferred
+ * bags still appear in a grouped summary.
  */
 async function getDistinctStockFilters(
   coldStorageId: string,
-  includeTransferStock = false,
 ): Promise<string[]> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
-
-  const transferStockMatch: mongoose.PipelineStage[] = includeTransferStock
-    ? []
-    : [{ $match: { type: { $ne: GatePassType.INCOMING_TRANSFER } } }];
 
   const result = await IncomingGatePass.aggregate<{ values: string[] }>([
     {
@@ -148,7 +160,6 @@ async function getDistinctStockFilters(
         stockFilter: { $exists: true, $nin: [null, ""] },
       },
     },
-    ...transferStockMatch,
     {
       $group: {
         _id: null,
@@ -167,24 +178,21 @@ async function getDistinctStockFilters(
  * Only documents belonging to the given cold storage are used (via farmer-storage links).
  * Caller must pass the logged-in store admin's coldStorageId from the JWT.
  *
- * Aggregation source: IncomingGatePass only. Quantities are summed from each
- * incoming gate pass's bagSizes (initialQuantity, currentQuantity). This is
- * unaffected by OutgoingGatePass; outgoing passes only decrement currentQuantity
- * on IncomingGatePass at creation time, so this summary always reflects the
- * current stock correctly. OutgoingGatePass.incomingGatePassSnapshots (which
- * now only stores sizes that were updated per outgoing pass) is not used here.
+ * Aggregation source: IncomingGatePass only. currentQuantity is summed from
+ * every incoming pass, including Incoming-transfer. initialQuantity ignores
+ * Incoming-transfer passes, because those bags were already counted on the
+ * source receipt. Outgoing gate passes are not aggregated: creating, editing,
+ * or nulling an outgoing pass already updates currentQuantity on the incoming
+ * pass.
  *
  * When options.groupByStockFilter is true, returns summary grouped by every
  * distinct non-empty stockFilter value found in data. If none exist, throws
  * ValidationError (NO_STOCK_FILTER).
- *
- * When options.includeTransferStock is false/undefined, Incoming-transfer
- * gate passes are excluded from the aggregation.
  */
 export async function getStockSummary(
   coldStorageId: string,
   logger?: FastifyBaseLogger,
-  options?: { groupByStockFilter?: boolean; includeTransferStock?: boolean },
+  options?: { groupByStockFilter?: boolean },
 ): Promise<StockSummaryResult | StockSummaryByFilterResult> {
   if (!mongoose.Types.ObjectId.isValid(coldStorageId)) {
     throw new ValidationError(
@@ -193,13 +201,8 @@ export async function getStockSummary(
     );
   }
 
-  const includeTransferStock = options?.includeTransferStock === true;
-
   if (options?.groupByStockFilter) {
-    const distinctFilters = await getDistinctStockFilters(
-      coldStorageId,
-      includeTransferStock,
-    );
+    const distinctFilters = await getDistinctStockFilters(coldStorageId);
     if (distinctFilters.length === 0) {
       throw new ValidationError(
         "No stock filter found. Please disable it from preferences.",
@@ -209,12 +212,7 @@ export async function getStockSummary(
 
     const results = await Promise.all(
       distinctFilters.map((filterValue) =>
-        getStockSummaryForFilter(
-          coldStorageId,
-          filterValue,
-          logger,
-          includeTransferStock,
-        ),
+        getStockSummaryForFilter(coldStorageId, filterValue, logger),
       ),
     );
 
@@ -225,35 +223,25 @@ export async function getStockSummary(
     return { stockSummaryByFilter };
   }
 
-  return getStockSummaryForFilter(
-    coldStorageId,
-    undefined,
-    logger,
-    includeTransferStock,
-  );
+  return getStockSummaryForFilter(coldStorageId, undefined, logger);
 }
 
 /**
  * Internal: get stock summary optionally filtered by stockFilter value.
  * When filterValue is set, only documents with that exact stockFilter are included.
  * When filterValue is undefined, no stockFilter filter is applied (all documents).
- * When includeTransferStock is false, Incoming-transfer gate passes are excluded.
+ * Incoming-transfer passes contribute to currentQuantity only.
  */
 async function getStockSummaryForFilter(
   coldStorageId: string,
   filterValue: string | undefined,
   logger?: FastifyBaseLogger,
-  includeTransferStock = false,
 ): Promise<StockSummaryResult> {
   const coldStorageObjectId = new mongoose.Types.ObjectId(coldStorageId);
 
   const stockFilterMatch: mongoose.PipelineStage[] = filterValue
     ? [{ $match: { stockFilter: filterValue } }]
     : [];
-
-  const transferStockMatch: mongoose.PipelineStage[] = includeTransferStock
-    ? []
-    : [{ $match: { type: { $ne: GatePassType.INCOMING_TRANSFER } } }];
 
   const pipeline: mongoose.PipelineStage[] = [
     {
@@ -270,7 +258,6 @@ async function getStockSummaryForFilter(
         "_link.coldStorageId": coldStorageObjectId,
       },
     },
-    ...transferStockMatch,
     ...stockFilterMatch,
     { $unwind: "$bagSizes" },
     {
@@ -279,7 +266,7 @@ async function getStockSummaryForFilter(
           variety: "$variety",
           size: "$bagSizes.name",
         },
-        initialQuantity: { $sum: "$bagSizes.initialQuantity" },
+        initialQuantity: sumInitialQuantityExcludingTransfers(),
         currentQuantity: { $sum: "$bagSizes.currentQuantity" },
       },
     },
@@ -603,6 +590,9 @@ export async function getTopFarmersForStore(
  * When options.groupByStockFilter is true, returns breakdown grouped by every
  * distinct non-empty stockFilter value found in data. If none exist, throws
  * ValidationError (NO_STOCK_FILTER).
+ *
+ * initialQuantity ignores Incoming-transfer passes. currentQuantity includes
+ * them. Outgoing gate passes are not aggregated.
  */
 export async function getVarietyBreakdown(
   coldStorageId: string,
@@ -663,6 +653,8 @@ export async function getVarietyBreakdown(
  * Internal: get variety breakdown optionally filtered by stockFilter value.
  * When filterValue is set, only documents with that exact stockFilter are included.
  * When filterValue is undefined, no stockFilter filter is applied (all documents).
+ * Incoming-transfer passes contribute to currentQuantity only, including on
+ * farmer rows, so those rows still add up to the size totals.
  */
 async function getVarietyBreakdownForFilter(
   coldStorageId: string,
@@ -701,7 +693,7 @@ async function getVarietyBreakdownForFilter(
           size: "$bagSizes.name",
           farmerStorageLinkId: "$farmerStorageLinkId",
         },
-        initialQuantity: { $sum: "$bagSizes.initialQuantity" },
+        initialQuantity: sumInitialQuantityExcludingTransfers(),
         currentQuantity: { $sum: "$bagSizes.currentQuantity" },
       },
     },

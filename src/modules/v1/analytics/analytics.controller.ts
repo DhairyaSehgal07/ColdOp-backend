@@ -39,8 +39,9 @@ function sendErrorReply(
  * Uses only the current logged-in store admin's cold storage (from JWT).
  * Query param stockFilter=true: group summary by every distinct non-empty
  * stockFilter value in data (returns NO_STOCK_FILTER if none exist).
- * Query param transferStock=true: include Incoming-transfer gate passes;
- * default excludes them.
+ * transferStock is accepted for older clients and does not change the totals.
+ * Incoming-transfer passes are included in current quantity and excluded from
+ * initial quantity.
  */
 export async function getSummaryHandler(
   request: FastifyRequest,
@@ -68,14 +69,11 @@ export async function getSummaryHandler(
 
     const query = request.query as {
       stockFilter?: string;
-      transferStock?: string;
     };
     const stockFilter = query.stockFilter === "true";
-    const transferStock = query.transferStock === "true";
 
     const result = await getStockSummary(coldStorageId, request.log, {
       groupByStockFilter: stockFilter,
-      includeTransferStock: transferStock,
     });
 
     if ("stockSummaryByFilter" in result) {
@@ -165,6 +163,8 @@ export async function getTopFarmersHandler(
  * contribution for each size. Scoped to authenticated user's cold storage.
  * Query param stockFilter=true: group breakdown by every distinct non-empty
  * stockFilter value in data (returns NO_STOCK_FILTER if none exist).
+ * Incoming-transfer passes are included in current quantity and excluded from
+ * initial quantity, including on farmer rows.
  */
 export async function getVarietyBreakdownHandler(
   request: FastifyRequest,
