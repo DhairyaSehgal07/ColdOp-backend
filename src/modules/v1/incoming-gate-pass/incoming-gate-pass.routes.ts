@@ -478,7 +478,7 @@ export async function incomingGatePassRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Update an existing incoming gate pass by ID. When updating bagSizes, both initial and current quantities are updated. When showFinances is enabled and a rent entry voucher exists, rent is synced: bagSizes and/or farmerStorageLinkId recalculate amount as costPerBag × Σ initialQuantity (net bags) and repoint the debit ledger to the farmer's Debtors ledger (credit remains Store Rent); date updates the voucher date; explicit amount alone updates voucher amount. An audit entry is created.",
+          "Update an existing incoming gate pass by ID. When updating bagSizes, both initial and current quantities are updated. When showFinances is enabled and a rent entry voucher exists, rent is synced: bagSizes and/or farmerStorageLinkId recalculate amount as costPerBag × Σ initialQuantity (net bags) and repoint the debit ledger to the farmer's Debtors ledger (credit remains Store Rent); date updates the voucher date; explicit amount alone updates voucher amount. Incoming-transfer gate passes have no rent voucher, so those edits update the gate pass only and do not require or sync a rent voucher. An audit entry is created.",
         tags: ["Incoming Gate Pass"],
         summary: "Edit incoming gate pass",
         params: {

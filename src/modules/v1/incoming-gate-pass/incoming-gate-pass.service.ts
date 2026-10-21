@@ -956,7 +956,12 @@ export async function updateIncomingGatePass(
           "INVALID_AMOUNT",
         );
       }
-      if (rentFinanceFieldsChanged && rentEntryVoucherId == null) {
+      // Incoming-transfer receipts are created without a rent voucher.
+      if (
+        rentFinanceFieldsChanged &&
+        rentEntryVoucherId == null &&
+        existing.type !== GatePassType.INCOMING_TRANSFER
+      ) {
         throw new ValidationError(
           "This gate pass has no rent entry voucher; rent-related fields cannot be updated",
           "NO_RENT_ENTRY_VOUCHER",
