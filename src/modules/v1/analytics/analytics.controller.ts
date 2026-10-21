@@ -163,8 +163,8 @@ export async function getTopFarmersHandler(
  * contribution for each size. Scoped to authenticated user's cold storage.
  * Query param stockFilter=true: group breakdown by every distinct non-empty
  * stockFilter value in data (returns NO_STOCK_FILTER if none exist).
- * Incoming-transfer passes are included in current quantity and excluded from
- * initial quantity, including on farmer rows.
+ * A transfer moves initial quantity from the sending farmer to the receiving
+ * farmer. An outward after that transfer is attributed to the farmer who issued it.
  */
 export async function getVarietyBreakdownHandler(
   request: FastifyRequest,

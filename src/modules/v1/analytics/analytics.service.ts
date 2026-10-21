@@ -7,11 +7,14 @@ import {
   IncomingGatePass,
 } from "../incoming-gate-pass/incoming-gate-pass.model.js";
 import { StoreAdmin } from "../store-admin/store-admin.model.js";
+import { TransferStockGatePass } from "../transfer-stock/transfer-stock.model.js";
 import { ValidationError } from "../../../utils/errors.js";
 
 const col = {
   farmerStorageLinks: FarmerStorageLink.collection.name,
   farmers: Farmer.collection.name,
+  incomingGatePasses: IncomingGatePass.collection.name,
+  transferStockGatePasses: TransferStockGatePass.collection.name,
 };
 
 /** Single size entry in stock summary (quantityRemoved = initialQuantity - currentQuantity on frontend) */
@@ -591,8 +594,10 @@ export async function getTopFarmersForStore(
  * distinct non-empty stockFilter value found in data. If none exist, throws
  * ValidationError (NO_STOCK_FILTER).
  *
- * initialQuantity ignores Incoming-transfer passes. currentQuantity includes
- * them. Outgoing gate passes are not aggregated.
+ * A transfer moves initialQuantity from the sending farmer to the receiving
+ * farmer. currentQuantity follows the bags, including Incoming-transfer passes.
+ * quantityRemoved is initialQuantity minus currentQuantity. Outgoing gate
+ * passes are not aggregated.
  */
 export async function getVarietyBreakdown(
   coldStorageId: string,
@@ -653,9 +658,105 @@ export async function getVarietyBreakdown(
  * Internal: get variety breakdown optionally filtered by stockFilter value.
  * When filterValue is set, only documents with that exact stockFilter are included.
  * When filterValue is undefined, no stockFilter filter is applied (all documents).
- * Incoming-transfer passes contribute to currentQuantity only, including on
- * farmer rows, so those rows still add up to the size totals.
+ * Receipts stay on the farmer who brought them in. Transfer stock then moves
+ * that initialQuantity to the receiving farmer, so an outward after a transfer
+ * is attributed to the farmer who issued it. Farmer rows still add up to the
+ * size totals, because every bag taken off the sender is added to the receiver.
+ * When filterValue is set, only transfers whose source or destination pass
+ * carries that stockFilter are applied on that side.
  */
+function varietyBreakdownTransferLookup(
+  trimmedVariety: string,
+  filterValue: string | undefined,
+): mongoose.PipelineStage {
+  const transferredOutConditions: Record<string, unknown>[] = [
+    { $eq: ["$fromFarmerStorageLinkId", "$$linkId"] },
+    { $eq: ["$_src.variety", trimmedVariety] },
+  ];
+  const transferredInConditions: Record<string, unknown>[] = [
+    { $eq: ["$toFarmerStorageLinkId", "$$linkId"] },
+    { $eq: ["$_dest.variety", trimmedVariety] },
+  ];
+  if (filterValue) {
+    transferredOutConditions.push({
+      $eq: ["$_src.stockFilter", filterValue],
+    });
+    transferredInConditions.push({
+      $eq: ["$_dest.stockFilter", filterValue],
+    });
+  }
+
+  return {
+    $lookup: {
+      from: col.transferStockGatePasses,
+      let: {
+        linkId: "$_id.farmerStorageLinkId",
+        size: "$_id.size",
+      },
+      pipeline: [
+        {
+          $match: {
+            $expr: {
+              $or: [
+                { $eq: ["$fromFarmerStorageLinkId", "$$linkId"] },
+                { $eq: ["$toFarmerStorageLinkId", "$$linkId"] },
+              ],
+            },
+          },
+        },
+        {
+          $lookup: {
+            from: col.incomingGatePasses,
+            localField: "createdIncomingGatePassId",
+            foreignField: "_id",
+            as: "_dest",
+          },
+        },
+        { $unwind: "$items" },
+        {
+          $match: {
+            $expr: { $eq: ["$items.bagSize", "$$size"] },
+          },
+        },
+        {
+          $lookup: {
+            from: col.incomingGatePasses,
+            localField: "items.incomingGatePassId",
+            foreignField: "_id",
+            as: "_src",
+          },
+        },
+        {
+          $addFields: {
+            _src: { $arrayElemAt: ["$_src", 0] },
+            _dest: { $arrayElemAt: ["$_dest", 0] },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            transferredOut: {
+              $sum: {
+                $cond: [
+                  { $and: transferredOutConditions },
+                  "$items.quantity",
+                  0,
+                ],
+              },
+            },
+            transferredIn: {
+              $sum: {
+                $cond: [{ $and: transferredInConditions }, "$items.quantity", 0],
+              },
+            },
+          },
+        },
+      ],
+      as: "_transfer",
+    },
+  };
+}
+
 async function getVarietyBreakdownForFilter(
   coldStorageId: string,
   trimmedVariety: string,
@@ -697,10 +798,42 @@ async function getVarietyBreakdownForFilter(
         currentQuantity: { $sum: "$bagSizes.currentQuantity" },
       },
     },
+    varietyBreakdownTransferLookup(trimmedVariety, filterValue),
+    {
+      $addFields: {
+        _transferDoc: {
+          $ifNull: [
+            { $arrayElemAt: ["$_transfer", 0] },
+            { transferredOut: 0, transferredIn: 0 },
+          ],
+        },
+      },
+    },
+    {
+      $addFields: {
+        initialQuantity: {
+          $subtract: [
+            { $add: ["$initialQuantity", "$_transferDoc.transferredIn"] },
+            "$_transferDoc.transferredOut",
+          ],
+        },
+      },
+    },
     {
       $addFields: {
         quantityRemoved: {
           $subtract: ["$initialQuantity", "$currentQuantity"],
+        },
+      },
+    },
+    {
+      $match: {
+        $expr: {
+          $or: [
+            { $ne: ["$initialQuantity", 0] },
+            { $ne: ["$currentQuantity", 0] },
+            { $ne: ["$quantityRemoved", 0] },
+          ],
         },
       },
     },

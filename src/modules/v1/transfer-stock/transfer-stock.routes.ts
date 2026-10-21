@@ -17,7 +17,7 @@ export async function transferStockRoutes(fastify: FastifyInstance) {
     {
       schema: {
         description:
-          "Get all transfer stock gate pass records for the authenticated store admin's cold storage without pagination. Optional dateFrom/dateTo filter (YYYY-MM-DD, UTC day boundaries).",
+          "Get all transfer stock gate pass records for the authenticated store admin's cold storage without pagination. Each row includes variety from the incoming gate pass created by the transfer. Optional dateFrom/dateTo filter (YYYY-MM-DD, UTC day boundaries).",
         tags: ["Transfer Stock"],
         summary: "Get transfer stock report",
         querystring: {

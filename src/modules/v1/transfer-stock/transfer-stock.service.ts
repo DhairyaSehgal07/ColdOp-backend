@@ -813,6 +813,22 @@ function mapTransferStockToReport(
   const items = (raw.items as { quantity?: number }[]) ?? [];
   const totalBags = items.reduce((sum, item) => sum + (item.quantity ?? 0), 0);
 
+  const createdIncoming = raw.createdIncomingGatePassId as
+    { _id?: unknown; variety?: string } | null | undefined;
+  const incomingId =
+    createdIncoming != null &&
+    typeof createdIncoming === "object" &&
+    "_id" in createdIncoming
+      ? createdIncoming._id
+      : raw.createdIncomingGatePassId;
+  const variety =
+    createdIncoming != null &&
+    typeof createdIncoming === "object" &&
+    typeof createdIncoming.variety === "string" &&
+    createdIncoming.variety.trim() !== ""
+      ? createdIncoming.variety
+      : undefined;
+
   const report: Record<string, unknown> = {
     _id: stringifyObjectId(raw._id),
     gatePassNo: raw.gatePassNo,
@@ -821,7 +837,8 @@ function mapTransferStockToReport(
     totalBags,
     fromFarmerStorageLinkId: formatReportFarmerStorageLink(fromLinkPop),
     toFarmerStorageLinkId: formatReportFarmerStorageLink(toLinkPop),
-    createdIncomingGatePassId: stringifyObjectId(raw.createdIncomingGatePassId),
+    createdIncomingGatePassId: stringifyObjectId(incomingId),
+    ...(variety !== undefined && { variety }),
   };
 
   if (raw.createdOutgoingGatePassId != null) {
@@ -935,6 +952,10 @@ export async function getTransferStockReport(
         },
       })
       .populate({ path: "createdBy", select: "name" })
+      .populate({
+        path: "createdIncomingGatePassId",
+        select: "variety",
+      })
       .lean();
 
     const report = list.map((raw) =>
